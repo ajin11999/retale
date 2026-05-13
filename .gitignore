@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Bun
+bun.lockb
+.bun/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Drizzle
+packages/api/drizzle/meta/_journal.json.bak
+
+# Test coverage
+coverage/
+*.lcov
+
+# Local Claude / agent state (don't commit machine-specific memory)
+.claude/projects/
