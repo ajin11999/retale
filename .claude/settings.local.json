@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Remove-Item *)"
+      "PowerShell(Remove-Item *)",
+      "PowerShell(Get-ChildItem -Recurse -File | Where-Object { $_.Name -match 'product' -or $_.Name -match 'Product' } | Select-Object -ExpandProperty FullName)"
     ]
   }
 }
