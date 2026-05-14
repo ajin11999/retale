@@ -272,15 +272,16 @@ The `IsPurchase` flag and source/target locations on `LandedCost` are dropped �
 
 ```
 purchases:
-  id                  ULID PK
-  vendor_id           ULID FK → vendors
-  date                DATE NOT NULL
-  source_document     VARCHAR NULL              -- vendor invoice / PO ref
-  memo                TEXT NULL
-  status              ENUM('open','complete','cancelled') NOT NULL DEFAULT 'open'
-  cancelled_at        TIMESTAMP NULL
-  cancelled_by_user_id ULID FK NULL
-  created_by_user_id  ULID FK
+  id                    ULID PK
+  vendor_id             ULID FK → vendors  NULL    -- NULL = ad-hoc / one-off purchase (no AP)
+  snapshot_vendor_name  VARCHAR NOT NULL           -- auto-copied from vendor; free-text when vendor_id IS NULL
+  date                  DATE NOT NULL
+  source_document       VARCHAR NULL               -- vendor invoice / PO ref
+  memo                  TEXT NULL
+  status                ENUM('open','complete','cancelled') NOT NULL DEFAULT 'open'
+  cancelled_at          TIMESTAMP NULL
+  cancelled_by_user_id  ULID FK NULL
+  created_by_user_id    ULID FK
   created_at, updated_at
 
 purchase_sections:
@@ -295,12 +296,13 @@ purchase_items:
   id              ULID PK
   purchase_id     ULID FK → purchases  ON DELETE CASCADE
   section_id      ULID FK → purchase_sections  ON DELETE SET NULL  NULL  -- NULL = "Uncategorized"
-  variant_id      ULID FK → product_variants
-  description     VARCHAR NULL                  -- vendor free text override
-  qty_ordered     BIGINT NOT NULL               -- variant's smallest unit
+  variant_id      ULID FK → product_variants  NULL                  -- NULL = non-stock line (workshop consumable, tool, etc.)
+  description     VARCHAR NULL                  -- vendor free text override; REQUIRED when variant_id IS NULL
+  qty_ordered     BIGINT NOT NULL               -- variant's smallest unit (non-stock: arbitrary integer, treated as "1 unit each")
   qty_delivered   BIGINT NOT NULL DEFAULT 0     -- DENORM running total from delivered deliveries
   unit_cost_minor BIGINT NOT NULL               -- vendor invoice price per smallest unit (pre-landed-cost)
   sort_order      INT NOT NULL DEFAULT 0
+  -- CHECK: variant_id IS NOT NULL OR description IS NOT NULL
   INDEX (variant_id)
 
 purchase_deliveries:
@@ -326,6 +328,26 @@ purchase_delivery_items:
   sort_order        INT NOT NULL DEFAULT 0
   INDEX (delivery_id), INDEX (purchase_item_id)
 ```
+
+### Ad-hoc purchases (no vendor)
+
+`purchases.vendor_id` is nullable. A NULL vendor means a one-off purchase — hardware store run, flea-market spare, reimbursing a parts pickup. Avoids bloating the vendor list with rows used once.
+
+- `snapshot_vendor_name` is **always required**. Auto-copied from `vendors.name` when `vendor_id` is set; free-text when NULL ("Toko Sumber Jaya," "Cash pickup — Jl. Sudirman").
+- **No AP on ad-hoc.** Ad-hoc purchases must be paid in full at delivery time — no vendor to owe, so `vendor_ledger` is never written. Enforced at the API layer: delivery commit on an ad-hoc purchase requires a same-transaction full payment record.
+- **No vendor variant code mapping** applies — there's no vendor row to key against.
+- Reporting "spend by vendor" buckets all `vendor_id IS NULL` purchases as "Ad-hoc / one-off."
+- Setting a vendor on an ad-hoc purchase later (clerk realized it's actually a recurring source): allowed while `status = 'open'`; updates `vendor_id` and refreshes `snapshot_vendor_name` from the vendor row. Disallowed once any delivery is committed.
+
+### Non-stock lines
+
+Workshop consumables, tools, office supplies bought from the same vendor — appear on the purchase invoice but never enter the product catalog.
+
+- `purchase_items.variant_id IS NULL` flags a non-stock line. `description` is required (it's the line label).
+- **Counts toward** `totalInvoiceCost` so the vendor invoice reconciles.
+- **Excluded from landed-cost allocation.** Freight/customs are capitalized into goods of resale, not expensed items. The cost tree allocates only over leaves whose `purchase_item.variant_id IS NOT NULL`.
+- **Appears on deliveries.** Non-stock lines show up as receivable rows on `purchase_deliveries` — delivery is the "what arrived from vendor" doc, and consumables arrive too. The leaf `purchase_delivery_items` row is written, but the delivery commit writes **no** `stock_movement` for it and doesn't touch any WAC.
+- No expense category / accounting category for v1 — `description` plus the vendor is enough searchable detail. Add if expense slicing surfaces a real need.
 
 ### Sections
 
@@ -376,11 +398,213 @@ Joins are bounded (few items, few deliveries). Don't denormalize on `purchases` 
 
 The only step that touches stock and WAC. In one transaction:
 1. Validate partial-delivery constraint per item.
-2. For each leaf with `purchase_item_id` set: write a `purchase_receive` `stock_movement` at `target_location_id` for `variant_id`, with `unit_cost = leaf.cost_minor / leaf.qty` (allocated cost, includes proportional share of parent freight/customs).
+2. For each leaf with `purchase_item_id` set **and the referenced `purchase_item.variant_id IS NOT NULL`**: write a `purchase_receive` `stock_movement` at `target_location_id` for `variant_id`, with `unit_cost = leaf.cost_minor / leaf.qty` (allocated cost, includes proportional share of parent freight/customs). Non-stock leaves (variant_id NULL) are recorded for receiving audit only — no stock movement, no WAC impact.
 3. Recompute `product_variants.cost_minor` via WAC formula per variant.
 4. Increment `purchase_items.qty_delivered` per affected item.
 5. Auto-set `purchases.status = 'complete'` if all items now fully delivered.
 6. Set delivery `status = delivered`, `delivered_at`, `delivered_by_user_id`.
+
+---
+
+## Vendors
+
+Mirror of the Customers entity, plus an AP ledger and per-vendor variant code mapping. Same patterns where they apply — denormalized contact on the row, archive + hard-delete, computed AP aging.
+
+### Schema
+
+```
+vendors:
+  id                   ULID PK
+  name                 VARCHAR NOT NULL
+  phone                VARCHAR NULL                 -- indexed; single number, extras in notes
+  email                VARCHAR NULL
+  address              TEXT NULL                    -- freeform single field
+  tax_id               VARCHAR NULL                 -- NPWP (Indonesia)
+  notes                TEXT NULL
+  balance_minor        BIGINT NOT NULL DEFAULT 0    -- cached sum of vendor_ledger; positive = we owe them
+  archived_at          TIMESTAMP NULL
+  created_at, updated_at
+  created_by_user_id   ULID FK NULL
+  -- search_text generated column = lower(name || ' ' || coalesce(phone, ''))
+  INDEX (archived_at), INDEX (phone), INDEX (search_text)
+
+vendor_ledger:
+  id                   ULID PK
+  vendor_id            ULID FK → vendors
+  type                 ENUM('purchase_on_account', 'payment', 'refund_credit',
+                            'adjustment', 'opening_balance')
+  amount_minor         BIGINT NOT NULL              -- positive = we owe more
+  ref_type             ENUM('purchase', 'purchase_delivery', 'payment',
+                            'adjustment', 'import') NULL
+  ref_id               ULID NULL
+  note                 TEXT NULL                    -- required for 'adjustment'
+  pos_session_id       ULID FK NULL                 -- required for cash events out of POS drawer
+  created_by_user_id   ULID FK → users
+  created_at           TIMESTAMP
+
+vendor_variant_codes:
+  vendor_id            ULID FK → vendors
+  variant_id           ULID FK → product_variants  ON DELETE CASCADE
+  vendor_code          VARCHAR NOT NULL             -- vendor's part number / SKU
+  vendor_description   VARCHAR NULL                 -- vendor's free-text label
+  PRIMARY KEY (vendor_id, vendor_code)
+  INDEX (variant_id)
+
+```
+
+(See `purchases.snapshot_vendor_name` in the Purchases & deliveries section — set on create, preserves vendor name on history, also used as the free-text label for ad-hoc purchases.)
+
+Invariant: `vendors.balance_minor == SUM(vendor_ledger.amount_minor)` per vendor. Always updated in same transaction.
+
+### Identity & lookup
+
+Same as customers: `name` required, phone is the fast lookup, free-text search via generated `search_text` column. No uniqueness on phone.
+
+### Payment terms / AP
+
+Full AP ledger, mirror of `customer_ledger`.
+
+- Purchases paid in full at delivery time: no ledger row needed — the cash event lives on `purchase_deliveries` / payment record.
+- Purchases on terms: delivery commit writes `vendor_ledger.type = 'purchase_on_account'` for the unpaid balance.
+- Vendor payments: `recordVendorPayment(vendorId, amount, posSessionId?, note?)` writes a `payment` row reducing balance. `pos_session_id` required when paid in cash from the drawer.
+- AP aging: computed per-resolver, FIFO-allocate `payment` rows against `purchase_on_account` rows oldest-first. Same approach as customer AR.
+
+No `credit_limit` field on vendors — vendors set our limit, not the other way around. If a vendor cuts us off it's a real-world conversation, not a system rule.
+
+### Vendor variant codes
+
+For mapping vendor part numbers / SKUs to our variants — vendor A calls the part `BP-5512`, vendor B calls it `5512BP`, our `SKU-01HX...` is internal.
+
+- Composite PK `(vendor_id, vendor_code)` — same vendor can't have two entries for one code, but the same code may legitimately belong to different vendors.
+- One variant can have multiple vendor codes (multiple vendors supply the same part); one vendor can have multiple codes pointing at the same variant (vendor renumbered, both still in circulation).
+- Receiving flow: scan/type vendor code → exact match returns variant → auto-fill `purchase_items.variant_id`.
+- `vendor_description` preserves the vendor's free-text label for printed POs and audit.
+- **Last-paid cost is derived**, not denormalized. Resolver: `MAX(unit_cost_minor) OVER (vendor_id, variant_id) ORDER BY purchases.date DESC LIMIT 1`. Cheap query, no drift surface.
+
+### Tax ID
+
+Single optional `tax_id` VARCHAR for NPWP. Cheap to have, expensive to retrofit. No validation — vendors enter what they give us.
+
+### Lifecycle: archive + hard delete
+
+Same two-track pattern as products and customers.
+
+| Action | Who | Reversible | Allowed when |
+|---|---|---|---|
+| Archive | clerk, root | yes (unarchive) | always |
+| Unarchive | clerk, root | n/a | always |
+| Hard delete | root | no | `balance_minor == 0` AND no non-cancelled purchases reference it, OR root override |
+
+Hard delete sets `purchases.vendor_id = NULL` via `ON DELETE SET NULL`. `snapshot_vendor_name` and `purchase_items` (including their snapshot data) preserve the record. `vendor_ledger` cascade-deletes.
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Create / edit vendor | ✓ | ✓ |
+| Archive / unarchive | ✓ | ✓ |
+| Record vendor payment | ✓ | ✓ |
+| Adjustment (write-off, root only) | ✗ | ✓ |
+| Hard delete (zero balance, no purchases) | ✗ | ✓ |
+| Hard delete (root override) | ✗ | ✓ |
+| Add / edit vendor variant code mapping | ✓ | ✓ |
+
+---
+
+## Locations
+
+Hierarchical, forest (multiple roots allowed). Stock can sit at any node — leaf or branch. Used by `stock_locations`, `purchase_deliveries.target_location_id`, `stock_transfers` source/dest, and `points_of_sale.location_id`.
+
+### Schema
+
+```
+locations:
+  id           ULID PK
+  parent_id    ULID FK → locations  NULL          -- NULL = root; multiple roots allowed
+  name         VARCHAR NOT NULL
+  code         VARCHAR NULL                       -- optional short label for transfer/picking docs
+  notes        TEXT NULL
+  archived_at  TIMESTAMP NULL                     -- hides from new-stock destinations; stock stays visible in reports
+  sort_order   INT NOT NULL DEFAULT 0
+  created_at, updated_at
+  created_by_user_id ULID FK NULL
+  INDEX (parent_id), INDEX (archived_at)
+```
+
+### Hierarchy rules
+
+- Forest: any number of roots (`parent_id IS NULL`). Costs nothing to allow; one-root setups still work naturally.
+- Stock allowed at any node, including non-leaves. Useful for "10 of these somewhere in the workshop, not pinned to a shelf yet." (`stock_locations.location_id` is also nullable for the unlocated-root entry — see Cost accounting / stock section.)
+- **Reparenting** allowed freely while not archived — UPDATE `parent_id`. One cycle check on save: target must not be self or a descendant.
+
+### Lifecycle: archive + hard delete
+
+| Action | Who | Reversible | Allowed when |
+|---|---|---|---|
+| Archive | clerk, root | yes | always |
+| Unarchive | clerk, root | n/a | always |
+| Hard delete | root | no | zero stock at this location AND no child locations AND not referenced by any non-archived POS or open session |
+
+Archive hides the location from new-stock destination pickers (purchase delivery, transfer dest) but preserves it in historical reports. Hard delete requires the operator to move stock out first — no auto-cascade. Children must be reparented or hard-deleted first.
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Create / edit / reparent location | ✓ | ✓ |
+| Archive / unarchive | ✓ | ✓ |
+| Hard delete | ✗ | ✓ |
+
+---
+
+## Points of Sale
+
+Physical register / checkout terminal. Bound to a location (where the drawer sits). `pos_sessions` reference these.
+
+### Schema
+
+```
+points_of_sale:
+  id           ULID PK
+  location_id  ULID FK → locations              -- required; cash drawer is somewhere
+  code         VARCHAR NOT NULL UNIQUE          -- short; used in orders.display_number ("P1-2026-05-14-0042")
+  name         VARCHAR NOT NULL                 -- display label ("Counter Register", "Backroom")
+  notes        TEXT NULL
+  archived_at  TIMESTAMP NULL                   -- archived POS can't open new sessions
+  created_at, updated_at
+  created_by_user_id ULID FK NULL
+  INDEX (location_id), INDEX (archived_at)
+```
+
+### Rules
+
+- `code` is required, unique, short. Appears in `orders.display_number` — locked earlier. Keep it 1–4 chars in practice.
+- Multiple POS may share a location (two registers at one counter). Many-POS-to-one-location.
+- `points_of_sale.location_id` describes where the drawer lives. It does **not** constrain which stock locations the POS pulls from — that's a per-order decision (delivery target, transfer source).
+
+### Lifecycle: archive + hard delete
+
+| Action | Who | Reversible | Allowed when |
+|---|---|---|---|
+| Archive | root | yes | no open session on this POS |
+| Unarchive | root | n/a | always |
+| Hard delete | root | no | zero orders AND zero sessions reference it |
+
+Archive is the normal "decommission" path — old register replaced, but its history must stay. Archived POS:
+- Cannot open new sessions (the partial unique index on open sessions still allows historical rows).
+- Still appears in reports filtered by date range.
+- Historical `display_number`s remain unique forever (they include the POS code + date + seq).
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Open session on a POS | ✓ | ✓ |
+| Create / edit POS row | ✗ | ✓ |
+| Archive / unarchive POS | ✗ | ✓ |
+| Hard delete POS | ✗ | ✓ |
+
+POS lifecycle is root-only — these are infrastructure rows, not daily-clerk concerns.
 
 ---
 
@@ -533,9 +757,14 @@ Unique constraint: `(product_id, type)` WHERE `acknowledged_at IS NULL` — prev
 - 5 failed TOTP codes against a challenge_token → invalidate challenge, force restart.
 - 5 failed recovery code attempts → same.
 
-### Roles
+### Roles & permissions
 
-- Many-to-many: `roles` table + `user_roles` join. Seeded with `root` and `clerk`. Extensible without schema change.
+Two-layer model:
+
+- **`users.is_root BOOLEAN`** — hard flag. Root short-circuits all permission checks. First user is auto-promoted at bootstrap. Cannot be revoked from the only remaining root.
+- Everything below root is **permissions assembled into roles** (RBAC). Roles are bags of permission keys; users hold any number of roles (additive union).
+
+See the next section (**Permission catalog & templates**) for the full design.
 
 ### Schema
 
@@ -573,19 +802,395 @@ login_attempts:
 roles:
   id                  ULID PK
   name                VARCHAR(50) UNIQUE
-  created_at          TIMESTAMP
+  description         TEXT NULL
+  is_template         BOOLEAN NOT NULL DEFAULT false   -- system-seeded; immutable
+  archived_at         TIMESTAMP NULL
+  created_at, updated_at
+
+role_permissions:
+  role_id             ULID FK → roles  ON DELETE CASCADE
+  permission_key      VARCHAR(100) NOT NULL            -- e.g. "stock.adjust"
+  PRIMARY KEY (role_id, permission_key)
 
 user_roles:
-  user_id             ULID FK
-  role_id             ULID FK
+  user_id             ULID FK → users  ON DELETE CASCADE
+  role_id             ULID FK → roles  ON DELETE CASCADE
+  granted_by_user_id  ULID FK → users
+  granted_at          TIMESTAMP
   PRIMARY KEY (user_id, role_id)
 ```
+
+(`users.is_root BOOLEAN NOT NULL DEFAULT false` lives on the still-to-be-formalized `users` schema.)
 
 ### Future-proofing notes
 
 - **Passkeys (WebAuthn):** add an `authenticators` table later; login flow grows a passkey branch. Nothing here blocks it.
 - **API tokens / service accounts:** reuse `sessions` with a `type` discriminator.
 - **OAuth/SSO:** add `provider` column to sessions; everything else stays.
+
+---
+
+## Permission catalog & templates
+
+RBAC layer below `is_root`. Per-section permissions tables (POS sessions, Order lifecycle, Customers, Vendors, Locations, Points of Sale, Payments & customer debt, etc.) document **which permission keys each action requires**. They are the source of truth for what the catalog must contain.
+
+### Permission catalog (in code, not DB)
+
+Permissions are part of the application contract — defined as a TypeScript const enum / readonly object, validated at app boot. The DB stores role-to-permission-key mappings. Unknown keys in DB get logged + ignored (forward-compat with downgrades).
+
+Naming convention: `<domain>.<action>` (lowercase, dot-separated). Initial catalog:
+
+```
+# Orders
+order.create_pos
+order.create_customer_sale     -- console open order
+order.edit_customer_sale       -- add/remove items on open console sale
+order.close_customer_sale
+order.cancel_customer_sale
+order.void_item
+order.discount
+order.refund                   -- create return order
+order.change_customer          -- change customer on open sale
+
+# POS sessions
+session.open
+session.close_own
+session.close_others
+session.reopen                 -- within 24h
+session.force_close
+
+# Products
+product.create
+product.edit                   -- non-financial fields
+product.edit_cost              -- cost_minor / cost overrides
+product.edit_price             -- price_minor / price tiers
+product.edit_tax               -- tax_rate_bps / price_mode
+product.archive
+product.hard_delete
+
+# Stock
+stock.adjust                   -- manual write-off / write-on, reason required
+stock.transfer.create
+stock.transfer.dispatch
+stock.transfer.receive
+stock.transfer.cancel
+
+# Purchases
+purchase.create
+purchase.edit                  -- while open and no delivered delivery
+purchase.cancel
+delivery.draft                 -- create/edit draft purchase delivery
+delivery.commit                -- draft → delivered
+delivery.cancel                -- root-equivalent in practice
+
+# Customers
+customer.create
+customer.edit
+customer.archive
+customer.set_credit_limit
+customer.adjustment            -- ledger write-off
+customer.hard_delete
+debt.record_payment            -- record cash against customer debt
+
+# Vendors
+vendor.create
+vendor.edit
+vendor.archive
+vendor.record_payment
+vendor.adjustment
+vendor.hard_delete
+vendor.variant_code.manage     -- vendor SKU mapping
+
+# Locations
+location.create
+location.edit                  -- includes reparent
+location.archive
+location.hard_delete
+
+# Points of sale
+pos.create
+pos.edit
+pos.archive
+pos.hard_delete
+
+# Reports
+report.sales.view              -- volume, count, by-day
+report.cost.view               -- includes COGS / per-item cost
+report.margin.view             -- price vs cost breakdown
+report.ar_aging.view           -- customer debt aging
+report.ap_aging.view           -- vendor debt aging
+report.session_variance.view   -- cash drawer variances
+
+# Product alerts
+alert.acknowledge
+
+# Admin
+admin.user.manage              -- create/edit users, assign roles
+admin.role.manage              -- create/edit/delete roles
+admin.import.run               -- one-shot ProDuck importer
+```
+
+### Seeded templates
+
+Shipped at install, `is_template = true`. Immutable via UI. Root can **clone** a template into a regular role (a new row, `is_template = false`) and edit the clone freely.
+
+| Template | Description | Permissions |
+|---|---|---|
+| `cashier_lite` | New hire / restricted POS only | `order.create_pos`, `order.void_item`, `session.open`, `session.close_own`, `debt.record_payment`, `report.sales.view` |
+| `clerk` | Daily POS + light entity management | cashier_lite + `order.discount`, `order.refund`, `customer.*` (except `set_credit_limit`, `adjustment`, `hard_delete`), `vendor.create/edit/archive/record_payment/variant_code.manage`, `location.create/edit/archive`, `purchase.create/edit`, `delivery.draft`, `product.create/edit/archive`, `stock.transfer.create/dispatch/receive`, `alert.acknowledge` |
+| `inventory_manager` | Everything clerk does + stock & cost authority | clerk + `product.edit_cost`, `stock.adjust`, `delivery.commit`, `purchase.cancel`, `stock.transfer.cancel`, `report.cost.view`, `report.margin.view` |
+
+Templates evolve via migration when the permission catalog changes; user-cloned roles are not touched.
+
+### Rules
+
+- **Role management is `admin.role.manage`**; user-role assignment is `admin.user.manage`. In practice these are root-only — granting them is granting root-equivalent, so the seeded templates above do not include them.
+- A user with **zero roles** has zero permissions. Can log in; can't do anything. No implicit defaults.
+- Root short-circuits every check. Root never needs role assignments. Root creation is bootstrap-only (first user) or via `admin.user.manage` (which only root has).
+- Required permissions per action are documented in each section's **Permissions** table (clerk/root columns reading as "default template assignments"). Implementations call `requirePermission(user, "<key>")` at the API resolver and again in the service layer for defense-in-depth.
+
+### JWT carries roles, not permissions
+
+Access tokens include `role_ids[]`, not the flattened permission set. Permissions are resolved server-side per request via `role_permissions`. Revoking a permission from a role takes effect on next request (no logout / token-refresh required for downgrade).
+
+### Per-location scoping: deferred
+
+Single workshop, one location effectively. If a future site needs "clerk at POS A only," add `user_roles.scope_location_id ULID NULL` — easy bolt-on.
+
+### Migration from ProDuck
+
+ProDuck's `claims = role names per user` collapses into:
+- `roles` rows for each distinct claim name observed
+- `user_roles` rows for each user-claim pair
+- Permissions for migrated roles are empty by default — root must assign templates or clone-and-edit after import. Importer logs a warning if any non-root user has zero permissions post-import.
+
+---
+
+## POS sessions
+
+Cashier shift model. Sessions exist to (a) reconcile the cash drawer at end of day and (b) group orders/payments for reporting. The workshop counts cash daily, so the variance dance is real, not theater.
+
+### Lifecycle
+
+| Event | Who | What |
+|---|---|---|
+| **Open** | clerk, root | Picks a POS, declares `opening_cash_minor`. Fails if another session is already open on that POS. |
+| **Order / payment** | clerk, root | Each order must reference an open session via `orders.pos_session_id`. No auto-create — fails loudly if no session is open. |
+| **Close** | session owner | Counts drawer, enters `closing_cash_minor`. System computes `variance_minor = closing_cash − (opening_cash + SUM(cash payments) − SUM(cash refunds))`. Stored, not blocked. Z-report JSON snapshotted. |
+| **Reopen** | root only | Allowed within 24h of close to amend mistakes (recount, late payment). Sets `closed_at = NULL`, preserves `z_report_json` until re-close. After 24h, immutable. |
+| **Force-close** | root only | For power-out / crashed sessions. `force_closed = true`, `closing_cash_minor = NULL`, `variance_minor = NULL`. Reports show "unreconciled" rather than a fake zero. |
+
+Same cashier owns a session start to finish — shift change = close + reopen. Simpler audit trail; the friction is ~30 seconds.
+
+### Schema
+
+```
+pos_sessions:
+  id                   ULID PK
+  pos_id               ULID FK → points_of_sale
+  opened_by_user_id    ULID FK → users
+  opened_at            TIMESTAMP NOT NULL
+  opening_cash_minor   BIGINT NOT NULL
+  closed_by_user_id    ULID FK → users  NULL
+  closed_at            TIMESTAMP NULL
+  closing_cash_minor   BIGINT NULL                  -- NULL when force-closed
+  variance_minor       BIGINT NULL                  -- NULL when force-closed
+  force_closed         BOOLEAN NOT NULL DEFAULT false
+  z_report_json        JSON NULL                    -- denormalized snapshot at close time
+  notes                TEXT NULL
+  created_at, updated_at
+  UNIQUE INDEX (pos_id) WHERE closed_at IS NULL     -- one open session per POS
+```
+
+### Variance and Z-report
+
+- **Variance is cash-only.** Card / transfer / QRIS totals appear on the Z-report for cross-check against bank/terminal settlement, but no variance field — those channels reconcile elsewhere, not by the cashier.
+- **Change is modeled net.** Hard invariant: `SUM(order_payments.amount_minor per order) == orders.total_minor`. Customer hands over 100k for a 73k order → the payment row is `73000`, not `100000 + (−27000) change`. The tendered detail is ephemeral and nobody reports on it.
+- **Refund payments reduce expected drawer cash naturally** — a cash refund is a payment row with negative `amount_minor`, so the same SUM-based variance formula works without special cases. (Whether refunds live as negative rows on the original order or via the `createReturn` flow is decided in the Payments section below.)
+- **`z_report_json`** is denormalized at close (totals by method, order count, void count, opening / closing / variance). Snapshotted so historical Z-reports don't shift when report logic changes — same spirit as `order_items` snapshots.
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Open session | ✓ | ✓ |
+| Close own session | ✓ | ✓ |
+| Close someone else's session | ✗ | ✓ |
+| Reopen (≤24h after close) | ✗ | ✓ |
+| Force-close stranded session | ✗ | ✓ |
+
+---
+
+## Order lifecycle
+
+Builds on the open/closed model already locked in `Payments & customer debt`. POS orders are atomic-on-create; Console customer sales are stateful and toggle `closed_at` at close time. This section pins the remaining axes.
+
+### Status is derived, not stored
+
+No `orders.status` enum. A stored status would drift (closed-then-returned, cancelled-vs-closed-empty, partial refunds). Instead:
+
+- `closed_at IS NULL` → open
+- `cancelled_at IS NOT NULL` → cancelled
+- exists `orders` with `return_of_order_id = this.id` → has returns (partial or full)
+
+Reports compute presentation status from these. Single source of truth.
+
+### Returns are linked orders, not mutations
+
+```
+orders (additions):
+  return_of_order_id   ULID FK → orders  NULL    -- set on return orders only
+```
+
+A return creates a **new `orders` row** with `return_of_order_id` pointing at the original. Negative `qty` on its `order_items`, negative `amount_minor` on its `order_payments`. The original sale stays immutable forever.
+
+- Partial returns over multiple visits = multiple return orders linked to the same original. No accounting bookkeeping needed.
+- Each return runs in its own `pos_session`, with its own cashier — clean audit per event.
+- Stock movements / customer_ledger entries: same machinery as a sale, just with reversed signs.
+- `createReturn(originalOrderId, items[])` writes the linked return order in one transaction.
+
+### Parked orders: frontend-only for v1
+
+POS cart lives in the frontend (locked in `Payments & customer debt`). "Park" is just a named slot in localStorage on the POS device — no backend involvement.
+
+If device-loss in practice turns out to be a real problem, escalate to server-side draft orders later. Migration is additive (introduce `parked_at` on `orders` for POS rows with `closed_at IS NULL`). Don't pre-build.
+
+### Discounts: per-item, fixed-amount
+
+```
+order_items (additions):
+  discount_minor       BIGINT NOT NULL DEFAULT 0    -- in variant smallest-unit pricing
+```
+
+- Always fixed amount, never %. The line total math is `qty * price - discount`.
+- Order-level discount in the UI is sugar — distributed across items proportionally by line subtotal at write time. Stored only as per-item.
+- Single representation, no special-case math anywhere downstream (reports, returns, snapshots).
+- Manager approval thresholds: deferred. Add a per-discount approval column when a real need surfaces.
+
+### Order numbering: customer-facing display number
+
+```
+orders (additions):
+  display_number       VARCHAR NOT NULL UNIQUE      -- e.g. "P1-2026-05-14-0042"
+```
+
+- Format: `<pos-code>-<YYYY-MM-DD>-<seq>`. `pos-code` is short human ID on `points_of_sale`. Daily sequence resets at midnight per POS.
+- Generated at **close time** (POS: atomic create; Console: explicit close). Open Console sales have `display_number = NULL` and a UI placeholder.
+- ULID PK remains the primary identifier everywhere internal. `display_number` is a label for humans — searchable, speakable, printable on receipts.
+- Return orders get their own `display_number` with the same format. The link to the original is visible via `return_of_order_id`, not embedded in the number.
+
+### Snapshot fields: tax travels with the sale
+
+Add to the locked `order_items` snapshot set:
+
+```
+order_items (additions):
+  snapshot_tax_rate_bps   INT NOT NULL
+  snapshot_price_mode     ENUM('tax_inclusive','tax_exclusive') NOT NULL
+```
+
+Same rationale as the existing snapshots: the sale record must show what was charged, forever. If we switch tax rate (PPN 11% → 12%) or change a product's `price_mode` later, historical orders stay correct without filtering logic.
+
+### Order cancellation (Console sales only)
+
+POS orders are atomic-on-create — they never exist in a cancellable state. Console customer sales can be cancelled pre-close.
+
+```
+orders (additions):
+  cancelled_at           TIMESTAMP NULL
+  cancelled_by_user_id   ULID FK → users  NULL
+  cancellation_reason    VARCHAR(255) NULL    -- required when cancelling
+```
+
+Cancellation in one transaction: void all non-voided items (reverses stock + customer_ledger entries), set `cancelled_at`. Distinct from "close empty" — intent matters for reports. `cancellation_reason` is required.
+
+Cancelled orders are immutable. No reopening. Root can hard-delete via the standard hard-delete escape hatch if needed.
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Create POS order (atomic) | ✓ | ✓ |
+| Park / resume POS cart (frontend) | ✓ | ✓ |
+| Create return order | ✓ | ✓ |
+| Apply discount to line item | ✓ | ✓ |
+| Cancel open Console sale | ✗ | ✓ |
+| Reopen closed order | ✗ | ✗ (use return) |
+
+---
+
+## Customers
+
+The AR/ledger side is locked in `Payments & customer debt`. This section pins the entity itself.
+
+### Schema
+
+```
+customers:
+  id                   ULID PK
+  name                 VARCHAR NOT NULL
+  phone                VARCHAR NULL                 -- indexed, single number; secondary numbers go in notes
+  email                VARCHAR NULL
+  address              TEXT NULL                    -- freeform single field, no structured city/postal
+  notes                TEXT NULL                    -- visible at POS when customer attached
+  balance_minor        BIGINT NOT NULL DEFAULT 0    -- cached sum of customer_ledger (see Payments section)
+  credit_limit_minor   BIGINT NULL                  -- NULL = no limit
+  archived_at          TIMESTAMP NULL               -- archive (reversible), hides from POS
+  created_at, updated_at
+  created_by_user_id   ULID FK NULL
+  -- search_text generated column = lower(name || ' ' || coalesce(phone, ''))
+  INDEX (archived_at), INDEX (phone), INDEX (search_text)
+
+orders (additions):
+  snapshot_customer_name   VARCHAR NULL    -- NULL for walk-in; set when customer_id is set
+```
+
+`orders.customer_id` is `ON DELETE SET NULL` so hard-deleting a customer never destroys sales. `snapshot_customer_name` preserves the name on historical orders.
+
+### Identity & lookup
+
+- `name` required, everything else optional. A workshop customer is "Pak Budi" first, a phone number maybe.
+- Phone is the primary fast-lookup key — POS clerk types phone digits, exact match wins. No uniqueness constraint (one phone can legitimately belong to two customer rows — household, business + personal).
+- Free-text search: same pattern as products — generated `search_text` column, lowercase, LIKE-prefix friendly, AND tokens on whitespace.
+- **Customer attachment is optional at POS.** Walk-in (NULL `customer_id`) is the default. Search is for *finding a customer when needed*, not a required step in the payment flow. Walk-in orders must have payments = total (already locked in Payments section).
+
+### Segmentation: none for v1
+
+No B2B/retail flag, no customer type enum. Cases where it matters (~5%) go in `notes`. If reporting later needs slicing by segment, add a `tags` join table — same call we made for products.
+
+### Multiple contacts / addresses / phones
+
+Single contact denormalized on the row. Real complexity (separate billing person, multiple sites, secondary phone) lives in `notes` until a customer's reality forces a `customer_contacts` or `customer_phones` table. Don't pre-build.
+
+### Opening balance on import
+
+Importer writes one `customer_ledger` row per imported customer with `type = 'opening_balance'`, dated to import day, amount = ProDuck's AR balance. No `opening_balance` column on `customers` — the ledger formula stays the single source of truth.
+
+### AR aging: computed, not stored
+
+"Who owes >30 days" runs as a resolver over `customer_ledger`: FIFO-allocate `payment` rows against `sale_on_account` rows oldest-first, age = NOW − oldest unallocated entry per customer. Workshop scale is small; the SQL is cheap. Denormalize only if profiling later shows it's a bottleneck.
+
+### Lifecycle: archive + hard delete
+
+Same two-track pattern as products.
+
+| Action | Who | Reversible | Allowed when |
+|---|---|---|---|
+| Archive | clerk, root | yes (unarchive) | always |
+| Unarchive | clerk, root | n/a | always |
+| Hard delete | root | no | `balance_minor == 0` AND no non-cancelled orders, OR root override |
+
+Hard delete sets `orders.customer_id = NULL` via `ON DELETE SET NULL`. `snapshot_customer_name` and `order_items` snapshots preserve the sale record. `customer_ledger` rows cascade-delete (the ledger is meaningless without the customer; AR history was already settled by the zero-balance precondition, or root explicitly overrode).
+
+### Permissions
+
+| Action | clerk | root |
+|---|---|---|
+| Create / edit customer | ✓ | ✓ |
+| Archive / unarchive | ✓ | ✓ |
+| Set or change credit limit | ✗ | ✓ |
+| Hard delete (zero balance, no orders) | ✗ | ✓ |
+| Hard delete (root override, non-zero balance) | ✗ | ✓ |
 
 ---
 
