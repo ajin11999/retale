@@ -56,6 +56,7 @@ products:
   id                 ULID PK
   name               VARCHAR NOT NULL
   description        TEXT NULL
+  kind               ENUM('physical','service') NOT NULL DEFAULT 'physical'
   category_id        ULID FK → product_categories NULL
   tax_rate_bps       INT NOT NULL DEFAULT 0       -- e.g. 1100 = 11%
   price_mode         ENUM('tax_inclusive','tax_exclusive') NOT NULL
@@ -80,8 +81,11 @@ product_variants:
   cost_minor         BIGINT NOT NULL DEFAULT 0    -- current WAC
   total_qty          BIGINT NOT NULL DEFAULT 0    -- denormalized sum of stock_locations for this variant
   sort_order         INT NOT NULL DEFAULT 0
+  tracking_account_id            ULID FK → tracking_accounts  NULL    -- auto-attribute on sale
+  tracking_attribution_mode      ENUM('full','percent') NOT NULL DEFAULT 'full'
+  tracking_attribution_pct_bps   INT NULL                              -- required when mode='percent'; e.g. 6000 = 60%
   created_at, updated_at
-  INDEX (product_id), INDEX (barcode), INDEX (sku)
+  INDEX (product_id), INDEX (barcode), INDEX (sku), INDEX (tracking_account_id)
 
 product_variant_options:
   variant_id         ULID FK → product_variants  ON DELETE CASCADE
@@ -129,19 +133,31 @@ product_images:
 All NOT NULL except where noted:
 
 ```
-snapshot_product_name        VARCHAR NOT NULL
-snapshot_product_sku         VARCHAR NOT NULL
-snapshot_product_barcode     VARCHAR NULL
-snapshot_variant_label       VARCHAR NULL          -- composed at sale time
-snapshot_unit                ENUM NOT NULL         -- 'piece','g','ml','mm'
-snapshot_category_name       VARCHAR NULL
-snapshot_price_minor         BIGINT NOT NULL       -- the price actually charged per smallest unit
-snapshot_cost_minor          BIGINT NOT NULL       -- WAC at sale time, immutable
-snapshot_tax_rate_bps        INT NOT NULL
-snapshot_tax_mode            ENUM NOT NULL         -- 'tax_inclusive','tax_exclusive'
+snapshot_product_name             VARCHAR NOT NULL
+snapshot_product_sku              VARCHAR NOT NULL
+snapshot_product_barcode          VARCHAR NULL
+snapshot_variant_label            VARCHAR NULL          -- composed at sale time
+snapshot_unit                     ENUM NOT NULL         -- 'piece','g','ml','mm'
+snapshot_category_name            VARCHAR NULL
+snapshot_price_minor              BIGINT NOT NULL       -- the price actually charged per smallest unit
+snapshot_cost_minor               BIGINT NOT NULL       -- WAC at sale time, immutable (0 for services)
+snapshot_tax_rate_bps             INT NOT NULL
+snapshot_tax_mode                 ENUM NOT NULL         -- 'tax_inclusive','tax_exclusive'
+snapshot_tracking_account_name    VARCHAR NULL          -- survives hard-delete of tracking account; see Tracking accounts
 ```
 
 `order_items.variant_id` is the live reference (nullable, `ON DELETE SET NULL`). Snapshots are the source of truth for reports and reprints.
+
+### Service products
+
+`products.kind` distinguishes physical goods from labor/services:
+
+- **`kind = 'physical'`** (default): sale writes `stock_movements`. `order_items.snapshot_price_minor` mirrors `variant.price_minor` — no cashier override.
+- **`kind = 'service'`**: sale skips `stock_movements` entirely. `variant.price_minor` is a *default* — cashier may override at POS, and `snapshot_price_minor` captures the actual price charged. `snapshot_cost_minor` is `0`. WAC and stock alerts do not apply.
+
+Everything else (variants, discounts, tax, tracking-account attribution, snapshots) works identically across kinds. Service products may have multiple variants for service tiers ("Standard", "Premium") if useful.
+
+API-level enforcement: a price override on a `kind='physical'` line is rejected. On a `kind='service'` line, the override flows into `snapshot_price_minor` directly.
 
 ### Images
 
@@ -913,6 +929,16 @@ pos.edit
 pos.archive
 pos.hard_delete
 
+# Tracking accounts (mechanics, staff, internal funds)
+tracking_account.create
+tracking_account.edit
+tracking_account.archive
+tracking_account.payout              -- cash-out from drawer
+tracking_account.deposit             -- cash-in / preload
+tracking_account.adjustment          -- root only
+tracking_account.hard_delete         -- root only
+order.attribute                      -- override attribution_amount_minor on an order_item
+
 # Reports
 report.sales.view              -- volume, count, by-day
 report.cost.view               -- includes COGS / per-item cost
@@ -920,6 +946,7 @@ report.margin.view             -- price vs cost breakdown
 report.ar_aging.view           -- customer debt aging
 report.ap_aging.view           -- vendor debt aging
 report.session_variance.view   -- cash drawer variances
+report.journal_export          -- export balanced journal for external accounting (GnuCash)
 
 # Product alerts
 alert.acknowledge
@@ -937,8 +964,8 @@ Shipped at install, `is_template = true`. Immutable via UI. Root can **clone** a
 | Template | Description | Permissions |
 |---|---|---|
 | `cashier_lite` | New hire / restricted POS only | `order.create_pos`, `order.void_item`, `session.open`, `session.close_own`, `debt.record_payment`, `report.sales.view` |
-| `clerk` | Daily POS + light entity management | cashier_lite + `order.discount`, `order.refund`, `customer.*` (except `set_credit_limit`, `adjustment`, `hard_delete`), `vendor.create/edit/archive/record_payment/variant_code.manage`, `location.create/edit/archive`, `purchase.create/edit`, `delivery.draft`, `product.create/edit/archive`, `stock.transfer.create/dispatch/receive`, `alert.acknowledge` |
-| `inventory_manager` | Everything clerk does + stock & cost authority | clerk + `product.edit_cost`, `stock.adjust`, `delivery.commit`, `purchase.cancel`, `stock.transfer.cancel`, `report.cost.view`, `report.margin.view` |
+| `clerk` | Daily POS + light entity management | cashier_lite + `order.discount`, `order.refund`, `order.attribute`, `customer.*` (except `set_credit_limit`, `adjustment`, `hard_delete`), `vendor.create/edit/archive/record_payment/variant_code.manage`, `location.create/edit/archive`, `purchase.create/edit`, `delivery.draft`, `product.create/edit/archive`, `stock.transfer.create/dispatch/receive`, `tracking_account.payout/deposit`, `alert.acknowledge` |
+| `inventory_manager` | Everything clerk does + stock & cost authority | clerk + `product.edit_cost`, `stock.adjust`, `delivery.commit`, `purchase.cancel`, `stock.transfer.cancel`, `tracking_account.create/edit/archive`, `report.cost.view`, `report.margin.view` |
 
 Templates evolve via migration when the permission catalog changes; user-cloned roles are not touched.
 
@@ -1066,6 +1093,18 @@ order_items (additions):
 - Order-level discount in the UI is sugar — distributed across items proportionally by line subtotal at write time. Stored only as per-item.
 - Single representation, no special-case math anywhere downstream (reports, returns, snapshots).
 - Manager approval thresholds: deferred. Add a per-discount approval column when a real need surfaces.
+
+### Tracking account attribution (per line)
+
+```
+order_items (additions):
+  attribution_account_id        ULID FK → tracking_accounts  NULL    -- ON DELETE SET NULL; snapshot from variant
+  attribution_amount_minor      BIGINT NOT NULL DEFAULT 0             -- computed at sale time; overridable per line
+```
+
+- Auto-filled from `product_variants.tracking_account_id` + `tracking_attribution_mode` + `tracking_attribution_pct_bps` at item-add.
+- Cashier may override `attribution_amount_minor` for one-off arrangements (negotiated commission, etc.). Requires `order.attribute` permission.
+- See **Tracking accounts** section for the compute formula (net of discount and tax) and ledger write timing.
 
 ### Order numbering: customer-facing display number
 
@@ -1296,6 +1335,341 @@ Invariant: `customers.balance_minor == SUM(customer_ledger.amount_minor)` per cu
 | Change credit limit | ✗ | ✓ |
 | Change customer on open sale | ✗ | ✓ |
 | Delete customer with non-zero balance | ✗ | ✓ |
+
+---
+
+## Tracking accounts
+
+Internal subsidiary accounts for tracking money owed to/from non-customer-non-vendor parties — mechanics, staff, partners, owner draws, internal funds. Structurally a sibling of `customer_ledger` and `vendor_ledger`: named entity, hierarchical, has a balance, has a per-event ledger.
+
+### Use case
+
+Workshop sells service through specific mechanics. A "Brake service by Abu Bakar" line on an order should credit Abu Bakar's tracking account by some portion of the revenue (typically a commission split). When the workshop pays Abu Bakar from the drawer, his balance reduces.
+
+Same pattern handles: staff commissions, partner draws, owner draws, equipment-fund contributions, internal cost centers — anything where money flows attached to a named bucket that isn't a customer or vendor.
+
+### Schema
+
+```
+tracking_accounts:
+  id                   ULID PK
+  parent_id            ULID FK → tracking_accounts  NULL    -- hierarchical: e.g. "Mechanic" → "Abu Bakar"
+  name                 VARCHAR NOT NULL
+  code                 VARCHAR NULL                          -- optional short label
+  account_category     VARCHAR NOT NULL    -- balance side, e.g. 'liability.tracking.staff'
+  counter_category     VARCHAR NOT NULL    -- offsetting side on attribution, e.g. 'expense.commission'
+  notes                TEXT NULL
+  balance_minor        BIGINT NOT NULL DEFAULT 0             -- positive = workshop owes account
+  archived_at          TIMESTAMP NULL
+  created_at, updated_at
+  created_by_user_id   ULID FK → users
+  INDEX (parent_id), INDEX (archived_at)
+
+tracking_account_ledger:
+  id                          ULID PK
+  tracking_account_id         ULID FK → tracking_accounts
+  type                        ENUM('attribution','payout','deposit','adjustment','opening_balance')
+  amount_minor                BIGINT NOT NULL                 -- positive = balance increases
+  ref_type                    ENUM('order_item','order','manual','import','adjustment') NULL
+  ref_id                      ULID NULL
+  counter_category_override   VARCHAR NULL                    -- for adjustments where the offset differs
+  note                        TEXT NULL                       -- required for 'adjustment'
+  pos_session_id              ULID FK NULL                    -- required for cash events
+  created_by_user_id          ULID FK → users
+  created_at                  TIMESTAMP
+  INDEX (tracking_account_id, created_at), INDEX (ref_type, ref_id)
+```
+
+Invariant: `tracking_accounts.balance_minor == SUM(tracking_account_ledger.amount_minor)` per account. Always updated in the same transaction.
+
+### No `kind` enum
+
+Hierarchy + name carry the semantic — "Mechanic / Abu Bakar" reads itself. `account_category` and `counter_category` carry the *accounting* meaning explicitly. No enum to maintain.
+
+### Hierarchy rules (same as locations)
+
+- Forest: any number of roots (`parent_id IS NULL`). Multiple top-level groups allowed.
+- Ledger entries may target any node, leaf or parent — UI nudges toward leaves but doesn't enforce.
+- Reparenting allowed while not archived. Cycle check on save: target must not be self or a descendant.
+
+### Configuration: on the variant, not on the account
+
+Attribution is configured on `product_variants` (see Product structure section). The variant points at one tracking account; that account doesn't enumerate its variants. Reverse navigation ("show me all variants attributed to Abu Bakar") is a query, not a schema relationship.
+
+```
+product_variants:
+  ...
+  tracking_account_id              ULID FK → tracking_accounts  NULL
+  tracking_attribution_mode        ENUM('full','percent') NOT NULL DEFAULT 'full'
+  tracking_attribution_pct_bps     INT NULL    -- required when mode='percent'
+```
+
+Rationale: locality. Editing a variant shows its attribution config inline. Single source of truth per variant — no risk of two accounts claiming the same SKU. Bulk-reassignment ("move Jimmy's products to Abu Bakar") is a UI feature on the account screen that issues UPDATEs against variants — doesn't need a join table.
+
+### Attribution compute formula
+
+On item-add, the system computes `order_items.attribution_amount_minor` automatically:
+
+```
+pre_tax_revenue = (snapshot_price_minor * qty - discount_minor)
+                * (snapshot_tax_mode = 'tax_exclusive'
+                     ? 1
+                     : 10000 / (10000 + snapshot_tax_rate_bps))
+
+attribution_amount_minor = mode = 'full'
+                              ? pre_tax_revenue
+                              : pre_tax_revenue * tracking_attribution_pct_bps / 10000
+```
+
+Mechanic's cut is on the goods/service portion — never on tax (which is remitted to government) and never on a discount the workshop chose to absorb.
+
+Cashier override (requires `order.attribute` permission) replaces the computed value directly on `order_items.attribution_amount_minor`. The variant's mode/pct config remains the default for subsequent lines.
+
+### Ledger write timing — per-event
+
+Per-event writes, consistent with `customer_ledger` / `vendor_ledger`. Trigger event differs by mode:
+
+| Mode | Trigger | Same transaction writes |
+|---|---|---|
+| POS sale | Order create (the atomic "Pay" action) | One `tracking_account_ledger` row per attributed line, `type='attribution'`, `ref_type='order_item'`, `ref_id=item.id` |
+| POS return | Return order create | Negative attribution row(s), `ref_type='order_item'`, `ref_id=return_item.id` |
+| Console sale | When order transitions to `fully paid AND closed` | One row per attributed line as above |
+| Console return | Same: when the return order is fully paid AND closed | Negative rows |
+
+Console-specific rule: attribution does **not** fire on item-add. Open orders accumulate without ledger writes. When the order is paid in full *and* closed (in either order), the service layer scans the order's non-voided items and writes the attribution rows in one transaction.
+
+**Bad-debt handling (all-or-nothing):** if a Console order never fully pays — write-off via customer adjustment — the mechanic earns nothing for it. Workshop absorbs the loss. (Pro-rata bad-debt sharing is an additive future enhancement; don't pre-build.)
+
+### Manual ops
+
+- **Payout** — cash-out from drawer to the account. `recordTrackingPayout(accountId, amountMinor, posSessionId, note?)`. Writes a `payout` ledger row (negative amount), reduces drawer expected cash via `pos_sessions` variance machinery.
+- **Deposit** — cash-in / preload (workshop advances money to an account). `recordTrackingDeposit(accountId, amountMinor, posSessionId, note?)`. Writes a `deposit` row (positive amount).
+- **Adjustment** — root only. Write-off, correction, opening balance. `counter_category_override` may be set when the offset isn't the account's default `counter_category` (e.g. an adjustment that hits `expense.other` instead of `expense.commission`). Note required.
+
+### Negative balance allowed
+
+If workshop pays the mechanic upfront and they haven't earned it back, balance goes negative (the account owes the workshop). Same model as customer store credit.
+
+### Two mechanics on one job
+
+Split into separate order lines: one line per mechanic, each with its own `attribution_account_id`. No join table, no special math. Workshop convention follows the schema.
+
+### Snapshot for hard-delete safety
+
+`order_items.snapshot_tracking_account_name` (locked in Product structure snapshots) preserves the account's name on the line forever. `order_items.attribution_account_id` is `ON DELETE SET NULL`. Hard-deleting an account doesn't destroy historical attribution records.
+
+### Lifecycle: archive + hard delete
+
+| Action | Who | Reversible | Allowed when |
+|---|---|---|---|
+| Archive | clerk, root | yes (unarchive) | always |
+| Unarchive | clerk, root | n/a | always |
+| Hard delete | root | no | `balance_minor == 0` AND no child accounts AND not referenced by any non-archived variant |
+
+Archive hides from new variant attribution pickers but preserves history. Variants still attributed to an archived account continue to work (warning surfaces in admin). Hard delete sets `product_variants.tracking_account_id = NULL` and `order_items.attribution_account_id = NULL` via `ON DELETE SET NULL`; snapshots preserve the audit. `tracking_account_ledger` cascade-deletes.
+
+### Permissions
+
+```
+order.attribute               -- override attribution_amount_minor at POS/Console
+tracking_account.create
+tracking_account.edit
+tracking_account.archive
+tracking_account.payout       -- cash-out
+tracking_account.deposit      -- cash-in
+tracking_account.adjustment   -- root only
+tracking_account.hard_delete  -- root only
+```
+
+Template defaults:
+- `clerk` gets `order.attribute`, `tracking_account.payout`, `tracking_account.deposit` (routine cash territory + sale-time override).
+- `inventory_manager` adds `tracking_account.create`, `.edit`, `.archive` (treats tracking accounts as configuration adjacent to products/stock).
+- `adjustment` and `hard_delete` stay root-only.
+
+### Accounting export integration
+
+Two new event shapes in `journalExport` (see Accounting & exports):
+
+| Event | Debit | Credit |
+|---|---|---|
+| Attribution | `tracking_account.counter_category` (e.g. `expense.commission`) | `tracking_account.account_category` (e.g. `liability.tracking.staff`) |
+| Payout | `tracking_account.account_category` | `asset.cash` (or `asset.bank.*`) |
+| Deposit | `asset.cash` (or `asset.bank.*`) | `tracking_account.account_category` |
+| Adjustment | `counter_category_override` or `account_category` (depends on sign) | the other side |
+
+New `account_category` keys required in the catalog:
+- `liability.tracking.staff`, `liability.tracking.partner`, `liability.tracking.fund`, `liability.tracking.other`
+- `expense.commission`, `expense.owner_draw`, `expense.partner_draw`
+
+---
+
+## Accounting & exports
+
+**Export-only model.** External accounting software (GnuCash) is the real GL. Retale's job: emit clean, balanced, period-bounded data the accountant imports once a year. No internal `accounts` / `journal_entries` tables — the existing subsidiary ledgers (`customer_ledger`, `vendor_ledger`, `stock_movements`, `order_payments`, `pos_sessions`) already encode every entity-money relationship.
+
+If reality later demands an internal GL, the path is additive: layer `journal_entries` over the existing ledgers, derive accounts from `account_category` tags. No data loss, no schema churn for existing tables.
+
+### Account category catalog
+
+Fixed enum (in code, like permission keys). ~20 entries. Maps to typical Indonesian small-business chart of accounts; the accountant translates these to their GnuCash account tree once.
+
+```
+# Assets
+asset.cash                    -- cash in drawer (from pos_sessions)
+asset.bank.card               -- card terminal settlements
+asset.bank.transfer           -- direct bank transfers in/out
+asset.bank.qris               -- QRIS settlements
+asset.inventory               -- stock value (from stock_movements)
+asset.receivable              -- AR (from customer_ledger)
+
+# Liabilities
+liability.payable             -- AP (from vendor_ledger)
+liability.tax.output          -- PPN collected on sales
+liability.tax.input           -- PPN paid on purchases (asset really; netted)
+
+# Revenue
+revenue.sales                 -- product sales (from orders)
+revenue.sales.discount        -- contra-revenue from discounts
+revenue.other                 -- misc income (rare)
+
+# COGS
+cogs.product                  -- cost of goods sold (allocated WAC from stock_movements)
+cogs.inventory_loss.damage    -- stock write-off, damage
+cogs.inventory_loss.theft     -- stock write-off, theft
+cogs.inventory_loss.variance  -- recount variance
+
+# Expenses (mostly from non-stock purchase items)
+expense.tools                 -- workshop tools, equipment <capitalize threshold
+expense.consumables           -- shop consumables (rags, cleaners, etc.)
+expense.freight               -- standalone freight bills not allocated to inventory
+expense.office                -- office supplies
+expense.bad_debt              -- customer adjustments (write-offs)
+expense.other                 -- catchall
+
+# Adjustments
+adjustment.vendor_credit      -- vendor adjustments in our favor
+adjustment.dispute            -- vendor adjustments contested
+
+# Tracking accounts (mechanics, staff, partners, internal funds)
+liability.tracking.staff      -- owed to mechanics/staff (e.g. unpaid commissions)
+liability.tracking.partner    -- owed to partners
+liability.tracking.fund       -- internal funds / reserves
+liability.tracking.other      -- catchall for tracking accounts
+expense.commission            -- staff commission expense (offsets liability.tracking.staff on attribution)
+expense.partner_draw          -- partner draw expense
+expense.owner_draw            -- owner draw expense
+```
+
+### Auto-classification (no explicit tag needed)
+
+The existing schema is rich enough that ~90% of events auto-classify. The export resolver derives `account_category` from the source row's shape:
+
+| Source | Debit | Credit |
+|---|---|---|
+| `orders` + items (sale) | `asset.cash` or `asset.bank.*` or `asset.receivable` | `revenue.sales`, `liability.tax.output` |
+| `order_items.discount_minor` | `revenue.sales.discount` | (offset reduces sale credit) |
+| `stock_movements` `purchase_receive` | `asset.inventory` | `liability.payable` or `asset.cash`/`asset.bank.*` |
+| `stock_movements` `pos_sale` | `cogs.product` | `asset.inventory` |
+| `stock_movements` `transfer_*` | n/a (internal — emit zero net) | n/a |
+| `customer_ledger` `payment` | `asset.cash` or `asset.bank.*` | `asset.receivable` |
+| `vendor_ledger` `payment` | `liability.payable` | `asset.cash` or `asset.bank.*` |
+| return order | `revenue.sales` (reversed) | `asset.cash`/`asset.bank.*`/`asset.receivable` |
+| `tracking_account_ledger` `attribution` | `tracking_account.counter_category` | `tracking_account.account_category` |
+| `tracking_account_ledger` `payout` | `tracking_account.account_category` | `asset.cash` / `asset.bank.*` |
+| `tracking_account_ledger` `deposit` | `asset.cash` / `asset.bank.*` | `tracking_account.account_category` |
+| `tracking_account_ledger` `adjustment` | `counter_category_override` (or `account_category` if absent) | the other side |
+
+The accountant gets a clean balanced journal without anyone tagging individual sales.
+
+### Explicit-tag cases
+
+Only events that *can't* be auto-classified need an `account_category` column. Add the column NULL on:
+
+```
+purchase_items (addition):
+  account_category   VARCHAR NULL    -- required when variant_id IS NULL (non-stock); auto = 'asset.inventory' when variant_id set
+
+customer_ledger (addition):
+  account_category   VARCHAR NULL    -- required for type='adjustment'; auto-derived for other types
+
+vendor_ledger (addition):
+  account_category   VARCHAR NULL    -- required for type='adjustment'
+
+stock_movements (addition):
+  account_category   VARCHAR NULL    -- required for type='adjustment' (damage/theft/variance); auto for other types
+```
+
+Service-layer guard: any insert with `type IN ('adjustment', ...)` or `variant_id IS NULL` (for purchase items) fails if `account_category IS NULL`.
+
+### Export resolver
+
+```
+journalExport(periodStart: Date, periodEnd: Date, currency: 'minor' | 'major'): JournalExport
+```
+
+Returns:
+
+```typescript
+{
+  period: { start: Date, end: Date },
+  entries: Array<{
+    date: Date,
+    ref_type: 'order' | 'purchase_delivery' | 'customer_payment' | 'vendor_payment' | 'stock_adjustment' | 'session_close' | ...,
+    ref_id: ULID,
+    description: string,           // e.g. "Sale P1-2026-05-14-0042"
+    party_type: 'customer' | 'vendor' | null,
+    party_id: ULID | null,
+    party_name: string | null,     // snapshot, not live
+    lines: Array<{
+      account_category: AccountCategory,
+      debit_minor: bigint,         // exactly one of debit/credit nonzero
+      credit_minor: bigint
+    }>
+  }>,
+  summary: Array<{                  // monthly aggregates by account
+    month: 'YYYY-MM',
+    account_category: AccountCategory,
+    debit_total_minor: bigint,
+    credit_total_minor: bigint
+  }>,
+  warnings: Array<{ kind: string, ref_type?, ref_id?, message: string }>
+}
+```
+
+Invariant: for every entry, `SUM(debits) == SUM(credits)`. Resolver runs a balance check at the end and surfaces any imbalance in `warnings` rather than silently shipping bad data.
+
+### CSV formats (presentation layer)
+
+Two output flavors, both derived from `journalExport`:
+
+- **`journal.csv`** — one row per debit/credit line. Columns: `date, ref, description, party, account, debit, credit`. GnuCash-friendly via the multi-split CSV importer.
+- **`summary.csv`** — one row per (month × account). Columns: `month, account, debit_total, credit_total`. For accountants who prefer to enter monthly totals manually.
+
+CSV generation is a thin formatter over the JSON; no separate query path.
+
+### Currency / amounts
+
+- Internal storage is always minor units (BIGINT). Export takes a `currency` flag — `'minor'` returns BIGINT-safe strings, `'major'` divides by 100 and formats with 2 decimals.
+- GnuCash imports work with major-unit amounts (Rp 12.500,00 style). The CSV exporter defaults to `'major'` with Indonesian locale formatting; JSON export defaults to `'minor'` to avoid float drift.
+
+### Tax (PPN)
+
+- Each order line carries `snapshot_tax_rate_bps` and `snapshot_price_mode` (locked earlier). Export uses these directly — no live tax lookup, no drift.
+- For each sale entry, the resolver splits revenue into `revenue.sales` (net) and `liability.tax.output` (tax portion). For tax_inclusive lines, it computes `tax = total * rate / (10000 + rate)`; for tax_exclusive, `tax = total * rate / 10000`.
+- Vendor purchases handled symmetrically: if the workshop is PKP and tracks input PPN, the resolver splits the inventory leg into `asset.inventory` + `liability.tax.input`. (For non-PKP, set a config flag and skip the split — input PPN goes into inventory cost.)
+- One `pkp_mode BOOLEAN` setting on a `tenant_settings` row (or env var for v1) controls whether input PPN is split out.
+
+### Permissions
+
+- `report.journal_export` — new permission key. Root + accountant role only. Add to the catalog.
+- Templates updated: neither `clerk` nor `inventory_manager` get it by default. Create a `accountant` template later if a non-root user runs exports.
+
+### What's deliberately NOT here
+
+- No accounts payable / receivable aging in the export — those are separate reports (`report.ar_aging.view`, `report.ap_aging.view`). Export is journal-style only.
+- No internal P&L / balance sheet rendering. GnuCash does that.
+- No depreciation, accruals, prepaid expenses, or anything period-end. If needed, accountant adjusts in GnuCash.
+- No manual journal entries inside Retale. Adjustments happen via the existing ledger flows (which already tag `account_category`).
 
 ---
 
