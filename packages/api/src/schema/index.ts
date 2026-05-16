@@ -5,6 +5,7 @@ import * as locationsDomain from "./locations.ts";
 import * as productsDomain from "./products.ts";
 import * as rbacDomain from "./rbac.ts";
 import * as stockDomain from "./stock.ts";
+import * as vendorsDomain from "./vendors.ts";
 
 // GraphQL schema root. The base defines `Query`/`Mutation` with one field
 // each; every domain module `extend`s them. Add domains to both arrays below
@@ -34,6 +35,7 @@ export const schema = createSchema<GraphQLContext>({
     productsDomain.typeDefs,
     locationsDomain.typeDefs,
     stockDomain.typeDefs,
+    vendorsDomain.typeDefs,
   ],
   resolvers: [
     baseResolvers,
@@ -42,5 +44,6 @@ export const schema = createSchema<GraphQLContext>({
     productsDomain.resolvers,
     locationsDomain.resolvers,
     stockDomain.resolvers,
+    vendorsDomain.resolvers,
   ],
 });
