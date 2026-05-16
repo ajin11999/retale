@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "68555168-b0cd-4741-8fbe-97e7200a6483",
+  "id": "d82fdf72-1c69-4404-ae2f-484d4bfd1d4b",
   "prevId": "6bf391ed-bd75-4f50-91ad-194647ae7e86",
   "tables": {
     "role_permissions": {
@@ -1815,12 +1815,7 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {
-        "purchase_items_line_target": {
-          "name": "purchase_items_line_target",
-          "value": "`purchase_items`.`variant_id` is not null or `purchase_items`.`description` is not null"
-        }
-      }
+      "checkConstraint": {}
     },
     "purchase_sections": {
       "name": "purchase_sections",
@@ -2156,6 +2151,273 @@
       "compositePrimaryKeys": {
         "purchases_id": {
           "name": "purchases_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "purchase_deliveries": {
+      "name": "purchase_deliveries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "biller": {
+          "name": "biller",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "target_location_id": {
+          "name": "target_location_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('draft','delivered','cancelled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_by_user_id": {
+          "name": "delivered_by_user_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "total_cost_minor": {
+          "name": "total_cost_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "purchase_deliveries_target_location_id_locations_id_fk": {
+          "name": "purchase_deliveries_target_location_id_locations_id_fk",
+          "tableFrom": "purchase_deliveries",
+          "tableTo": "locations",
+          "columnsFrom": [
+            "target_location_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "purchase_deliveries_delivered_by_user_id_users_id_fk": {
+          "name": "purchase_deliveries_delivered_by_user_id_users_id_fk",
+          "tableFrom": "purchase_deliveries",
+          "tableTo": "users",
+          "columnsFrom": [
+            "delivered_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "purchase_deliveries_created_by_user_id_users_id_fk": {
+          "name": "purchase_deliveries_created_by_user_id_users_id_fk",
+          "tableFrom": "purchase_deliveries",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "purchase_deliveries_id": {
+          "name": "purchase_deliveries_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "purchase_delivery_items": {
+      "name": "purchase_delivery_items",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "delivery_id": {
+          "name": "delivery_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parent_item_id": {
+          "name": "parent_item_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "purchase_item_id": {
+          "name": "purchase_item_id",
+          "type": "varchar(26)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "qty": {
+          "name": "qty",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_minor": {
+          "name": "cost_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "purchase_delivery_items_delivery_id_idx": {
+          "name": "purchase_delivery_items_delivery_id_idx",
+          "columns": [
+            "delivery_id"
+          ],
+          "isUnique": false
+        },
+        "purchase_delivery_items_purchase_item_id_idx": {
+          "name": "purchase_delivery_items_purchase_item_id_idx",
+          "columns": [
+            "purchase_item_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "purchase_delivery_items_delivery_id_purchase_deliveries_id_fk": {
+          "name": "purchase_delivery_items_delivery_id_purchase_deliveries_id_fk",
+          "tableFrom": "purchase_delivery_items",
+          "tableTo": "purchase_deliveries",
+          "columnsFrom": [
+            "delivery_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "purchase_delivery_items_purchase_item_id_purchase_items_id_fk": {
+          "name": "purchase_delivery_items_purchase_item_id_purchase_items_id_fk",
+          "tableFrom": "purchase_delivery_items",
+          "tableTo": "purchase_items",
+          "columnsFrom": [
+            "purchase_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "pdi_parent_item_fk": {
+          "name": "pdi_parent_item_fk",
+          "tableFrom": "purchase_delivery_items",
+          "tableTo": "purchase_delivery_items",
+          "columnsFrom": [
+            "parent_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "purchase_delivery_items_id": {
+          "name": "purchase_delivery_items_id",
           "columns": [
             "id"
           ]

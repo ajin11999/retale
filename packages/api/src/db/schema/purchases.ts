@@ -4,11 +4,10 @@
 // `revision` is bumped by content edits; see docs/design-decisions.md →
 // "Purchases & deliveries".
 
-import { relations, sql } from "drizzle-orm";
+import { relations } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
   bigint,
-  check,
   date,
   index,
   int,
@@ -94,10 +93,6 @@ export const purchaseItems = mysqlTable(
   (t) => [
     index("purchase_items_purchase_id_idx").on(t.purchaseId),
     index("purchase_items_variant_id_idx").on(t.variantId),
-    check(
-      "purchase_items_line_target",
-      sql`${t.variantId} is not null or ${t.description} is not null`,
-    ),
   ],
 );
 
