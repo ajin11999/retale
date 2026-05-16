@@ -1,0 +1,6 @@
+// Drizzle table definitions, one file per domain. Re-exported here so the
+// db client and drizzle-kit pick up every table from a single entry point.
+//
+// Populated as domains are built out (products, purchases, ...).
+
+export * from "./auth.ts";

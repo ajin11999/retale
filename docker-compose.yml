@@ -1,0 +1,26 @@
+# Local dev database. Brings up the MariaDB that DATABASE_URL in .env points at.
+#   docker compose up -d        start
+#   docker compose down         stop (keeps data)
+#   docker compose down -v      stop + wipe data (the importer is wipe-and-restore by design)
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: retale-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: retale
+      MARIADB_USER: produck
+      MARIADB_PASSWORD: password
+      MARIADB_ROOT_PASSWORD: rootpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - retale-dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  retale-dbdata:
