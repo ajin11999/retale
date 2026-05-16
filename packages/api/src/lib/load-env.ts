@@ -28,8 +28,10 @@ function applyEnvFile(path: string): void {
   }
 }
 
-// Walk up from this file until a `.env` is found (the monorepo root).
-let dir = import.meta.dir;
+// Walk up until a `.env` is found (the monorepo root). Start from this file's
+// directory; fall back to cwd when `import.meta.dir` is unavailable — e.g.
+// drizzle-kit bundles the config with esbuild, where it is undefined.
+let dir = import.meta.dir || process.cwd();
 for (let depth = 0; depth < 8; depth++) {
   const candidate = join(dir, ".env");
   if (existsSync(candidate)) {

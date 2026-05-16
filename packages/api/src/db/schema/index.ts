@@ -4,3 +4,4 @@
 // Populated as domains are built out (products, purchases, ...).
 
 export * from "./auth.ts";
+export * from "./products.ts";

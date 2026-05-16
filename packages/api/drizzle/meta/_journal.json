@@ -15,6 +15,13 @@
       "when": 1778922996475,
       "tag": "0001_dashing_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1778926075678,
+      "tag": "0002_crazy_xorn",
+      "breakpoints": true
     }
   ]
 }
