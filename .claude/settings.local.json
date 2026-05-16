@@ -5,7 +5,10 @@
       "PowerShell(Get-ChildItem -Recurse -File | Where-Object { $_.Name -match 'product' -or $_.Name -match 'Product' } | Select-Object -ExpandProperty FullName)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "PowerShell(bun *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(bun run *)"
     ]
   }
 }

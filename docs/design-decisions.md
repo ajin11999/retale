@@ -295,6 +295,8 @@ purchases:
   source_document       VARCHAR NULL               -- vendor invoice / PO ref
   memo                  TEXT NULL
   status                ENUM('open','complete','cancelled') NOT NULL DEFAULT 'open'
+  revision              INT NOT NULL DEFAULT 1     -- bumped by content edits; see "Sending a purchase order"
+  last_sent_at          TIMESTAMP NULL             -- DENORM; "not yet sent" list filter
   cancelled_at          TIMESTAMP NULL
   cancelled_by_user_id  ULID FK NULL
   created_by_user_id    ULID FK
@@ -419,6 +421,71 @@ The only step that touches stock and WAC. In one transaction:
 4. Increment `purchase_items.qty_delivered` per affected item.
 5. Auto-set `purchases.status = 'complete'` if all items now fully delivered.
 6. Set delivery `status = delivered`, `delivered_at`, `delivered_by_user_id`.
+
+### Sending a purchase order to the vendor
+
+Clerks send a purchase to its vendor over WhatsApp or email. The network is local-only with no public internet (see Clients in `CLAUDE.md`), so **the server never sends anything itself** — it has no SMTP and cannot reach the WhatsApp API. Division of labor:
+
+- **Server** — renders the purchase into a vendor-ready artifact (text body + PDF), normalizes the recipient, builds deep-link URLs, and logs the send event.
+- **Flutter client** — opens `wa.me` / `mailto:` deep links, or the OS share sheet for the PDF, using the *device's* own connectivity.
+
+Deep links cannot carry attachments, so:
+- **Text-only** → open `https://wa.me/<phone>?text=<urlencoded>` or `mailto:<email>?subject=…&body=…`.
+- **With PDF** → the app downloads the PDF, then uses the OS share sheet (`Share.shareXFiles`) targeting WhatsApp/Gmail — attachment rides along, body pre-filled. This path needs no pre-filled recipient and is therefore *always* available.
+
+#### Schema
+
+A per-event log table, ledger-style, consistent with the rest of the system:
+
+```
+purchase_sends:
+  id                 ULID PK
+  purchase_id        ULID FK → purchases  ON DELETE CASCADE
+  channel            ENUM('whatsapp','email','manual') NOT NULL
+  recipient          VARCHAR NOT NULL       -- snapshot of the phone/email actually used
+  revision           INT NOT NULL           -- snapshot of purchases.revision at send time
+  status             ENUM('prepared','sent') NOT NULL DEFAULT 'prepared'
+  sent_at            TIMESTAMP NULL         -- set when the clerk confirms it went out
+  note               TEXT NULL
+  created_by_user_id ULID FK → users
+  created_at         TIMESTAMP
+  INDEX (purchase_id)
+```
+
+Append-only — re-sending adds another row; the purchase detail page shows the full send history. The server cannot verify delivery (sending happens on the phone), so `status` is clerk-confirmed: `prepared` when the link is generated, `sent` once the clerk marks it as gone out.
+
+`purchases.last_sent_at` (indexed) lets list views filter "not yet sent" without a join — consistent with the existing `qty_delivered` / `total_cost_minor` denorm pattern.
+
+#### Re-sending and revisions
+
+Re-sending is always allowed — `purchase_sends` is append-only. Two cases:
+
+- **Unchanged PO** (chasing a vendor who didn't reply) — just send again; another row, same `revision`.
+- **Revised PO** — any mutation that changes PO *content* (add/edit/delete `purchase_item`, section changes) bumps `purchases.revision`. Sending and `recordPurchaseSend` setting `last_sent_at` do **not** bump it — `revision` tracks content only, never delivery state.
+
+The rendered body and PDF print `PO #xxx — Rev N`, and on Rev ≥ 2 add a line "Revised — supersedes any earlier copy" so the vendor knows the new document wins.
+
+`recordPurchaseSend` snapshots the current `purchases.revision` into `purchase_sends.revision`. From that the UI derives **unsent changes**: `purchases.revision > MAX(purchase_sends.revision)`. When true, the purchase detail page actively prompts "PO edited since last send — re-send Rev N?" The send history then reads "Rev 1 sent · Rev 2 sent" rather than indistinguishable rows.
+
+Editing a sent PO is never blocked (a typo fix shouldn't force a cancel-and-recreate); the revision bump plus the re-send prompt keep the vendor copy honest.
+
+#### API surface
+
+1. **`purchaseSendDraft(purchaseId, channel, recipientOverride?)`** — pure read, no side effects. Returns `{ channel, recipient, recipientAvailable, subject, body, deepLink, pdfUrl }`.
+   - `body` — rendered PO: header (ref, date, workshop), vendor name, sections → lines. Each line shows the **vendor's** code/label via a `vendor_variant_codes` lookup on `(vendor_id, variant_id)`, falling back to our variant name when unmapped; includes qty and unit cost.
+   - `deepLink` — `wa.me` / `mailto:` URL; phone normalized server-side (strip non-digits, leading `0` → `62`).
+   - `pdfUrl` — points at the binary route below; independent of contact info, so it always renders.
+2. **`recordPurchaseSend(purchaseId, channel, recipient)`** — mutation. Writes a `purchase_sends` row and sets `purchases.last_sent_at`. Client calls it after opening the link.
+3. **`GET /purchases/:id/po.pdf`** — Elysia binary route (not GraphQL), same JWT auth; referenced by `pdfUrl`.
+
+#### Missing or unusable contact info
+
+`vendors.phone` / `vendors.email` are nullable and have no format validation, so the renderer must degrade gracefully, never throw:
+
+- `recipientAvailable` is reported **per channel** — `false` when the field is null **or** unparseable (e.g. `"0812 / 0813"`, `"call the workshop"`).
+- The client greys out *that channel's* button independently, showing why ("No phone number on file") with an inline shortcut to edit the vendor (clerk has `vendor.edit`).
+- It is never a dead end: the clerk can supply a one-off `recipientOverride` (snapshotted into `purchase_sends.recipient`, vendor row untouched), and the PDF share-sheet path works with no recipient at all.
+- **Ad-hoc purchases** (`vendor_id IS NULL`) have no contact info by definition — same code path, `recipientOverride` is simply required rather than optional.
 
 ---
 
@@ -895,6 +962,7 @@ stock.transfer.cancel
 purchase.create
 purchase.edit                  -- while open and no delivered delivery
 purchase.cancel
+purchase.send                  -- send PO to vendor via WhatsApp/email/PDF
 delivery.draft                 -- create/edit draft purchase delivery
 delivery.commit                -- draft → delivered
 delivery.cancel                -- root-equivalent in practice
@@ -951,6 +1019,10 @@ report.journal_export          -- export balanced journal for external accountin
 # Product alerts
 alert.acknowledge
 
+# Online catalog (see future-features.md)
+catalog.manage                 -- toggle online_visible + price/stock modes
+catalog.publish                -- trigger an on-demand publish to the online DB
+
 # Admin
 admin.user.manage              -- create/edit users, assign roles
 admin.role.manage              -- create/edit/delete roles
@@ -964,7 +1036,7 @@ Shipped at install, `is_template = true`. Immutable via UI. Root can **clone** a
 | Template | Description | Permissions |
 |---|---|---|
 | `cashier_lite` | New hire / restricted POS only | `order.create_pos`, `order.void_item`, `session.open`, `session.close_own`, `debt.record_payment`, `report.sales.view` |
-| `clerk` | Daily POS + light entity management | cashier_lite + `order.discount`, `order.refund`, `order.attribute`, `customer.*` (except `set_credit_limit`, `adjustment`, `hard_delete`), `vendor.create/edit/archive/record_payment/variant_code.manage`, `location.create/edit/archive`, `purchase.create/edit`, `delivery.draft`, `product.create/edit/archive`, `stock.transfer.create/dispatch/receive`, `tracking_account.payout/deposit`, `alert.acknowledge` |
+| `clerk` | Daily POS + light entity management | cashier_lite + `order.discount`, `order.refund`, `order.attribute`, `customer.*` (except `set_credit_limit`, `adjustment`, `hard_delete`), `vendor.create/edit/archive/record_payment/variant_code.manage`, `location.create/edit/archive`, `purchase.create/edit/send`, `delivery.draft`, `product.create/edit/archive`, `stock.transfer.create/dispatch/receive`, `tracking_account.payout/deposit`, `alert.acknowledge` |
 | `inventory_manager` | Everything clerk does + stock & cost authority | clerk + `product.edit_cost`, `stock.adjust`, `delivery.commit`, `purchase.cancel`, `stock.transfer.cancel`, `tracking_account.create/edit/archive`, `report.cost.view`, `report.margin.view` |
 
 Templates evolve via migration when the permission catalog changes; user-cloned roles are not touched.
