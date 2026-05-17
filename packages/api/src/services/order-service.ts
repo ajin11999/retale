@@ -16,6 +16,10 @@ import {
   products,
   productVariants,
 } from "../db/schema/products.ts";
+import {
+  trackingAccountLedger,
+  trackingAccounts,
+} from "../db/schema/tracking.ts";
 import { db } from "../lib/db.ts";
 import { modifyStock } from "./stock-service.ts";
 
@@ -67,6 +71,12 @@ export interface PosOrderItemInput {
   discountMinor?: number;
   /** Allowed only for `kind = 'service'` products. */
   priceOverrideMinor?: number | null;
+  /**
+   * Replaces the computed tracking-account attribution for this line.
+   * Requires the variant to carry a tracking account; the caller must hold
+   * the `order.attribute` permission.
+   */
+  attributionAmountOverrideMinor?: number | null;
 }
 
 export interface PosOrderPaymentInput {
@@ -202,6 +212,30 @@ async function resolvePrice(
   return best ? best.priceMinor : variant.priceMinor;
 }
 
+/**
+ * Tracking-account attribution for a line: the mechanic's cut falls on the
+ * pre-tax goods/service revenue — never on tax, never on a discount the
+ * workshop absorbed. `qty` may be negative (return lines), yielding a negative
+ * attribution. See docs/design-decisions.md → "Attribution compute formula".
+ */
+function computeAttribution(args: {
+  priceMinor: number;
+  qty: number;
+  discountMinor: number;
+  priceMode: "tax_inclusive" | "tax_exclusive";
+  taxRateBps: number;
+  mode: "full" | "percent";
+  pctBps: number | null;
+}): number {
+  const gross = args.priceMinor * args.qty - args.discountMinor;
+  const preTax =
+    args.priceMode === "tax_exclusive"
+      ? gross
+      : Math.round((gross * 10000) / (10000 + args.taxRateBps));
+  if (args.mode === "full") return preTax;
+  return Math.round((preTax * (args.pctBps ?? 0)) / 10000);
+}
+
 /** Built order_items insert row plus the computed line total. */
 interface BuiltLine {
   row: typeof orderItems.$inferInsert;
@@ -261,6 +295,40 @@ async function buildLine(
       })
     : null;
 
+  // Tracking-account attribution: snapshotted on the line at sale time. The
+  // ledger row is posted separately (POS: on create; Console: on close).
+  let attributionAccountId: string | null = null;
+  let attributionAmountMinor = 0;
+  let trackingAccountName: string | null = null;
+  if (variant.trackingAccountId) {
+    const account = await tx.query.trackingAccounts.findFirst({
+      where: eq(trackingAccounts.id, variant.trackingAccountId),
+    });
+    attributionAccountId = variant.trackingAccountId;
+    trackingAccountName = account?.name ?? null;
+    attributionAmountMinor = computeAttribution({
+      priceMinor: price,
+      qty: item.qty,
+      discountMinor: discount,
+      priceMode: product.priceMode,
+      taxRateBps: product.taxRateBps,
+      mode: variant.trackingAttributionMode,
+      pctBps: variant.trackingAttributionPctBps,
+    });
+  }
+  if (item.attributionAmountOverrideMinor != null) {
+    if (!attributionAccountId) {
+      throw new OrderError(
+        "INVALID_INPUT",
+        "attribution override requires a tracking account on the variant",
+      );
+    }
+    if (!Number.isInteger(item.attributionAmountOverrideMinor)) {
+      throw new OrderError("INVALID_INPUT", "attribution override must be an integer");
+    }
+    attributionAmountMinor = item.attributionAmountOverrideMinor;
+  }
+
   return {
     isPhysical: !isService,
     lineTotal,
@@ -281,12 +349,59 @@ async function buildLine(
       snapshotCostMinor: isService ? 0 : variant.costMinor,
       snapshotTaxRateBps: product.taxRateBps,
       snapshotPriceMode: product.priceMode,
-      // Tracking-account attribution is filled once that domain is built.
-      snapshotTrackingAccountName: null,
-      attributionAccountId: null,
-      attributionAmountMinor: 0,
+      snapshotTrackingAccountName: trackingAccountName,
+      attributionAccountId,
+      attributionAmountMinor,
     },
   };
+}
+
+/** Recompute a tracking account's cached `balanceMinor` from the ledger SUM. */
+async function syncTrackingBalance(tx: Tx, accountId: string): Promise<void> {
+  const sums = await tx
+    .select({
+      total: sql<number>`COALESCE(SUM(${trackingAccountLedger.amountMinor}), 0)`,
+    })
+    .from(trackingAccountLedger)
+    .where(eq(trackingAccountLedger.trackingAccountId, accountId));
+  await tx
+    .update(trackingAccounts)
+    .set({ balanceMinor: Number(sums[0]?.total ?? 0) })
+    .where(eq(trackingAccounts.id, accountId));
+}
+
+/**
+ * Post one `attribution` tracking_account_ledger row per non-voided line of an
+ * order that carries an attribution account and a non-zero amount, then
+ * re-sync each touched account's balance.
+ */
+async function postAttribution(
+  tx: Tx,
+  orderId: string,
+  createdByUserId: string,
+): Promise<void> {
+  const items = await tx
+    .select()
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+  const touched = new Set<string>();
+  for (const item of items) {
+    if (item.voidedAt) continue;
+    if (!item.attributionAccountId || item.attributionAmountMinor === 0) continue;
+    await tx.insert(trackingAccountLedger).values({
+      id: ulid(),
+      trackingAccountId: item.attributionAccountId,
+      type: "attribution",
+      amountMinor: item.attributionAmountMinor,
+      refType: "order_item",
+      refId: item.id,
+      createdByUserId,
+    });
+    touched.add(item.attributionAccountId);
+  }
+  for (const accountId of touched) {
+    await syncTrackingBalance(tx, accountId);
+  }
 }
 
 /**
@@ -411,6 +526,9 @@ export async function createPosOrder(input: {
       });
       await syncCustomerBalance(tx, customer.id);
     }
+
+    // POS orders attribute on create (the atomic "Pay" action).
+    await postAttribution(tx, orderId, input.createdByUserId);
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, orderId) });
     return row as Order;
@@ -631,14 +749,20 @@ export async function addCustomerSalePayment(input: {
   });
 }
 
-/** Close a Console sale: assigns a `C-<date>-<seq>` display number; immutable after. */
+/**
+ * Close a Console sale: assigns a `C-<date>-<seq>` display number; immutable
+ * after. Tracking attribution fires here only when the sale is fully paid at
+ * close — an order that closes on account never credits the mechanic (the
+ * design's all-or-nothing bad-debt rule). A debt later settled via
+ * `recordDebtPayment` does not retro-fire attribution.
+ */
 export async function closeCustomerSale(input: {
   orderId: string;
   closedByUserId: string;
 }): Promise<Order> {
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);
-    await recomputeOrderTotal(tx, order.id);
+    const total = await recomputeOrderTotal(tx, order.id);
     await tx
       .update(orders)
       .set({
@@ -647,6 +771,16 @@ export async function closeCustomerSale(input: {
         displayNumber: await nextDisplayNumber(tx, "C"),
       })
       .where(eq(orders.id, order.id));
+
+    const payRows = await tx
+      .select({ amt: orderPayments.amountMinor })
+      .from(orderPayments)
+      .where(eq(orderPayments.orderId, order.id));
+    const paid = payRows.reduce((sum, p) => sum + p.amt, 0);
+    if (paid >= total) {
+      await postAttribution(tx, order.id, input.closedByUserId);
+    }
+
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
     return row as Order;
   });
@@ -892,9 +1026,14 @@ export async function createReturn(input: {
         throw new OrderError("RETURN_QTY_EXCEEDED");
       }
 
-      // Prorate the original discount across the units being returned.
+      // Prorate the original discount and attribution across the units being
+      // returned — a return reverses what the original line actually posted
+      // (so a cashier override on the original is reversed proportionally).
       const proratedDiscount = Math.round(
         (orig.discountMinor * ret.qty) / orig.qty,
+      );
+      const proratedAttribution = Math.round(
+        (orig.attributionAmountMinor * ret.qty) / orig.qty,
       );
       rows.push({
         id: ulid(),
@@ -915,8 +1054,8 @@ export async function createReturn(input: {
         snapshotTaxRateBps: orig.snapshotTaxRateBps,
         snapshotPriceMode: orig.snapshotPriceMode,
         snapshotTrackingAccountName: orig.snapshotTrackingAccountName,
-        attributionAccountId: null,
-        attributionAmountMinor: 0,
+        attributionAccountId: orig.attributionAccountId,
+        attributionAmountMinor: -proratedAttribution,
       });
     }
 
@@ -986,6 +1125,9 @@ export async function createReturn(input: {
       });
       await syncCustomerBalance(tx, customerId);
     }
+
+    // Reverse the mechanic's attribution proportionally to what was returned.
+    await postAttribution(tx, returnOrderId, input.createdByUserId);
 
     const row = await tx.query.orders.findFirst({
       where: eq(orders.id, returnOrderId),

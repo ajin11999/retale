@@ -31,6 +31,10 @@ import {
   voidCustomerSaleItem,
 } from "./order-service.ts";
 import { closeSession, createPointOfSale, openSession } from "./pos-service.ts";
+import {
+  createTrackingAccount,
+  getTrackingAccount,
+} from "./tracking-service.ts";
 
 let userId: string;
 let locationId: string;
@@ -50,6 +54,8 @@ async function wipe(): Promise<void> {
     "product_variants",
     "products",
     "product_categories",
+    "tracking_account_ledger",
+    "tracking_accounts",
     "pos_sessions",
     "points_of_sale",
     "locations",
@@ -108,6 +114,11 @@ async function seedVariant(opts?: {
   priceMinor?: number;
   costMinor?: number;
   stockQty?: number;
+  priceMode?: "tax_inclusive" | "tax_exclusive";
+  taxRateBps?: number;
+  trackingAccountId?: string;
+  attributionMode?: "full" | "percent";
+  attributionPctBps?: number;
 }): Promise<string> {
   const kind = opts?.kind ?? "physical";
   const productId = ulid();
@@ -116,8 +127,8 @@ async function seedVariant(opts?: {
     id: productId,
     name: "Widget",
     kind,
-    priceMode: "tax_exclusive",
-    taxRateBps: 1100,
+    priceMode: opts?.priceMode ?? "tax_exclusive",
+    taxRateBps: opts?.taxRateBps ?? 1100,
   });
   await db.insert(productVariants).values({
     id: variantId,
@@ -125,6 +136,9 @@ async function seedVariant(opts?: {
     sku: `SKU-${variantId}`,
     priceMinor: opts?.priceMinor ?? 1000,
     costMinor: opts?.costMinor ?? 400,
+    trackingAccountId: opts?.trackingAccountId ?? null,
+    trackingAttributionMode: opts?.attributionMode ?? "full",
+    trackingAttributionPctBps: opts?.attributionPctBps ?? null,
   });
   if (kind === "physical") {
     await db.insert(stockLocations).values({
@@ -707,5 +721,176 @@ describe("returns", () => {
         createdByUserId: userId,
       }),
     );
+  });
+});
+
+describe("tracking attribution", () => {
+  /** A tracking account; returns its id. */
+  async function seedAccount(): Promise<string> {
+    const a = await createTrackingAccount({
+      name: "Abu Bakar",
+      accountCategory: "liability.tracking.staff",
+      counterCategory: "expense.commission",
+      createdByUserId: userId,
+    });
+    return a.id;
+  }
+
+  test("a POS sale posts full pre-tax attribution to the account", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.attributionAccountId).toBe(accountId);
+    expect(items[0]!.attributionAmountMinor).toBe(3000);
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
+  });
+
+  test("percent mode attributes only the configured share", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "percent",
+      attributionPctBps: 1000, // 10%
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 5 }],
+      payments: [{ amountMinor: 5000 }],
+      createdByUserId: userId,
+    });
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.attributionAmountMinor).toBe(500);
+  });
+
+  test("tax-inclusive pricing attributes the pre-tax portion", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1110,
+      priceMode: "tax_inclusive",
+      taxRateBps: 1100, // 11% — 1110 gross → 1000 pre-tax
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1 }],
+      payments: [{ amountMinor: 1110 }],
+      createdByUserId: userId,
+    });
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.attributionAmountMinor).toBe(1000);
+  });
+
+  test("a cashier override replaces the computed attribution", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3, attributionAmountOverrideMinor: 1200 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.attributionAmountMinor).toBe(1200);
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(1200);
+  });
+
+  test("a return reverses the attribution proportionally", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      trackingAccountId: accountId,
+      attributionMode: "full",
+      stockQty: 100,
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
+
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+    await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(2000);
+  });
+
+  test("a console sale attributes on close only when fully paid", async () => {
+    const accountId = await seedAccount();
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 2 },
+      createdByUserId: userId,
+    });
+    // Attribution must not fire on item-add.
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+
+    await addCustomerSalePayment({
+      orderId: sale.id,
+      amountMinor: 2000,
+      createdByUserId: userId,
+    });
+    await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(2000);
+  });
+
+  test("a console sale closed on account does not attribute", async () => {
+    const accountId = await seedAccount();
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 2 },
+      createdByUserId: userId,
+    });
+    await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
   });
 });

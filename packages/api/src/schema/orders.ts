@@ -48,6 +48,10 @@ export const typeDefs = /* GraphQL */ `
     snapshotPriceMode: String!
     "qty * price - discount."
     lineTotalMinor: Float!
+    "Tracking account this line attributes revenue to, if any."
+    attributionAccountId: ID
+    "Attributed amount, minor units (pre-tax revenue share)."
+    attributionAmountMinor: Float!
     voidedAt: String
     voidReason: String
   }
@@ -67,6 +71,8 @@ export const typeDefs = /* GraphQL */ `
     discountMinor: Float
     "Allowed only on service products."
     priceOverrideMinor: Float
+    "Overrides the computed tracking attribution; requires order.attribute."
+    attributionAmountOverrideMinor: Float
   }
 
   input PosOrderPaymentInput {
@@ -188,6 +194,9 @@ export const resolvers = {
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "order.create_pos");
+      if (args.items.some((i) => i.attributionAmountOverrideMinor != null)) {
+        await requirePermission(ctx, "order.attribute");
+      }
       try {
         return await orders.createPosOrder({
           posSessionId: args.posSessionId,
@@ -222,6 +231,9 @@ export const resolvers = {
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "order.edit_customer_sale");
+      if (args.item.attributionAmountOverrideMinor != null) {
+        await requirePermission(ctx, "order.attribute");
+      }
       try {
         return await orders.addCustomerSaleItem({
           orderId: args.orderId,
