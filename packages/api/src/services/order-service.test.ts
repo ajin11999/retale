@@ -23,6 +23,7 @@ import {
   closeCustomerSale,
   createCustomerSale,
   createPosOrder,
+  createReturn,
   listOrderItems,
   listOrderPayments,
   OrderError,
@@ -523,5 +524,132 @@ describe("console customer sales", () => {
     expect(moved.customerId).toBe(b.id);
     expect(await balanceOf(a.id)).toBe(0);
     expect(await balanceOf(b.id)).toBe(3000);
+  });
+});
+
+describe("returns", () => {
+  test("a full cash return links the order, reverses stock, refunds cash", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+
+    const ret = await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 3 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+    expect(ret.returnOfOrderId).toBe(order.id);
+    expect(ret.totalMinor).toBe(-3000);
+    expect(await stockOf(variantId)).toBe(100);
+
+    const payments = await listOrderPayments(ret.id);
+    expect(payments[0]!.amountMinor).toBe(-3000);
+  });
+
+  test("partial returns accumulate and over-returning is rejected", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+
+    await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+    await expectError("RETURN_QTY_EXCEEDED", () =>
+      createReturn({
+        originalOrderId: order.id,
+        posSessionId: sessionId,
+        items: [{ orderItemId: itemId, qty: 3 }],
+        refundMethod: "cash",
+        createdByUserId: userId,
+      }),
+    );
+  });
+
+  test("a store-credit return pays down the customer balance", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      customerId: customer.id,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    expect(await balanceOf(customer.id)).toBe(2000);
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+
+    await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "store_credit",
+      createdByUserId: userId,
+    });
+    expect(await balanceOf(customer.id)).toBe(1000);
+  });
+
+  test("store-credit refund on a walk-in order is rejected", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+    await expectError("STORE_CREDIT_NEEDS_CUSTOMER", () =>
+      createReturn({
+        originalOrderId: order.id,
+        posSessionId: sessionId,
+        items: [{ orderItemId: itemId, qty: 1 }],
+        refundMethod: "store_credit",
+        createdByUserId: userId,
+      }),
+    );
+  });
+
+  test("an open console sale cannot be returned", async () => {
+    const sessionId = await seedSession("P1");
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 1 },
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(sale.id))[0]!.id;
+    await expectError("ORDER_NOT_CLOSED", () =>
+      createReturn({
+        originalOrderId: sale.id,
+        posSessionId: sessionId,
+        items: [{ orderItemId: itemId, qty: 1 }],
+        refundMethod: "cash",
+        createdByUserId: userId,
+      }),
+    );
   });
 });

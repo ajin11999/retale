@@ -74,6 +74,15 @@ export const typeDefs = /* GraphQL */ `
     amountMinor: Float!
   }
 
+  enum RefundMethod { cash store_credit }
+
+  input ReturnItemInput {
+    "The original order_item being returned."
+    orderItemId: ID!
+    "Units to return — positive."
+    qty: Int!
+  }
+
   extend type Query {
     order(id: ID!): Order
     orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
@@ -102,6 +111,14 @@ export const typeDefs = /* GraphQL */ `
     cancelCustomerSale(orderId: ID!, reason: String!): Order!
     "Reassign an open Console sale to a different customer (root-only)."
     changeCustomerSaleCustomer(orderId: ID!, newCustomerId: ID!): Order!
+
+    "Create a return order against a closed original. Refund as cash or store credit."
+    createReturn(
+      originalOrderId: ID!
+      posSessionId: ID!
+      items: [ReturnItemInput!]!
+      refundMethod: RefundMethod!
+    ): Order!
   }
 `;
 
@@ -290,6 +307,29 @@ export const resolvers = {
           orderId: args.orderId,
           newCustomerId: args.newCustomerId,
           changedByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    createReturn: async (
+      _: unknown,
+      args: {
+        originalOrderId: string;
+        posSessionId: string;
+        items: orders.ReturnItemInput[];
+        refundMethod: "cash" | "store_credit";
+      },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.refund");
+      try {
+        return await orders.createReturn({
+          originalOrderId: args.originalOrderId,
+          posSessionId: args.posSessionId,
+          items: args.items,
+          refundMethod: args.refundMethod,
+          createdByUserId: viewer.userId,
         });
       } catch (e) {
         asGraphQLError(e);

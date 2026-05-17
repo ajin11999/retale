@@ -82,6 +82,12 @@ export const orderItems = mysqlTable(
       onDelete: "set null",
     }),
     productId: ulidRef().references(() => products.id, { onDelete: "set null" }),
+    // Set on return-order lines: the original line being returned. Enables
+    // per-line over-return checks across multiple partial returns.
+    returnOfOrderItemId: ulidRef().references(
+      (): AnyMySqlColumn => orderItems.id,
+      { onDelete: "set null" },
+    ),
     qty: bigint({ mode: "number" }).notNull(),
     discountMinor: bigint({ mode: "number" }).notNull().default(0),
     // --- Snapshot of the product at sale time (locked field set) ---

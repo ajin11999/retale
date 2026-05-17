@@ -34,7 +34,12 @@ export type OrderErrorCode =
   | "ORDER_CLOSED"
   | "ORDER_CANCELLED"
   | "ITEM_NOT_FOUND"
-  | "ITEM_ALREADY_VOIDED";
+  | "ITEM_ALREADY_VOIDED"
+  | "ORDER_NOT_CLOSED"
+  | "CANNOT_RETURN_RETURN"
+  | "NOTHING_TO_RETURN"
+  | "RETURN_QTY_EXCEEDED"
+  | "STORE_CREDIT_NEEDS_CUSTOMER";
 
 export class OrderError extends Error {
   constructor(
@@ -803,6 +808,188 @@ export async function changeCustomerSaleCustomer(input: {
       })
       .where(eq(orders.id, order.id));
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+// --- Returns ---
+//
+// A return is a new `orders` row linked to the original via `returnOfOrderId`,
+// with negative-qty lines and (for cash refunds) a negative payment. The
+// original sale stays immutable. Multiple partial returns may link to one
+// original; `order_items.returnOfOrderItemId` bounds each line.
+
+export interface ReturnItemInput {
+  /** The original order_item being returned. */
+  orderItemId: string;
+  /** Units to return — positive, in the variant's smallest unit. */
+  qty: number;
+}
+
+/**
+ * Create a return order against a closed original. Each line snapshots the
+ * original line with negative qty (discount is prorated); stock is added back
+ * for physical lines. The refund is either cash (a negative `order_payments`
+ * row) or store credit (a negative `refund_credit` customer_ledger row).
+ */
+export async function createReturn(input: {
+  originalOrderId: string;
+  posSessionId: string;
+  items: ReturnItemInput[];
+  refundMethod: "cash" | "store_credit";
+  createdByUserId: string;
+}): Promise<Order> {
+  if (!input.items.length) throw new OrderError("NOTHING_TO_RETURN");
+
+  return db.transaction(async (tx) => {
+    const session = await tx.query.posSessions.findFirst({
+      where: eq(posSessions.id, input.posSessionId),
+    });
+    if (!session) throw new OrderError("SESSION_NOT_FOUND");
+    if (session.closedAt) throw new OrderError("SESSION_CLOSED");
+    const pos = await tx.query.pointsOfSale.findFirst({
+      where: eq(pointsOfSale.id, session.posId),
+    });
+    if (!pos) throw new OrderError("SESSION_NOT_FOUND");
+
+    const original = await tx.query.orders.findFirst({
+      where: eq(orders.id, input.originalOrderId),
+    });
+    if (!original) throw new OrderError("ORDER_NOT_FOUND");
+    if (!original.closedAt) throw new OrderError("ORDER_NOT_CLOSED");
+    if (original.cancelledAt) throw new OrderError("ORDER_CANCELLED");
+    if (original.returnOfOrderId) throw new OrderError("CANNOT_RETURN_RETURN");
+
+    const customerId = original.customerId;
+    if (input.refundMethod === "store_credit" && !customerId) {
+      throw new OrderError("STORE_CREDIT_NEEDS_CUSTOMER");
+    }
+
+    const returnOrderId = ulid();
+    const rows: (typeof orderItems.$inferInsert)[] = [];
+
+    for (const ret of input.items) {
+      if (!Number.isInteger(ret.qty) || ret.qty <= 0) {
+        throw new OrderError("INVALID_INPUT", "return qty must be a positive integer");
+      }
+      const orig = await tx.query.orderItems.findFirst({
+        where: eq(orderItems.id, ret.orderItemId),
+      });
+      if (!orig || orig.orderId !== original.id) {
+        throw new OrderError("ITEM_NOT_FOUND");
+      }
+      if (orig.voidedAt) {
+        throw new OrderError("INVALID_INPUT", "cannot return a voided line");
+      }
+
+      // Units already returned on prior return orders for this exact line.
+      const priorReturns = await tx
+        .select()
+        .from(orderItems)
+        .where(eq(orderItems.returnOfOrderItemId, orig.id));
+      const returned = priorReturns.reduce((sum, r) => sum - r.qty, 0);
+      if (returned + ret.qty > orig.qty) {
+        throw new OrderError("RETURN_QTY_EXCEEDED");
+      }
+
+      // Prorate the original discount across the units being returned.
+      const proratedDiscount = Math.round(
+        (orig.discountMinor * ret.qty) / orig.qty,
+      );
+      rows.push({
+        id: ulid(),
+        orderId: returnOrderId,
+        variantId: orig.variantId,
+        productId: orig.productId,
+        returnOfOrderItemId: orig.id,
+        qty: -ret.qty,
+        discountMinor: -proratedDiscount,
+        snapshotProductName: orig.snapshotProductName,
+        snapshotProductSku: orig.snapshotProductSku,
+        snapshotProductBarcode: orig.snapshotProductBarcode,
+        snapshotVariantLabel: orig.snapshotVariantLabel,
+        snapshotUnit: orig.snapshotUnit,
+        snapshotCategoryName: orig.snapshotCategoryName,
+        snapshotPriceMinor: orig.snapshotPriceMinor,
+        snapshotCostMinor: orig.snapshotCostMinor,
+        snapshotTaxRateBps: orig.snapshotTaxRateBps,
+        snapshotPriceMode: orig.snapshotPriceMode,
+        snapshotTrackingAccountName: orig.snapshotTrackingAccountName,
+        attributionAccountId: null,
+        attributionAmountMinor: 0,
+      });
+    }
+
+    const returnTotal = rows.reduce(
+      (sum, r) =>
+        sum + (r.qty as number) * (r.snapshotPriceMinor as number) -
+        (r.discountMinor as number),
+      0,
+    );
+    const refundAmount = -returnTotal; // positive
+
+    const now = new Date();
+    await tx.insert(orders).values({
+      id: returnOrderId,
+      displayNumber: await nextDisplayNumber(tx, pos.code),
+      customerId,
+      snapshotCustomerName: original.snapshotCustomerName,
+      posSessionId: input.posSessionId,
+      returnOfOrderId: original.id,
+      totalMinor: returnTotal,
+      closedAt: now,
+      closedByUserId: input.createdByUserId,
+      createdByUserId: input.createdByUserId,
+    });
+    await tx.insert(orderItems).values(rows);
+
+    // Add stock back for physical lines.
+    for (const r of rows) {
+      if (!r.variantId) continue;
+      const product = r.productId
+        ? await tx.query.products.findFirst({ where: eq(products.id, r.productId) })
+        : null;
+      if (product && product.kind !== "physical") continue;
+      await modifyStock(
+        {
+          variantId: r.variantId as string,
+          type: "sale_return",
+          qtyDelta: -(r.qty as number),
+          unitCost: r.snapshotCostMinor as number,
+          refType: "order",
+          refId: returnOrderId,
+          createdByUserId: input.createdByUserId,
+        },
+        tx,
+      );
+    }
+
+    if (input.refundMethod === "cash") {
+      await tx.insert(orderPayments).values({
+        id: ulid(),
+        orderId: returnOrderId,
+        method: "cash",
+        amountMinor: -refundAmount,
+        posSessionId: input.posSessionId,
+        createdByUserId: input.createdByUserId,
+      });
+    } else if (customerId) {
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId,
+        type: "refund_credit",
+        amountMinor: -refundAmount,
+        refType: "order",
+        refId: returnOrderId,
+        posSessionId: input.posSessionId,
+        createdByUserId: input.createdByUserId,
+      });
+      await syncCustomerBalance(tx, customerId);
+    }
+
+    const row = await tx.query.orders.findFirst({
+      where: eq(orders.id, returnOrderId),
+    });
     return row as Order;
   });
 }

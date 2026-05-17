@@ -1,0 +1,2 @@
+ALTER TABLE `order_items` ADD `return_of_order_item_id` varchar(26);--> statement-breakpoint
+ALTER TABLE `order_items` ADD CONSTRAINT `order_items_return_of_order_item_id_order_items_id_fk` FOREIGN KEY (`return_of_order_item_id`) REFERENCES `order_items`(`id`) ON DELETE set null ON UPDATE no action;

@@ -64,6 +64,13 @@
       "when": 1778984038142,
       "tag": "0008_cute_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1778986274530,
+      "tag": "0009_careful_chameleon",
+      "breakpoints": true
     }
   ]
 }
