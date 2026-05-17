@@ -14,3 +14,4 @@ export * from "./customers.ts";
 export * from "./pos.ts";
 export * from "./orders.ts";
 export * from "./tracking.ts";
+export * from "./transfers.ts";
