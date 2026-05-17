@@ -11,7 +11,10 @@
       "PowerShell(bun run *)",
       "PowerShell(Select-String *)",
       "PowerShell(Get-Process *)",
-      "PowerShell(taskkill *)"
+      "PowerShell(taskkill *)",
+      "Bash(bun test *)",
+      "Bash(bun -e ' *)",
+      "Bash(bunx drizzle-kit *)"
     ]
   }
 }
