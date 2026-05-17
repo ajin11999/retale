@@ -8,7 +8,8 @@
       "Bash(git push *)",
       "PowerShell(bun *)",
       "PowerShell(Get-Command *)",
-      "PowerShell(bun run *)"
+      "PowerShell(bun run *)",
+      "PowerShell(Select-String *)"
     ]
   }
 }

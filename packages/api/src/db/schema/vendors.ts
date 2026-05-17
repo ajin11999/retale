@@ -15,6 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
+import { posSessions } from "./pos.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** Ledger event categories. `amount_minor` is positive when we owe more. */
@@ -74,8 +75,8 @@ export const vendors = mysqlTable(
 /**
  * Append-only AP ledger. Invariant: `vendors.balanceMinor` equals the SUM of
  * this table's `amountMinor` for the vendor, maintained in the same
- * transaction as every insert. `posSessionId` carries no FK yet — the POS
- * sessions domain is not built; the constraint is added when it is.
+ * transaction as every insert. `posSessionId` references the cashier shift a
+ * cash event belongs to.
  */
 export const vendorLedger = mysqlTable(
   "vendor_ledger",
@@ -92,8 +93,7 @@ export const vendorLedger = mysqlTable(
     refId: ulidRef(),
     // Required for `adjustment` rows — checked in the service layer.
     note: text(),
-    // FK to pos_sessions is added when that domain is built.
-    posSessionId: ulidRef(),
+    posSessionId: ulidRef().references(() => posSessions.id),
     createdByUserId: ulidRef().references(() => users.id),
     createdAt: timestamp()
       .notNull()

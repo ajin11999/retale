@@ -50,6 +50,13 @@
       "when": 1778982010901,
       "tag": "0006_nervous_newton_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1778983331066,
+      "tag": "0007_smooth_bug",
+      "breakpoints": true
     }
   ]
 }

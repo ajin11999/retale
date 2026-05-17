@@ -16,6 +16,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
+import { posSessions } from "./pos.ts";
 import { productVariants } from "./products.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
@@ -80,8 +81,8 @@ export const customers = mysqlTable(
 /**
  * Append-only AR ledger. Invariant: `customers.balanceMinor` equals the SUM of
  * this table's `amountMinor` for the customer, maintained in the same
- * transaction as every insert. `posSessionId` carries no FK yet — the POS
- * sessions domain is not built; the constraint is added when it is.
+ * transaction as every insert. `posSessionId` references the cashier shift a
+ * cash event belongs to.
  */
 export const customerLedger = mysqlTable(
   "customer_ledger",
@@ -98,8 +99,7 @@ export const customerLedger = mysqlTable(
     refId: ulidRef(),
     // Required for `adjustment` rows — checked in the service layer.
     note: text(),
-    // FK to pos_sessions is added when that domain is built.
-    posSessionId: ulidRef(),
+    posSessionId: ulidRef().references(() => posSessions.id),
     createdByUserId: ulidRef().references(() => users.id),
     createdAt: timestamp()
       .notNull()

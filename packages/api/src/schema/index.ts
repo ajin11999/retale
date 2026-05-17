@@ -4,6 +4,7 @@ import * as authDomain from "./auth.ts";
 import * as customersDomain from "./customers.ts";
 import * as deliveriesDomain from "./deliveries.ts";
 import * as locationsDomain from "./locations.ts";
+import * as posDomain from "./pos.ts";
 import * as productsDomain from "./products.ts";
 import * as purchasesDomain from "./purchases.ts";
 import * as rbacDomain from "./rbac.ts";
@@ -42,6 +43,7 @@ export const schema = createSchema<GraphQLContext>({
     purchasesDomain.typeDefs,
     deliveriesDomain.typeDefs,
     customersDomain.typeDefs,
+    posDomain.typeDefs,
   ],
   resolvers: [
     baseResolvers,
@@ -54,5 +56,6 @@ export const schema = createSchema<GraphQLContext>({
     purchasesDomain.resolvers,
     deliveriesDomain.resolvers,
     customersDomain.resolvers,
+    posDomain.resolvers,
   ],
 });
