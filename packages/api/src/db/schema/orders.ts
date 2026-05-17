@@ -92,7 +92,11 @@ export const orderItems = mysqlTable(
     qty: bigint({ mode: "number" }).notNull(),
     discountMinor: bigint({ mode: "number" }).notNull().default(0),
     // --- Snapshot of the product at sale time (locked field set) ---
+    // Internal name; the source of truth for sales reports.
     snapshotProductName: varchar({ length: 300 }).notNull(),
+    // Public name at sale time, if the product had one — receipts and the
+    // catalog render `snapshotPublicName ?? snapshotProductName`.
+    snapshotPublicName: varchar({ length: 300 }),
     snapshotProductSku: varchar({ length: 64 }).notNull(),
     snapshotProductBarcode: varchar({ length: 64 }),
     snapshotVariantLabel: varchar({ length: 200 }),

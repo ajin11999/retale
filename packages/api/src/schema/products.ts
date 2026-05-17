@@ -48,7 +48,12 @@ export const typeDefs = /* GraphQL */ `
 
   type Product {
     id: ID!
+    "Internal, staff-facing name."
     name: String!
+    "Optional public-facing name; null falls back to name."
+    publicName: String
+    "publicName ?? name — the name to show on receipts and the catalog."
+    publicDisplayName: String!
     description: String
     kind: ProductKind!
     categoryId: ID
@@ -96,6 +101,7 @@ export const typeDefs = /* GraphQL */ `
 
     createProduct(
       name: String!
+      publicName: String
       description: String
       kind: ProductKind
       categoryId: ID
@@ -110,6 +116,7 @@ export const typeDefs = /* GraphQL */ `
     updateProduct(
       id: ID!
       name: String
+      publicName: String
       description: String
       kind: ProductKind
       categoryId: ID
@@ -162,6 +169,8 @@ export const resolvers = {
   Product: {
     createdAt: (p: WithDates) => iso(p.createdAt),
     archivedAt: (p: WithDates) => iso(p.archivedAt),
+    publicDisplayName: (p: { name: string; publicName: string | null }) =>
+      p.publicName ?? p.name,
     variants: async (p: { id: string; variants?: unknown[] }) => {
       if (Array.isArray(p.variants)) return p.variants;
       return db.select().from(productVariants).where(eq(productVariants.productId, p.id));

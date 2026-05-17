@@ -54,7 +54,11 @@ export const products = mysqlTable(
   "products",
   {
     id: ulidPk(),
+    // Internal, staff-facing name — used in admin lists and search.
     name: varchar({ length: 300 }).notNull(),
+    // Optional public-facing name for POS receipts and the online catalog.
+    // Null means public surfaces fall back to `name`.
+    publicName: varchar({ length: 300 }),
     description: text(),
     kind: mysqlEnum(["physical", "service"]).notNull().default("physical"),
     categoryId: ulidRef().references(() => productCategories.id, { onDelete: "set null" }),

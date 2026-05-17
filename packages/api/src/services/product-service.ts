@@ -208,6 +208,7 @@ function buildVariantRow(productId: string, v: VariantInput) {
 
 export async function createProduct(input: {
   name: string;
+  publicName?: string | null;
   description?: string | null;
   kind?: "physical" | "service";
   categoryId?: string | null;
@@ -233,6 +234,7 @@ export async function createProduct(input: {
       await tx.insert(products).values({
         id: productId,
         name: input.name,
+        publicName: input.publicName ?? null,
         description: input.description ?? null,
         kind: input.kind ?? "physical",
         categoryId: input.categoryId ?? null,
@@ -258,6 +260,7 @@ export async function updateProduct(
   id: string,
   patch: {
     name?: string;
+    publicName?: string | null;
     description?: string | null;
     kind?: "physical" | "service";
     categoryId?: string | null;
@@ -278,6 +281,7 @@ export async function updateProduct(
     .update(products)
     .set({
       ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.publicName !== undefined && { publicName: patch.publicName }),
       ...(patch.description !== undefined && { description: patch.description }),
       ...(patch.kind !== undefined && { kind: patch.kind }),
       ...(patch.categoryId !== undefined && { categoryId: patch.categoryId }),

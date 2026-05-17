@@ -119,6 +119,7 @@ async function seedVariant(opts?: {
   trackingAccountId?: string;
   attributionMode?: "full" | "percent";
   attributionPctBps?: number;
+  publicName?: string;
 }): Promise<string> {
   const kind = opts?.kind ?? "physical";
   const productId = ulid();
@@ -126,6 +127,7 @@ async function seedVariant(opts?: {
   await db.insert(products).values({
     id: productId,
     name: "Widget",
+    publicName: opts?.publicName ?? null,
     kind,
     priceMode: opts?.priceMode ?? "tax_exclusive",
     taxRateBps: opts?.taxRateBps ?? 1100,
@@ -892,5 +894,62 @@ describe("tracking attribution", () => {
     });
     await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
     expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+  });
+});
+
+describe("dual product naming", () => {
+  test("an order line snapshots both the internal and public names", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      publicName: "Premium Widget",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    const item = (await listOrderItems(order.id))[0]!;
+    expect(item.snapshotProductName).toBe("Widget");
+    expect(item.snapshotPublicName).toBe("Premium Widget");
+  });
+
+  test("a product with no public name snapshots null", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    const item = (await listOrderItems(order.id))[0]!;
+    expect(item.snapshotPublicName).toBeNull();
+  });
+
+  test("a return order carries the public name snapshot forward", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      stockQty: 100,
+      publicName: "Premium Widget",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 2 }],
+      payments: [{ amountMinor: 2000 }],
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+    const ret = await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+    const retItem = (await listOrderItems(ret.id))[0]!;
+    expect(retItem.snapshotPublicName).toBe("Premium Widget");
   });
 });

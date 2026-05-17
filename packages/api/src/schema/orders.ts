@@ -37,6 +37,10 @@ export const typeDefs = /* GraphQL */ `
     qty: Float!
     discountMinor: Float!
     snapshotProductName: String!
+    "Public name at sale time, if any."
+    snapshotPublicName: String
+    "snapshotPublicName ?? snapshotProductName — the name for a receipt."
+    displayName: String!
     snapshotProductSku: String!
     snapshotProductBarcode: String
     snapshotVariantLabel: String
@@ -154,6 +158,7 @@ export const resolvers = {
   OrderItem: {
     lineTotalMinor: (i: ItemRow) =>
       i.qty * i.snapshotPriceMinor - i.discountMinor,
+    displayName: (i: ItemRow) => i.snapshotPublicName ?? i.snapshotProductName,
     voidedAt: (i: { voidedAt: Date | string | null }) => iso(i.voidedAt),
   },
   OrderPayment: {
