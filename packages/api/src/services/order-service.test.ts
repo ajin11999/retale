@@ -359,6 +359,11 @@ describe("session guard", () => {
   });
 });
 
+/** Normalize a z_report_json value (MariaDB returns JSON columns as text). */
+function parseZ(v: unknown): Record<string, number> {
+  return typeof v === "string" ? JSON.parse(v) : (v as Record<string, number>);
+}
+
 /** Current cached balance for a customer. */
 async function balanceOf(customerId: string): Promise<number> {
   const row = await db.query.customers.findFirst({
@@ -626,6 +631,57 @@ describe("returns", () => {
         createdByUserId: userId,
       }),
     );
+  });
+
+  test("z-report folds order cash sales into the variance", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    // Drawer opened at 0; one 3000 cash sale → expected 3000.
+    const closed = await closeSession({
+      sessionId,
+      closingCashMinor: 3000,
+      closedByUserId: userId,
+    });
+    expect(closed.varianceMinor).toBe(0);
+    const z = parseZ(closed.zReportJson);
+    expect(z.cashSalesMinor).toBe(3000);
+    expect(z.expectedCashMinor).toBe(3000);
+    expect(z.orderCount).toBe(1);
+  });
+
+  test("z-report nets a cash refund against cash sales", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(order.id))[0]!.id;
+    await createReturn({
+      originalOrderId: order.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+    // 3000 in, 1000 refunded out → 2000 net expected.
+    const closed = await closeSession({
+      sessionId,
+      closingCashMinor: 2000,
+      closedByUserId: userId,
+    });
+    expect(closed.varianceMinor).toBe(0);
+    const z = parseZ(closed.zReportJson);
+    expect(z.cashSalesMinor).toBe(2000);
+    expect(z.returnCount).toBe(1);
   });
 
   test("an open console sale cannot be returned", async () => {

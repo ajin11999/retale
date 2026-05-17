@@ -6,6 +6,7 @@
 
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
+import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
 import { pointsOfSale, posSessions } from "../db/schema/pos.ts";
 import { db } from "../lib/db.ts";
 
@@ -33,6 +34,9 @@ export class PosError extends Error {
 
 type Pos = typeof pointsOfSale.$inferSelect;
 type Session = typeof posSessions.$inferSelect;
+
+/** A drizzle transaction handle; structurally a subset of `db`. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Reopen is allowed only within this window after close. */
 const REOPEN_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -217,95 +221,169 @@ export async function openSession(input: {
   return loadSession(id);
 }
 
+/** Totals snapshotted in a Z-report and used for the variance calc. */
+interface SessionTotals {
+  /** Net cash through orders this session: sales positive, refunds negative. */
+  cashSalesMinor: number;
+  /** Sale orders attributed to the session (excludes returns and cancelled). */
+  orderCount: number;
+  /** Return orders attributed to the session. */
+  returnCount: number;
+  /** Voided lines across the session's orders. */
+  voidedItemCount: number;
+}
+
 /**
- * Expected drawer cash at close: opening float plus net cash movement during
- * the shift. Cash payment/refund sums fold in once the orders domain exists;
- * for now the expected total is simply the opening float.
+ * Tally the session's cash and order activity. `cashSalesMinor` is the SUM of
+ * `order_payments.amount_minor` for the session — cash refunds are negative
+ * rows, so the single SUM is already net of refunds. Standalone debt and
+ * vendor cash payments are not folded in (design-decisions.md §"POS sessions"
+ * states the variance formula over order cash only).
  */
-function expectedCashMinor(session: Session): number {
-  // TODO(orders): + SUM(order_payments cash) − SUM(cash refunds) for this session.
-  return session.openingCashMinor;
+async function sessionTotals(tx: Tx, sessionId: string): Promise<SessionTotals> {
+  const payRows = await tx
+    .select({ amt: orderPayments.amountMinor })
+    .from(orderPayments)
+    .where(eq(orderPayments.posSessionId, sessionId));
+  const cashSalesMinor = payRows.reduce((sum, r) => sum + r.amt, 0);
+
+  const orderRows = await tx
+    .select({
+      id: orders.id,
+      returnOf: orders.returnOfOrderId,
+      cancelledAt: orders.cancelledAt,
+    })
+    .from(orders)
+    .where(eq(orders.posSessionId, sessionId));
+  const orderCount = orderRows.filter(
+    (o) => !o.returnOf && !o.cancelledAt,
+  ).length;
+  const returnCount = orderRows.filter((o) => o.returnOf).length;
+
+  let voidedItemCount = 0;
+  for (const o of orderRows) {
+    const rows = await tx
+      .select({ voidedAt: orderItems.voidedAt })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, o.id));
+    voidedItemCount += rows.filter((r) => r.voidedAt != null).length;
+  }
+
+  return { cashSalesMinor, orderCount, returnCount, voidedItemCount };
 }
 
 /** Denormalized close-time snapshot stored in `z_report_json`. */
 function buildZReport(
   session: Session,
+  totals: SessionTotals,
+  expectedCashMinor: number,
   closingCashMinor: number | null,
   varianceMinor: number | null,
   closedAt: Date,
 ): Record<string, unknown> {
   return {
     openingCashMinor: session.openingCashMinor,
-    expectedCashMinor: expectedCashMinor(session),
+    cashSalesMinor: totals.cashSalesMinor,
+    expectedCashMinor,
     closingCashMinor,
     varianceMinor,
     forceClosed: closingCashMinor === null,
+    orderCount: totals.orderCount,
+    returnCount: totals.returnCount,
+    voidedItemCount: totals.voidedItemCount,
     closedAt: closedAt.toISOString(),
-    // TODO(orders): totals by payment method, order count, void count.
-    note: "order and payment totals pending the orders domain",
   };
 }
 
 /**
- * Close a session. Computes `variance = closing − expected` and snapshots a
- * Z-report. A non-zero variance is recorded, never blocked. Ownership /
- * permission (own vs others) is enforced by the caller.
+ * Close a session. Computes `variance = closing − (opening + net cash sales)`
+ * and snapshots a Z-report. A non-zero variance is recorded, never blocked.
+ * Ownership / permission (own vs others) is enforced by the caller.
  */
 export async function closeSession(input: {
   sessionId: string;
   closingCashMinor: number;
   closedByUserId: string;
 }): Promise<Session> {
-  if (
-    !Number.isInteger(input.closingCashMinor) ||
-    input.closingCashMinor < 0
-  ) {
+  if (!Number.isInteger(input.closingCashMinor) || input.closingCashMinor < 0) {
     throw new PosError("INVALID_INPUT", "closing cash must be a non-negative integer");
   }
-  const session = await loadSession(input.sessionId);
-  if (session.closedAt) throw new PosError("SESSION_CLOSED");
+  return db.transaction(async (tx) => {
+    const session = await tx.query.posSessions.findFirst({
+      where: eq(posSessions.id, input.sessionId),
+    });
+    if (!session) throw new PosError("SESSION_NOT_FOUND");
+    if (session.closedAt) throw new PosError("SESSION_CLOSED");
 
-  const closedAt = new Date();
-  const variance = input.closingCashMinor - expectedCashMinor(session);
-  await db
-    .update(posSessions)
-    .set({
-      closedByUserId: input.closedByUserId,
-      closedAt,
-      closingCashMinor: input.closingCashMinor,
-      varianceMinor: variance,
-      forceClosed: false,
-      zReportJson: buildZReport(session, input.closingCashMinor, variance, closedAt),
-    })
-    .where(eq(posSessions.id, input.sessionId));
-  return loadSession(input.sessionId);
+    const closedAt = new Date();
+    const totals = await sessionTotals(tx, session.id);
+    const expected = session.openingCashMinor + totals.cashSalesMinor;
+    const variance = input.closingCashMinor - expected;
+
+    await tx
+      .update(posSessions)
+      .set({
+        closedByUserId: input.closedByUserId,
+        closedAt,
+        closingCashMinor: input.closingCashMinor,
+        varianceMinor: variance,
+        forceClosed: false,
+        zReportJson: buildZReport(
+          session,
+          totals,
+          expected,
+          input.closingCashMinor,
+          variance,
+          closedAt,
+        ),
+      })
+      .where(eq(posSessions.id, session.id));
+
+    const row = await tx.query.posSessions.findFirst({
+      where: eq(posSessions.id, session.id),
+    });
+    return row as Session;
+  });
 }
 
 /**
  * Force-close a stranded session (power-out, crash). Leaves
  * `closingCashMinor`/`varianceMinor` null so reports flag it as
- * unreconciled. Root-only — enforced by the caller.
+ * unreconciled, but still snapshots the session's activity totals.
+ * Root-only — enforced by the caller.
  */
 export async function forceCloseSession(input: {
   sessionId: string;
   closedByUserId: string;
 }): Promise<Session> {
-  const session = await loadSession(input.sessionId);
-  if (session.closedAt) throw new PosError("SESSION_CLOSED");
+  return db.transaction(async (tx) => {
+    const session = await tx.query.posSessions.findFirst({
+      where: eq(posSessions.id, input.sessionId),
+    });
+    if (!session) throw new PosError("SESSION_NOT_FOUND");
+    if (session.closedAt) throw new PosError("SESSION_CLOSED");
 
-  const closedAt = new Date();
-  await db
-    .update(posSessions)
-    .set({
-      closedByUserId: input.closedByUserId,
-      closedAt,
-      closingCashMinor: null,
-      varianceMinor: null,
-      forceClosed: true,
-      zReportJson: buildZReport(session, null, null, closedAt),
-    })
-    .where(eq(posSessions.id, input.sessionId));
-  return loadSession(input.sessionId);
+    const closedAt = new Date();
+    const totals = await sessionTotals(tx, session.id);
+    const expected = session.openingCashMinor + totals.cashSalesMinor;
+
+    await tx
+      .update(posSessions)
+      .set({
+        closedByUserId: input.closedByUserId,
+        closedAt,
+        closingCashMinor: null,
+        varianceMinor: null,
+        forceClosed: true,
+        zReportJson: buildZReport(session, totals, expected, null, null, closedAt),
+      })
+      .where(eq(posSessions.id, session.id));
+
+    const row = await tx.query.posSessions.findFirst({
+      where: eq(posSessions.id, session.id),
+    });
+    return row as Session;
+  });
 }
 
 /**

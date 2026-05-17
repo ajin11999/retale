@@ -98,8 +98,13 @@ export const resolvers = {
     closedAt: (s: { closedAt: Date | string | null }) => iso(s.closedAt),
     createdAt: (s: { createdAt: Date | string }) => iso(s.createdAt),
     updatedAt: (s: { updatedAt: Date | string }) => iso(s.updatedAt),
-    zReportJson: (s: { zReportJson: unknown }) =>
-      s.zReportJson == null ? null : JSON.stringify(s.zReportJson),
+    zReportJson: (s: { zReportJson: unknown }) => {
+      // MariaDB returns JSON columns as text; pass a string straight through,
+      // stringify an object.
+      const v = s.zReportJson;
+      if (v == null) return null;
+      return typeof v === "string" ? v : JSON.stringify(v);
+    },
   },
 
   Query: {
