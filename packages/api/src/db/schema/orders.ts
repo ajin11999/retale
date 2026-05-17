@@ -22,6 +22,7 @@ import { users } from "./auth.ts";
 import { customers } from "./customers.ts";
 import { posSessions } from "./pos.ts";
 import { products, productVariants } from "./products.ts";
+import { trackingAccounts } from "./tracking.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** Payment methods. Cash-only for v1; the enum is extensible. */
@@ -105,8 +106,9 @@ export const orderItems = mysqlTable(
     snapshotPriceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
     // Survives a hard-delete of the tracking account. Tracking domain pending.
     snapshotTrackingAccountName: varchar({ length: 200 }),
-    // FK to tracking_accounts is added when that domain is built.
-    attributionAccountId: ulidRef(),
+    attributionAccountId: ulidRef().references(() => trackingAccounts.id, {
+      onDelete: "set null",
+    }),
     attributionAmountMinor: bigint({ mode: "number" }).notNull().default(0),
     voidedAt: timestamp(),
     voidedByUserId: ulidRef().references(() => users.id),

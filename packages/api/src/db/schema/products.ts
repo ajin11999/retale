@@ -20,6 +20,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
+import { trackingAccounts } from "./tracking.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /**
@@ -98,8 +99,9 @@ export const productVariants = mysqlTable(
     costMinor: bigint({ mode: "number" }).notNull().default(0),
     totalQty: bigint({ mode: "number" }).notNull().default(0),
     sortOrder: int().notNull().default(0),
-    // FK to tracking_accounts is added when that domain is built.
-    trackingAccountId: ulidRef(),
+    trackingAccountId: ulidRef().references(() => trackingAccounts.id, {
+      onDelete: "set null",
+    }),
     trackingAttributionMode: mysqlEnum(["full", "percent"]).notNull().default("full"),
     trackingAttributionPctBps: int(),
     ...timestamps,

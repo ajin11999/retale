@@ -71,6 +71,13 @@
       "when": 1778986274530,
       "tag": "0009_careful_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1778988699076,
+      "tag": "0010_first_wallop",
+      "breakpoints": true
     }
   ]
 }
