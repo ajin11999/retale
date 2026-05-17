@@ -16,11 +16,18 @@ import { stockLocations } from "../db/schema/stock.ts";
 import { db } from "../lib/db.ts";
 import { createCustomer, setCustomerCreditLimit, setCustomerPrice } from "./customer-service.ts";
 import {
+  addCustomerSaleItem,
+  addCustomerSalePayment,
+  cancelCustomerSale,
+  changeCustomerSaleCustomer,
+  closeCustomerSale,
+  createCustomerSale,
   createPosOrder,
   listOrderItems,
   listOrderPayments,
   OrderError,
   type OrderErrorCode,
+  voidCustomerSaleItem,
 } from "./order-service.ts";
 import { closeSession, createPointOfSale, openSession } from "./pos-service.ts";
 
@@ -348,5 +355,173 @@ describe("session guard", () => {
         createdByUserId: userId,
       }),
     );
+  });
+});
+
+/** Current cached balance for a customer. */
+async function balanceOf(customerId: string): Promise<number> {
+  const row = await db.query.customers.findFirst({
+    where: eq(customers.id, customerId),
+  });
+  return row!.balanceMinor;
+}
+
+describe("console customer sales", () => {
+  test("createCustomerSale opens an empty order", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const order = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    expect(order.closedAt).toBeNull();
+    expect(order.displayNumber).toBeNull();
+    expect(order.totalMinor).toBe(0);
+  });
+
+  test("adding an item grows the total, the balance, and decrements stock", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    const updated = await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 3 },
+      createdByUserId: userId,
+    });
+    expect(updated.totalMinor).toBe(3000);
+    expect(await balanceOf(customer.id)).toBe(3000);
+    expect(await stockOf(variantId)).toBe(97);
+  });
+
+  test("voiding an item reverses the total, balance, and stock", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 3 },
+      createdByUserId: userId,
+    });
+    const itemId = (await listOrderItems(sale.id))[0]!.id;
+    const after = await voidCustomerSaleItem({
+      orderItemId: itemId,
+      reason: "wrong item",
+      voidedByUserId: userId,
+    });
+    expect(after.totalMinor).toBe(0);
+    expect(await balanceOf(customer.id)).toBe(0);
+    expect(await stockOf(variantId)).toBe(100);
+  });
+
+  test("a payment reduces the customer balance", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 5 },
+      createdByUserId: userId,
+    });
+    await addCustomerSalePayment({
+      orderId: sale.id,
+      amountMinor: 2000,
+      createdByUserId: userId,
+    });
+    expect(await balanceOf(customer.id)).toBe(3000);
+  });
+
+  test("closing assigns a C-prefixed display number and locks the order", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 1 },
+      createdByUserId: userId,
+    });
+    const closed = await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+    expect(closed.closedAt).not.toBeNull();
+    expect(closed.displayNumber!.startsWith("C-")).toBe(true);
+
+    await expectError("ORDER_CLOSED", () =>
+      addCustomerSaleItem({
+        orderId: sale.id,
+        item: { variantId, qty: 1 },
+        createdByUserId: userId,
+      }),
+    );
+  });
+
+  test("an item add breaching the credit limit is rejected", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    await setCustomerCreditLimit(customer.id, 1000);
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await expectError("CREDIT_LIMIT_EXCEEDED", () =>
+      addCustomerSaleItem({
+        orderId: sale.id,
+        item: { variantId, qty: 3 },
+        createdByUserId: userId,
+      }),
+    );
+  });
+
+  test("cancelling voids every line and zeroes the balance", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 4 },
+      createdByUserId: userId,
+    });
+    const cancelled = await cancelCustomerSale({
+      orderId: sale.id,
+      reason: "customer left",
+      cancelledByUserId: userId,
+    });
+    expect(cancelled.cancelledAt).not.toBeNull();
+    expect(cancelled.totalMinor).toBe(0);
+    expect(await balanceOf(customer.id)).toBe(0);
+    expect(await stockOf(variantId)).toBe(100);
+  });
+
+  test("changing the customer moves the open sale's debt", async () => {
+    const a = await createCustomer({ name: "Customer A", createdByUserId: userId });
+    const b = await createCustomer({ name: "Customer B", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({ customerId: a.id, createdByUserId: userId });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 3 },
+      createdByUserId: userId,
+    });
+    expect(await balanceOf(a.id)).toBe(3000);
+
+    const moved = await changeCustomerSaleCustomer({
+      orderId: sale.id,
+      newCustomerId: b.id,
+      changedByUserId: userId,
+    });
+    expect(moved.customerId).toBe(b.id);
+    expect(await balanceOf(a.id)).toBe(0);
+    expect(await balanceOf(b.id)).toBe(3000);
   });
 });

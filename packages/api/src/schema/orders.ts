@@ -87,6 +87,21 @@ export const typeDefs = /* GraphQL */ `
       items: [PosOrderItemInput!]!
       payments: [PosOrderPaymentInput!]!
     ): Order!
+
+    "Open an empty Console customer sale (stateful, root-only)."
+    createCustomerSale(customerId: ID!): Order!
+    "Add a line to an open Console sale."
+    addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
+    "Void a line on an open Console sale — returns stock, reverses the ledger."
+    voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
+    "Record a payment against an open Console sale."
+    addCustomerSalePayment(orderId: ID!, amountMinor: Float!, posSessionId: ID): Order!
+    "Close a Console sale — assigns its display number; immutable after."
+    closeCustomerSale(orderId: ID!): Order!
+    "Cancel an open Console sale — voids every line. reason is required."
+    cancelCustomerSale(orderId: ID!, reason: String!): Order!
+    "Reassign an open Console sale to a different customer (root-only)."
+    changeCustomerSaleCustomer(orderId: ID!, newCustomerId: ID!): Order!
   }
 `;
 
@@ -163,6 +178,118 @@ export const resolvers = {
           items: args.items,
           payments: args.payments,
           createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+
+    createCustomerSale: async (
+      _: unknown,
+      args: { customerId: string },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.create_customer_sale");
+      try {
+        return await orders.createCustomerSale({
+          customerId: args.customerId,
+          createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    addCustomerSaleItem: async (
+      _: unknown,
+      args: { orderId: string; item: orders.PosOrderItemInput },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.edit_customer_sale");
+      try {
+        return await orders.addCustomerSaleItem({
+          orderId: args.orderId,
+          item: args.item,
+          createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    voidCustomerSaleItem: async (
+      _: unknown,
+      args: { orderItemId: string; reason: string },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.void_item");
+      try {
+        return await orders.voidCustomerSaleItem({
+          orderItemId: args.orderItemId,
+          reason: args.reason,
+          voidedByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    addCustomerSalePayment: async (
+      _: unknown,
+      args: { orderId: string; amountMinor: number; posSessionId?: string | null },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.edit_customer_sale");
+      try {
+        return await orders.addCustomerSalePayment({
+          orderId: args.orderId,
+          amountMinor: args.amountMinor,
+          posSessionId: args.posSessionId ?? null,
+          createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    closeCustomerSale: async (
+      _: unknown,
+      args: { orderId: string },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.close_customer_sale");
+      try {
+        return await orders.closeCustomerSale({
+          orderId: args.orderId,
+          closedByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    cancelCustomerSale: async (
+      _: unknown,
+      args: { orderId: string; reason: string },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.cancel_customer_sale");
+      try {
+        return await orders.cancelCustomerSale({
+          orderId: args.orderId,
+          reason: args.reason,
+          cancelledByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    changeCustomerSaleCustomer: async (
+      _: unknown,
+      args: { orderId: string; newCustomerId: string },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.change_customer");
+      try {
+        return await orders.changeCustomerSaleCustomer({
+          orderId: args.orderId,
+          newCustomerId: args.newCustomerId,
+          changedByUserId: viewer.userId,
         });
       } catch (e) {
         asGraphQLError(e);

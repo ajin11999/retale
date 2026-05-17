@@ -5,7 +5,7 @@
 // See docs/design-decisions.md → "Order lifecycle" and "Payments & customer
 // debt".
 
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { customerLedger, customerPrices, customers } from "../db/schema/customers.ts";
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
@@ -30,7 +30,11 @@ export type OrderErrorCode =
   | "PRICE_OVERRIDE_NOT_ALLOWED"
   | "WALKIN_NOT_FULLY_PAID"
   | "OVERPAID"
-  | "CREDIT_LIMIT_EXCEEDED";
+  | "CREDIT_LIMIT_EXCEEDED"
+  | "ORDER_CLOSED"
+  | "ORDER_CANCELLED"
+  | "ITEM_NOT_FOUND"
+  | "ITEM_ALREADY_VOIDED";
 
 export class OrderError extends Error {
   constructor(
@@ -102,6 +106,38 @@ export function listOrderPayments(orderId: string): Promise<OrderPayment[]> {
 export function orderStatus(o: Order): "open" | "closed" | "cancelled" {
   if (o.cancelledAt) return "cancelled";
   return o.closedAt ? "closed" : "open";
+}
+
+/** Recompute a customer's cached `balanceMinor` from the ledger SUM. */
+async function syncCustomerBalance(tx: Tx, customerId: string): Promise<void> {
+  const sums = await tx
+    .select({
+      total: sql<number>`COALESCE(SUM(${customerLedger.amountMinor}), 0)`,
+    })
+    .from(customerLedger)
+    .where(eq(customerLedger.customerId, customerId));
+  await tx
+    .update(customers)
+    .set({ balanceMinor: Number(sums[0]?.total ?? 0) })
+    .where(eq(customers.id, customerId));
+}
+
+/** A non-voided line's total: qty * price - discount. */
+function lineTotalOf(i: OrderItem): number {
+  return i.qty * i.snapshotPriceMinor - i.discountMinor;
+}
+
+/** Recompute and store `orders.totalMinor` from the order's live (non-voided) lines. */
+async function recomputeOrderTotal(tx: Tx, orderId: string): Promise<number> {
+  const items = await tx
+    .select()
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+  const total = items
+    .filter((i) => !i.voidedAt)
+    .reduce((sum, i) => sum + lineTotalOf(i), 0);
+  await tx.update(orders).set({ totalMinor: total }).where(eq(orders.id, orderId));
+  return total;
 }
 
 // --- POS order creation ---
@@ -368,19 +404,405 @@ export async function createPosOrder(input: {
         posSessionId: input.posSessionId,
         createdByUserId: input.createdByUserId,
       });
-      const sums = await tx
-        .select({
-          total: sql<number>`COALESCE(SUM(${customerLedger.amountMinor}), 0)`,
-        })
-        .from(customerLedger)
-        .where(eq(customerLedger.customerId, customer.id));
-      await tx
-        .update(customers)
-        .set({ balanceMinor: Number(sums[0]?.total ?? 0) })
-        .where(eq(customers.id, customer.id));
+      await syncCustomerBalance(tx, customer.id);
     }
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, orderId) });
+    return row as Order;
+  });
+}
+
+// --- Console customer sales (stateful open orders) ---
+//
+// Unlike POS orders, a Console sale is built up incrementally: each item add
+// posts a `sale_on_account` customer_ledger row and each payment posts a
+// `payment` row, so `customers.balanceMinor` always reflects the open sale.
+// Voiding a line reverses both its stock movement and its ledger row.
+
+/** Load an order that must still be open (not closed, not cancelled). */
+async function loadOpenOrder(tx: Tx, id: string): Promise<Order> {
+  const order = await tx.query.orders.findFirst({ where: eq(orders.id, id) });
+  if (!order) throw new OrderError("ORDER_NOT_FOUND");
+  if (order.cancelledAt) throw new OrderError("ORDER_CANCELLED");
+  if (order.closedAt) throw new OrderError("ORDER_CLOSED");
+  return order;
+}
+
+/** Open an empty Console customer sale for a customer. */
+export async function createCustomerSale(input: {
+  customerId: string;
+  createdByUserId: string;
+}): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const customer = await tx.query.customers.findFirst({
+      where: eq(customers.id, input.customerId),
+    });
+    if (!customer) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    const orderId = ulid();
+    await tx.insert(orders).values({
+      id: orderId,
+      customerId: customer.id,
+      snapshotCustomerName: customer.name,
+      totalMinor: 0,
+      createdByUserId: input.createdByUserId,
+    });
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, orderId) });
+    return row as Order;
+  });
+}
+
+/**
+ * Add a line to an open Console sale. Decrements stock (physical lines) and
+ * posts a `sale_on_account` ledger row for the line total, rejecting it if
+ * that would breach the customer's credit limit.
+ */
+export async function addCustomerSaleItem(input: {
+  orderId: string;
+  item: PosOrderItemInput;
+  createdByUserId: string;
+}): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    const customerId = order.customerId;
+    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
+    const customer = await tx.query.customers.findFirst({
+      where: eq(customers.id, customerId),
+    });
+    if (!customer) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    const line = await buildLine(tx, order.id, input.item, customerId);
+
+    if (
+      customer.creditLimitMinor != null &&
+      customer.balanceMinor + line.lineTotal > customer.creditLimitMinor
+    ) {
+      throw new OrderError("CREDIT_LIMIT_EXCEEDED");
+    }
+
+    await tx.insert(orderItems).values(line.row);
+
+    if (line.isPhysical) {
+      await modifyStock(
+        {
+          variantId: line.row.variantId as string,
+          type: "sale",
+          qtyDelta: -(line.row.qty as number),
+          refType: "order",
+          refId: order.id,
+          createdByUserId: input.createdByUserId,
+        },
+        tx,
+      );
+    }
+
+    await tx.insert(customerLedger).values({
+      id: ulid(),
+      customerId,
+      type: "sale_on_account",
+      amountMinor: line.lineTotal,
+      refType: "order_item",
+      refId: line.row.id as string,
+      createdByUserId: input.createdByUserId,
+    });
+    await syncCustomerBalance(tx, customerId);
+    await recomputeOrderTotal(tx, order.id);
+
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+/**
+ * Void a line on an open Console sale. Marks the row voided (kept for audit),
+ * returns its stock, and posts a reversing `sale_on_account` ledger row.
+ */
+export async function voidCustomerSaleItem(input: {
+  orderItemId: string;
+  reason: string;
+  voidedByUserId: string;
+}): Promise<Order> {
+  if (!input.reason.trim()) {
+    throw new OrderError("INVALID_INPUT", "void reason is required");
+  }
+  return db.transaction(async (tx) => {
+    const item = await tx.query.orderItems.findFirst({
+      where: eq(orderItems.id, input.orderItemId),
+    });
+    if (!item) throw new OrderError("ITEM_NOT_FOUND");
+    if (item.voidedAt) throw new OrderError("ITEM_ALREADY_VOIDED");
+
+    const order = await loadOpenOrder(tx, item.orderId);
+    const customerId = order.customerId;
+    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    await tx
+      .update(orderItems)
+      .set({
+        voidedAt: new Date(),
+        voidedByUserId: input.voidedByUserId,
+        voidReason: input.reason.trim(),
+      })
+      .where(eq(orderItems.id, item.id));
+
+    // Return stock for physical lines (services never moved the ledger).
+    const product = item.productId
+      ? await tx.query.products.findFirst({ where: eq(products.id, item.productId) })
+      : null;
+    if (product && product.kind === "physical" && item.variantId) {
+      await modifyStock(
+        {
+          variantId: item.variantId,
+          type: "sale_return",
+          qtyDelta: item.qty,
+          refType: "order",
+          refId: order.id,
+          reason: `void: ${input.reason.trim()}`,
+          createdByUserId: input.voidedByUserId,
+        },
+        tx,
+      );
+    }
+
+    await tx.insert(customerLedger).values({
+      id: ulid(),
+      customerId,
+      type: "sale_on_account",
+      amountMinor: -lineTotalOf(item),
+      refType: "order_item",
+      refId: item.id,
+      note: `void: ${input.reason.trim()}`,
+      createdByUserId: input.voidedByUserId,
+    });
+    await syncCustomerBalance(tx, customerId);
+    await recomputeOrderTotal(tx, order.id);
+
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+/**
+ * Record a payment against an open Console sale. Writes the `order_payments`
+ * row and a `payment` customer_ledger row that reduces the balance.
+ */
+export async function addCustomerSalePayment(input: {
+  orderId: string;
+  amountMinor: number;
+  posSessionId?: string | null;
+  createdByUserId: string;
+}): Promise<Order> {
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new OrderError("INVALID_INPUT", "payment amount must be a positive integer");
+  }
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    const customerId = order.customerId;
+    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    const paymentId = ulid();
+    await tx.insert(orderPayments).values({
+      id: paymentId,
+      orderId: order.id,
+      method: "cash",
+      amountMinor: input.amountMinor,
+      posSessionId: input.posSessionId ?? null,
+      createdByUserId: input.createdByUserId,
+    });
+    await tx.insert(customerLedger).values({
+      id: ulid(),
+      customerId,
+      type: "payment",
+      amountMinor: -input.amountMinor,
+      refType: "payment",
+      refId: paymentId,
+      posSessionId: input.posSessionId ?? null,
+      createdByUserId: input.createdByUserId,
+    });
+    await syncCustomerBalance(tx, customerId);
+
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+/** Close a Console sale: assigns a `C-<date>-<seq>` display number; immutable after. */
+export async function closeCustomerSale(input: {
+  orderId: string;
+  closedByUserId: string;
+}): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    await recomputeOrderTotal(tx, order.id);
+    await tx
+      .update(orders)
+      .set({
+        closedAt: new Date(),
+        closedByUserId: input.closedByUserId,
+        displayNumber: await nextDisplayNumber(tx, "C"),
+      })
+      .where(eq(orders.id, order.id));
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+/**
+ * Cancel an open Console sale: voids every live line (returning stock and
+ * reversing ledger rows) and stamps `cancelled_at`. Distinct from closing
+ * empty — intent matters for reports. `reason` is required.
+ */
+export async function cancelCustomerSale(input: {
+  orderId: string;
+  reason: string;
+  cancelledByUserId: string;
+}): Promise<Order> {
+  if (!input.reason.trim()) {
+    throw new OrderError("INVALID_INPUT", "cancellation reason is required");
+  }
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    const customerId = order.customerId;
+
+    const items = await tx
+      .select()
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
+    for (const item of items) {
+      if (item.voidedAt) continue;
+      await tx
+        .update(orderItems)
+        .set({
+          voidedAt: new Date(),
+          voidedByUserId: input.cancelledByUserId,
+          voidReason: `cancelled: ${input.reason.trim()}`,
+        })
+        .where(eq(orderItems.id, item.id));
+
+      const product = item.productId
+        ? await tx.query.products.findFirst({ where: eq(products.id, item.productId) })
+        : null;
+      if (product && product.kind === "physical" && item.variantId) {
+        await modifyStock(
+          {
+            variantId: item.variantId,
+            type: "sale_return",
+            qtyDelta: item.qty,
+            refType: "order",
+            refId: order.id,
+            reason: `cancelled: ${input.reason.trim()}`,
+            createdByUserId: input.cancelledByUserId,
+          },
+          tx,
+        );
+      }
+      if (customerId) {
+        await tx.insert(customerLedger).values({
+          id: ulid(),
+          customerId,
+          type: "sale_on_account",
+          amountMinor: -lineTotalOf(item),
+          refType: "order_item",
+          refId: item.id,
+          note: `cancelled: ${input.reason.trim()}`,
+          createdByUserId: input.cancelledByUserId,
+        });
+      }
+    }
+    if (customerId) await syncCustomerBalance(tx, customerId);
+
+    await tx
+      .update(orders)
+      .set({
+        cancelledAt: new Date(),
+        cancelledByUserId: input.cancelledByUserId,
+        cancellationReason: input.reason.trim(),
+        totalMinor: 0,
+      })
+      .where(eq(orders.id, order.id));
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
+    return row as Order;
+  });
+}
+
+/**
+ * Reassign an open Console sale to a different customer (root-only). Moves the
+ * sale's net ledger contribution off the old customer and onto the new one as
+ * a paired `adjustment`, then re-checks the new customer's credit limit.
+ */
+export async function changeCustomerSaleCustomer(input: {
+  orderId: string;
+  newCustomerId: string;
+  changedByUserId: string;
+}): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    const oldCustomerId = order.customerId;
+    if (oldCustomerId === input.newCustomerId) {
+      throw new OrderError("INVALID_INPUT", "order already belongs to that customer");
+    }
+    const newCustomer = await tx.query.customers.findFirst({
+      where: eq(customers.id, input.newCustomerId),
+    });
+    if (!newCustomer) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    // Net ledger contribution of this order = its item rows minus payments.
+    const itemRows = await tx
+      .select({ id: orderItems.id })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id));
+    const payRows = await tx
+      .select({ id: orderPayments.id })
+      .from(orderPayments)
+      .where(eq(orderPayments.orderId, order.id));
+    const refIds = [...itemRows, ...payRows].map((r) => r.id);
+    const ledgerRows = refIds.length
+      ? await tx
+          .select()
+          .from(customerLedger)
+          .where(inArray(customerLedger.refId, refIds))
+      : [];
+    const net = ledgerRows.reduce((sum, r) => sum + r.amountMinor, 0);
+
+    if (
+      net > 0 &&
+      newCustomer.creditLimitMinor != null &&
+      newCustomer.balanceMinor + net > newCustomer.creditLimitMinor
+    ) {
+      throw new OrderError("CREDIT_LIMIT_EXCEEDED");
+    }
+
+    if (net !== 0 && oldCustomerId) {
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId: oldCustomerId,
+        type: "adjustment",
+        amountMinor: -net,
+        note: `open sale ${order.id} reassigned to customer ${input.newCustomerId}`,
+        createdByUserId: input.changedByUserId,
+      });
+      await syncCustomerBalance(tx, oldCustomerId);
+    }
+    if (net !== 0) {
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId: input.newCustomerId,
+        type: "adjustment",
+        amountMinor: net,
+        note: `open sale ${order.id} reassigned from customer ${oldCustomerId ?? "none"}`,
+        createdByUserId: input.changedByUserId,
+      });
+      await syncCustomerBalance(tx, input.newCustomerId);
+    }
+
+    await tx
+      .update(orders)
+      .set({
+        customerId: input.newCustomerId,
+        snapshotCustomerName: newCustomer.name,
+      })
+      .where(eq(orders.id, order.id));
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
     return row as Order;
   });
 }
