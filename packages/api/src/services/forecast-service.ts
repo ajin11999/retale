@@ -16,6 +16,9 @@ export type ReorderStatus =
   | "ok"
   | "insufficient_data";
 
+/** Which window's rate the effective velocity was taken from. */
+export type VelocityBasis = "baseline" | "recent" | "none";
+
 export interface ReorderForecastRow {
   variantId: string;
   productId: string;
@@ -23,8 +26,14 @@ export interface ReorderForecastRow {
   sku: string;
   /** Stock on hand, in the variant's smallest unit. */
   currentQty: number;
-  /** Average net units sold per day over the velocity window. */
+  /** Effective velocity: the higher of the baseline and recent rates. */
   velocityPerDay: number;
+  /** Net units/day averaged over the full (default 30-day) window. */
+  baselineVelocityPerDay: number;
+  /** Net units/day averaged over the recent (default 7-day) window. */
+  recentVelocityPerDay: number;
+  /** Which rate `velocityPerDay` came from — `recent` means accelerating. */
+  velocityBasis: VelocityBasis;
   /** `currentQty / velocity`; null when nothing is depleting. */
   daysOfCover: number | null;
   /** Lead time from the product's primary vendor; null when unknown. */
@@ -44,18 +53,27 @@ function dateStamp(d: Date): string {
 
 /**
  * Forecast reorder timing for every monitored, physical, non-archived product
- * variant. `velocityPerDay` is the trailing-window net sales average (sales
- * positive, returns negative). `orderByDate = today + daysOfCover − leadTime`.
+ * variant. Velocity is net sales/day (sales positive, returns negative); the
+ * effective `velocityPerDay` is the *higher* of a baseline (30-day) and a
+ * recent (7-day) rate, so a product selling fast lately is caught before a
+ * flat average would notice. `orderByDate = today + daysOfCover − leadTime`.
  */
 export async function reorderForecast(opts?: {
-  /** Trailing window for the velocity average, in days. Default 30. */
+  /** Baseline window for the velocity average, in days. Default 30. */
   windowDays?: number;
+  /** Recent window that catches acceleration, in days. Default 7. */
+  recentWindowDays?: number;
   /** An orderBy within this many days counts as `order_soon`. Default 7. */
   soonHorizonDays?: number;
 }): Promise<ReorderForecastRow[]> {
   const windowDays = Math.max(1, Math.floor(opts?.windowDays ?? 30));
+  const recentWindowDays = Math.min(
+    windowDays,
+    Math.max(1, Math.floor(opts?.recentWindowDays ?? 7)),
+  );
   const soonHorizon = Math.max(0, Math.floor(opts?.soonHorizonDays ?? 7));
   const since = new Date(Date.now() - windowDays * DAY_MS);
+  const recentSince = new Date(Date.now() - recentWindowDays * DAY_MS);
 
   // Monitored physical products and their variants.
   const rows = await db
@@ -78,11 +96,13 @@ export async function reorderForecast(opts?: {
     );
   if (rows.length === 0) return [];
 
-  // Net units sold per variant over the window (returns are negative qty).
+  // Net units sold per variant — over the full window, and within the recent
+  // sub-window — in one pass (returns are negative qty).
   const velocityRows = await db
     .select({
       variantId: orderItems.variantId,
-      net: sql<number>`SUM(${orderItems.qty})`,
+      netFull: sql<number>`SUM(${orderItems.qty})`,
+      netRecent: sql<number>`SUM(CASE WHEN ${orderItems.createdAt} >= ${recentSince} THEN ${orderItems.qty} ELSE 0 END)`,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -94,9 +114,14 @@ export async function reorderForecast(opts?: {
       ),
     )
     .groupBy(orderItems.variantId);
-  const netByVariant = new Map<string, number>();
+  const netByVariant = new Map<string, { full: number; recent: number }>();
   for (const v of velocityRows) {
-    if (v.variantId) netByVariant.set(v.variantId, Number(v.net ?? 0));
+    if (v.variantId) {
+      netByVariant.set(v.variantId, {
+        full: Number(v.netFull ?? 0),
+        recent: Number(v.netRecent ?? 0),
+      });
+    }
   }
 
   // Lead time per vendor referenced as a primary vendor.
@@ -113,8 +138,17 @@ export async function reorderForecast(opts?: {
 
   const now = Date.now();
   return rows.map((r): ReorderForecastRow => {
-    const net = netByVariant.get(r.variantId) ?? 0;
-    const velocityPerDay = net > 0 ? net / windowDays : 0;
+    const net = netByVariant.get(r.variantId) ?? { full: 0, recent: 0 };
+    // Negative net (more returned than sold) is not depletion — floor at 0.
+    const baselineVelocityPerDay = Math.max(net.full, 0) / windowDays;
+    const recentVelocityPerDay = Math.max(net.recent, 0) / recentWindowDays;
+    const velocityPerDay = Math.max(baselineVelocityPerDay, recentVelocityPerDay);
+    const velocityBasis: VelocityBasis =
+      velocityPerDay <= 0
+        ? "none"
+        : recentVelocityPerDay > baselineVelocityPerDay
+          ? "recent"
+          : "baseline";
     const leadTimeDays = r.primaryVendorId
       ? leadByVendor.get(r.primaryVendorId) ?? null
       : null;
@@ -150,6 +184,9 @@ export async function reorderForecast(opts?: {
       sku: r.sku,
       currentQty: r.currentQty,
       velocityPerDay,
+      baselineVelocityPerDay,
+      recentVelocityPerDay,
+      velocityBasis,
       daysOfCover,
       leadTimeDays,
       orderByDate,
