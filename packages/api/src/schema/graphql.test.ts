@@ -12,6 +12,7 @@ import { eq, sql } from "drizzle-orm";
 import { type ExecutionResult, graphql } from "graphql";
 import { ulid } from "ulid";
 import { rolePermissions, roles, userRoles, users } from "../db/schema/auth.ts";
+import { userTwoFactor } from "../db/schema/two-factor.ts";
 import type { GraphQLContext } from "../lib/context.ts";
 import type { AccessTokenClaims } from "../lib/jwt.ts";
 import { db } from "../lib/db.ts";
@@ -21,7 +22,8 @@ import { schema } from "./index.ts";
 async function wipe(): Promise<void> {
   await db.execute(sql`SET FOREIGN_KEY_CHECKS = 0`);
   for (const t of [
-    "vendor_ledger", "vendors", "user_roles", "role_permissions", "roles", "users",
+    "vendor_ledger", "vendors", "user_roles", "role_permissions", "roles",
+    "user_two_factor", "users",
   ]) {
     await db.execute(sql.raw(`DELETE FROM \`${t}\``));
   }
@@ -59,6 +61,17 @@ async function seedUser(): Promise<string> {
   return id;
 }
 
+/** Insert a user already enrolled in 2FA; returns its id. */
+async function seedEnrolledUser(): Promise<string> {
+  const id = await seedUser();
+  await db.insert(userTwoFactor).values({
+    userId: id,
+    secretEncrypted: "x",
+    confirmedAt: new Date(),
+  });
+  return id;
+}
+
 /** First error's `extensions.code`, if any. */
 function errorCode(result: ExecutionResult): unknown {
   return result.errors?.[0]?.extensions?.code;
@@ -79,7 +92,7 @@ describe("auth gating", () => {
   });
 
   test("root short-circuits permission checks", async () => {
-    const userId = await seedUser();
+    const userId = await seedEnrolledUser();
     const root: AccessTokenClaims = { userId, isRoot: true, roleIds: [] };
 
     const created = await run(
@@ -115,6 +128,16 @@ describe("auth gating", () => {
     );
   });
 
+  test("a root viewer without 2FA is gated until enrolment", async () => {
+    const userId = await seedUser(); // no user_two_factor row
+    const root: AccessTokenClaims = { userId, isRoot: true, roleIds: [] };
+    const result = await run(
+      `mutation { createVendor(name: "Blocked") { id } }`,
+      root,
+    );
+    expect(errorCode(result)).toBe("TWO_FACTOR_SETUP_REQUIRED");
+  });
+
   test("a non-root viewer lacking the permission is forbidden", async () => {
     const userId = await seedUser();
     const viewer: AccessTokenClaims = { userId, isRoot: false, roleIds: [] };
@@ -128,7 +151,7 @@ describe("auth gating", () => {
 
 describe("domain errors surface as GraphQL errors", () => {
   test("a service validation error carries its code", async () => {
-    const userId = await seedUser();
+    const userId = await seedEnrolledUser();
     const root: AccessTokenClaims = { userId, isRoot: true, roleIds: [] };
     // Blank name — vendor-service throws VendorError("INVALID_INPUT").
     const result = await run(

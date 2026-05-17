@@ -6,6 +6,7 @@
 import { inArray } from "drizzle-orm";
 import { GraphQLError } from "graphql";
 import { rolePermissions } from "../db/schema/auth.ts";
+import { isTwoFactorEnabled } from "../services/two-factor-service.ts";
 import type { GraphQLContext } from "./context.ts";
 import { db } from "./db.ts";
 import type { AccessTokenClaims } from "./jwt.ts";
@@ -13,6 +14,24 @@ import { isKnownPermission, type PermissionKey } from "./permissions.ts";
 
 // Per-request memo so multiple checks in one request hit the DB at most once.
 const permissionCache = new WeakMap<GraphQLContext, Promise<ReadonlySet<string>>>();
+const rootTwoFactorCache = new WeakMap<GraphQLContext, Promise<boolean>>();
+
+/**
+ * True when the viewer is a root user who has not yet enrolled in 2FA. 2FA is
+ * mandatory for root (design decision); such a viewer is blocked from every
+ * permission-checked operation until they complete setup. The 2FA setup
+ * mutations gate on `requireAuth` only, so they stay reachable.
+ */
+function rootTwoFactorPending(ctx: GraphQLContext): Promise<boolean> {
+  if (!ctx.viewer?.isRoot) return Promise.resolve(false);
+  let cached = rootTwoFactorCache.get(ctx);
+  if (!cached) {
+    const userId = ctx.viewer.userId;
+    cached = isTwoFactorEnabled(userId).then((enabled) => !enabled);
+    rootTwoFactorCache.set(ctx, cached);
+  }
+  return cached;
+}
 
 async function computePermissions(viewer: AccessTokenClaims): Promise<ReadonlySet<string>> {
   if (viewer.roleIds.length === 0) return new Set();
@@ -67,7 +86,14 @@ export async function requirePermission(
   key: PermissionKey,
 ): Promise<AccessTokenClaims> {
   const viewer = requireAuth(ctx);
-  if (viewer.isRoot) return viewer;
+  if (viewer.isRoot) {
+    if (await rootTwoFactorPending(ctx)) {
+      throw new GraphQLError("Two-factor authentication setup is required", {
+        extensions: { code: "TWO_FACTOR_SETUP_REQUIRED" },
+      });
+    }
+    return viewer;
+  }
   if (!(await resolvePermissions(ctx)).has(key)) {
     throw new GraphQLError(`Missing permission: ${key}`, {
       extensions: { code: "FORBIDDEN", requiredPermission: key },

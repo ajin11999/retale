@@ -1,10 +1,10 @@
 // Auth service: registration (bootstrap-aware), login, refresh-token
 // rotation, and logout. Pure business logic — GraphQL resolvers call in here.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 import { db } from "../lib/db.ts";
-import { sessions, userRoles, users } from "../db/schema/auth.ts";
+import { loginAttempts, sessions, userRoles, users } from "../db/schema/auth.ts";
 import { signAccessToken } from "../lib/jwt.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import {
@@ -19,13 +19,18 @@ import {
 } from "./two-factor-service.ts";
 
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/** Brute-force lockout: this many consecutive recent failures locks login. */
+const MAX_FAILED_ATTEMPTS = 5;
+/** Failures only count toward the lockout within this trailing window. */
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 
 /** Error codes are stable strings resolvers map to GraphQL errors. */
 export type AuthErrorCode =
   | "INVALID_CREDENTIALS"
   | "USERNAME_TAKEN"
   | "SESSION_INVALID"
-  | "USER_ARCHIVED";
+  | "USER_ARCHIVED"
+  | "ACCOUNT_LOCKED";
 
 export class AuthError extends Error {
   constructor(public code: AuthErrorCode, message?: string) {
@@ -127,6 +132,42 @@ async function issueTokens(user: User, ctx: SessionContext): Promise<AuthTokens>
   return { accessToken, refreshToken: token, refreshExpiresAt };
 }
 
+/** Record one password attempt for the brute-force tracker. */
+function recordAttempt(
+  username: string,
+  ip: string | null | undefined,
+  succeeded: boolean,
+): Promise<unknown> {
+  return db
+    .insert(loginAttempts)
+    .values({ id: ulid(), username, ip: ip ?? null, succeeded });
+}
+
+/**
+ * True when a username is locked: at least `MAX_FAILED_ATTEMPTS` consecutive
+ * failures within the trailing window, with no success since. A successful
+ * login resets the streak.
+ */
+async function isLocked(username: string): Promise<boolean> {
+  const since = new Date(Date.now() - LOCKOUT_WINDOW_MS);
+  const rows = await db
+    .select({ succeeded: loginAttempts.succeeded })
+    .from(loginAttempts)
+    .where(
+      and(
+        eq(loginAttempts.username, username),
+        gte(loginAttempts.attemptedAt, since),
+      ),
+    )
+    .orderBy(desc(loginAttempts.attemptedAt));
+  let streak = 0;
+  for (const row of rows) {
+    if (row.succeeded) break;
+    streak++;
+  }
+  return streak >= MAX_FAILED_ATTEMPTS;
+}
+
 /**
  * Outcome of a password login. A user with 2FA enabled gets a `challenge`
  * (no tokens yet); everyone else gets `tokens` directly.
@@ -145,13 +186,21 @@ export async function login(input: {
   password: string;
   ctx?: SessionContext;
 }): Promise<LoginOutcome> {
+  if (await isLocked(input.username)) {
+    throw new AuthError("ACCOUNT_LOCKED");
+  }
+
   const user = await db.query.users.findFirst({
     where: eq(users.username, input.username),
   });
   // Verify even when the user is missing, to keep timing uniform.
   const hash = user?.passwordHash ?? "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const ok = await verifyPassword(hash, input.password);
-  if (!user || !ok) throw new AuthError("INVALID_CREDENTIALS");
+  if (!user || !ok) {
+    await recordAttempt(input.username, input.ctx?.ip, false);
+    throw new AuthError("INVALID_CREDENTIALS");
+  }
+  await recordAttempt(input.username, input.ctx?.ip, true);
   if (user.archivedAt) throw new AuthError("USER_ARCHIVED");
 
   if (await isTwoFactorEnabled(user.id)) {

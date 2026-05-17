@@ -107,6 +107,25 @@ export const sessions = mysqlTable(
   (t) => [index("sessions_user_id_idx").on(t.userId)],
 );
 
+/**
+ * Password login attempts, for brute-force lockout. Deliberately has no FK to
+ * `users` — a failed attempt may target a username that does not exist, and
+ * those still count toward the lockout.
+ */
+export const loginAttempts = mysqlTable(
+  "login_attempts",
+  {
+    id: ulidPk(),
+    username: varchar({ length: 100 }).notNull(),
+    ip: varchar({ length: 45 }),
+    succeeded: boolean().notNull(),
+    attemptedAt: timestamp()
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [index("login_attempts_username_idx").on(t.username, t.attemptedAt)],
+);
+
 // --- Relations (for the relational query API) ---
 
 export const usersRelations = relations(users, ({ many }) => ({
