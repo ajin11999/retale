@@ -110,6 +110,12 @@ export const productVariants = mysqlTable(
     priceMinor: bigint({ mode: "number" }).notNull(),
     costMinor: bigint({ mode: "number" }).notNull().default(0),
     totalQty: bigint({ mode: "number" }).notNull().default(0),
+    // Reorder thresholds, in the variant's smallest unit. `reorderPoint` is the
+    // available-stock level at or below which the reorder scan suggests a
+    // purchase; null = not tracked, excluded from the scan. `reorderQty` is the
+    // suggested order quantity — null falls back to "enough to reach the point".
+    reorderPoint: bigint({ mode: "number" }),
+    reorderQty: bigint({ mode: "number" }),
     sortOrder: int().notNull().default(0),
     trackingAccountId: ulidRef().references(() => trackingAccounts.id, {
       onDelete: "set null",
