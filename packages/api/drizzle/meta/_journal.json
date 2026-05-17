@@ -57,6 +57,13 @@
       "when": 1778983331066,
       "tag": "0007_smooth_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1778984038142,
+      "tag": "0008_cute_leper_queen",
+      "breakpoints": true
     }
   ]
 }

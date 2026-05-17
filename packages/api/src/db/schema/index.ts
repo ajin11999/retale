@@ -12,3 +12,4 @@ export * from "./purchases.ts";
 export * from "./deliveries.ts";
 export * from "./customers.ts";
 export * from "./pos.ts";
+export * from "./orders.ts";
