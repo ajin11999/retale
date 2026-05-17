@@ -11,6 +11,7 @@ import {
   productVariants,
   products,
 } from "../db/schema/products.ts";
+import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 
 export type ProductErrorCode =
@@ -47,6 +48,13 @@ function assertNonNegative(label: string, value: number | undefined): void {
   if (value != null && value < 0) {
     throw new ProductError("INVALID_INPUT", `${label} must not be negative`);
   }
+}
+
+/** Ensure a vendor exists when a `primaryVendorId` is supplied. */
+async function assertVendorExists(vendorId: string | null | undefined): Promise<void> {
+  if (!vendorId) return;
+  const row = await db.query.vendors.findFirst({ where: eq(vendors.id, vendorId) });
+  if (!row) throw new ProductError("INVALID_INPUT", "primaryVendorId not found");
 }
 
 // --- Categories ---
@@ -207,11 +215,14 @@ export async function createProduct(input: {
   priceMode: "tax_inclusive" | "tax_exclusive";
   minQty?: number | null;
   minMarginBps?: number | null;
+  primaryVendorId?: string | null;
+  replenishMonitored?: boolean;
   variants: VariantInput[];
   createdByUserId: string;
 }): Promise<ProductWithVariants> {
   if (!input.variants?.length) throw new ProductError("NO_VARIANTS");
   if (input.categoryId) await loadCategory(input.categoryId);
+  await assertVendorExists(input.primaryVendorId);
   assertNonNegative("taxRateBps", input.taxRateBps);
 
   const productId = ulid();
@@ -229,6 +240,10 @@ export async function createProduct(input: {
         priceMode: input.priceMode,
         minQty: input.minQty ?? null,
         minMarginBps: input.minMarginBps ?? null,
+        primaryVendorId: input.primaryVendorId ?? null,
+        ...(input.replenishMonitored !== undefined && {
+          replenishMonitored: input.replenishMonitored,
+        }),
         createdByUserId: input.createdByUserId,
       });
       await tx.insert(productVariants).values(variantRows);
@@ -250,10 +265,13 @@ export async function updateProduct(
     priceMode?: "tax_inclusive" | "tax_exclusive";
     minQty?: number | null;
     minMarginBps?: number | null;
+    primaryVendorId?: string | null;
+    replenishMonitored?: boolean;
   },
 ): Promise<ProductWithVariants> {
   await loadProductRow(id);
   if (patch.categoryId) await loadCategory(patch.categoryId);
+  if (patch.primaryVendorId) await assertVendorExists(patch.primaryVendorId);
   assertNonNegative("taxRateBps", patch.taxRateBps);
 
   await db
@@ -267,6 +285,12 @@ export async function updateProduct(
       ...(patch.priceMode !== undefined && { priceMode: patch.priceMode }),
       ...(patch.minQty !== undefined && { minQty: patch.minQty }),
       ...(patch.minMarginBps !== undefined && { minMarginBps: patch.minMarginBps }),
+      ...(patch.primaryVendorId !== undefined && {
+        primaryVendorId: patch.primaryVendorId,
+      }),
+      ...(patch.replenishMonitored !== undefined && {
+        replenishMonitored: patch.replenishMonitored,
+      }),
     })
     .where(eq(products.id, id));
   return getProduct(id);

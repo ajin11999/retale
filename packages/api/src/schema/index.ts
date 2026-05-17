@@ -3,6 +3,7 @@ import type { GraphQLContext } from "../lib/context.ts";
 import * as authDomain from "./auth.ts";
 import * as customersDomain from "./customers.ts";
 import * as deliveriesDomain from "./deliveries.ts";
+import * as forecastDomain from "./forecast.ts";
 import * as locationsDomain from "./locations.ts";
 import * as ordersDomain from "./orders.ts";
 import * as posDomain from "./pos.ts";
@@ -48,6 +49,7 @@ export const schema = createSchema<GraphQLContext>({
     posDomain.typeDefs,
     ordersDomain.typeDefs,
     trackingDomain.typeDefs,
+    forecastDomain.typeDefs,
   ],
   resolvers: [
     baseResolvers,
@@ -63,5 +65,6 @@ export const schema = createSchema<GraphQLContext>({
     posDomain.resolvers,
     ordersDomain.resolvers,
     trackingDomain.resolvers,
+    forecastDomain.resolvers,
   ],
 });

@@ -26,6 +26,8 @@ export const typeDefs = /* GraphQL */ `
     address: String
     taxId: String
     notes: String
+    "Typical delivery lead time in days; feeds the reorder forecast."
+    leadTimeDays: Int
     "Cached AP balance, minor units. Positive = we owe the vendor."
     balanceMinor: Float!
     archivedAt: String
@@ -60,6 +62,7 @@ export const typeDefs = /* GraphQL */ `
       address: String
       taxId: String
       notes: String
+      leadTimeDays: Int
     ): Vendor!
     updateVendor(
       id: ID!
@@ -69,6 +72,7 @@ export const typeDefs = /* GraphQL */ `
       address: String
       taxId: String
       notes: String
+      leadTimeDays: Int
     ): Vendor!
     setVendorArchived(id: ID!, archived: Boolean!): Vendor!
     "Hard delete — root-only. Refused if the vendor carries a non-zero AP balance."

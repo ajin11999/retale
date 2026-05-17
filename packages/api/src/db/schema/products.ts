@@ -8,6 +8,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
   bigint,
+  boolean,
   index,
   int,
   mysqlEnum,
@@ -21,6 +22,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { trackingAccounts } from "./tracking.ts";
+import { vendors } from "./vendors.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /**
@@ -60,6 +62,12 @@ export const products = mysqlTable(
     priceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
     minQty: int(),
     minMarginBps: int(),
+    // Default supplier — the reorder forecast inherits this vendor's lead time.
+    primaryVendorId: ulidRef().references(() => vendors.id, {
+      onDelete: "set null",
+    }),
+    // When false, the product is excluded from the reorder forecast.
+    replenishMonitored: boolean().notNull().default(true),
     archivedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     // Lowercased name for LIKE search (fixes ProDuck empty-keyword bug at the

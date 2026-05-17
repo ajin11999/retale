@@ -56,6 +56,10 @@ export const typeDefs = /* GraphQL */ `
     priceMode: PriceMode!
     minQty: Int
     minMarginBps: Int
+    "Default supplier — the reorder forecast inherits this vendor's lead time."
+    primaryVendorId: ID
+    "When false, the product is excluded from the reorder forecast."
+    replenishMonitored: Boolean!
     archivedAt: String
     createdAt: String!
     variants: [ProductVariant!]!
@@ -99,6 +103,8 @@ export const typeDefs = /* GraphQL */ `
       priceMode: PriceMode!
       minQty: Int
       minMarginBps: Int
+      primaryVendorId: ID
+      replenishMonitored: Boolean
       variants: [VariantInput!]!
     ): Product!
     updateProduct(
@@ -111,6 +117,8 @@ export const typeDefs = /* GraphQL */ `
       priceMode: PriceMode
       minQty: Int
       minMarginBps: Int
+      primaryVendorId: ID
+      replenishMonitored: Boolean
     ): Product!
     setProductArchived(id: ID!, archived: Boolean!): Product!
     "Hard delete — root-only. Prefer archiving."

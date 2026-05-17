@@ -8,6 +8,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   index,
+  int,
   mysqlEnum,
   mysqlTable,
   text,
@@ -52,6 +53,9 @@ export const vendors = mysqlTable(
     address: text(),
     taxId: varchar({ length: 100 }),
     notes: text(),
+    // Typical days from placing a purchase order to stock arriving. Feeds the
+    // reorder forecast; null = unknown lead time.
+    leadTimeDays: int(),
     // Cached sum of vendor_ledger.amount_minor. Positive = we owe them.
     balanceMinor: bigint({ mode: "number" }).notNull().default(0),
     archivedAt: timestamp(),

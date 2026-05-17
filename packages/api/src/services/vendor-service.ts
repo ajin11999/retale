@@ -51,9 +51,16 @@ export async function createVendor(input: {
   address?: string | null;
   taxId?: string | null;
   notes?: string | null;
+  leadTimeDays?: number | null;
   createdByUserId: string;
 }): Promise<Vendor> {
   if (!input.name.trim()) throw new VendorError("INVALID_INPUT", "name is required");
+  if (
+    input.leadTimeDays != null &&
+    (!Number.isInteger(input.leadTimeDays) || input.leadTimeDays < 0)
+  ) {
+    throw new VendorError("INVALID_INPUT", "leadTimeDays must be a non-negative integer");
+  }
 
   const id = ulid();
   await db.insert(vendors).values({
@@ -64,6 +71,7 @@ export async function createVendor(input: {
     address: input.address ?? null,
     taxId: input.taxId ?? null,
     notes: input.notes ?? null,
+    leadTimeDays: input.leadTimeDays ?? null,
     createdByUserId: input.createdByUserId,
   });
   return loadVendor(id);
@@ -78,11 +86,18 @@ export async function updateVendor(
     address?: string | null;
     taxId?: string | null;
     notes?: string | null;
+    leadTimeDays?: number | null;
   },
 ): Promise<Vendor> {
   await loadVendor(id);
   if (patch.name !== undefined && !patch.name.trim()) {
     throw new VendorError("INVALID_INPUT", "name cannot be blank");
+  }
+  if (
+    patch.leadTimeDays != null &&
+    (!Number.isInteger(patch.leadTimeDays) || patch.leadTimeDays < 0)
+  ) {
+    throw new VendorError("INVALID_INPUT", "leadTimeDays must be a non-negative integer");
   }
 
   await db
@@ -94,6 +109,7 @@ export async function updateVendor(
       ...(patch.address !== undefined && { address: patch.address }),
       ...(patch.taxId !== undefined && { taxId: patch.taxId }),
       ...(patch.notes !== undefined && { notes: patch.notes }),
+      ...(patch.leadTimeDays !== undefined && { leadTimeDays: patch.leadTimeDays }),
     })
     .where(eq(vendors.id, id));
   return loadVendor(id);
