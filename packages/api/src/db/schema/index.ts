@@ -10,3 +10,4 @@ export * from "./stock.ts";
 export * from "./vendors.ts";
 export * from "./purchases.ts";
 export * from "./deliveries.ts";
+export * from "./customers.ts";

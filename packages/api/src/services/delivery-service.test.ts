@@ -15,7 +15,7 @@ import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { stockLocations, stockMovements } from "../db/schema/stock.ts";
 import { users } from "../db/schema/auth.ts";
-import { db, pool } from "../lib/db.ts";
+import { db } from "../lib/db.ts";
 import {
   cancelDelivery,
   commitDelivery,
@@ -61,8 +61,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await wipe();
   await db.delete(users).where(eq(users.id, userId));
-  // Close the pool so the test process exits instead of hanging on it.
-  await pool.end();
+  // The shared pool is closed once globally — see src/test-setup.ts.
 });
 
 beforeEach(wipe);

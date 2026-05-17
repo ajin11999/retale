@@ -43,6 +43,13 @@
       "when": 1778942415365,
       "tag": "0005_broken_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778982010901,
+      "tag": "0006_nervous_newton_destine",
+      "breakpoints": true
     }
   ]
 }

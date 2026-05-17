@@ -1,0 +1,4 @@
+[test]
+# Global test preload — registers a single afterAll that closes the shared DB
+# pool once, after every test file. Individual files must not close it.
+preload = ["./packages/api/src/test-setup.ts"]
