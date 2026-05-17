@@ -12,6 +12,7 @@ function required(name: string): string {
 export const env = {
   databaseUrl: required("DATABASE_URL"),
   jwtSigningKey: required("JWT_SIGNING_KEY"),
+  twoFactorEncKey: required("TWO_FACTOR_ENC_KEY"),
   port: Number(process.env.PORT ?? 3000),
   isDev: process.env.NODE_ENV !== "production",
 };

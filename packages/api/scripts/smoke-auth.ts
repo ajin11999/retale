@@ -12,7 +12,9 @@ console.log("bootstrap needed:", await isBootstrapNeeded());
 const user = await registerUser({ username, password: "hunter2", name: "Smoke Test" });
 console.log("registered:", { id: user.id, username: user.username, isRoot: user.isRoot });
 
-const { tokens } = await login({ username, password: "hunter2" });
+const outcome = await login({ username, password: "hunter2" });
+if (outcome.kind !== "tokens") throw new Error("unexpected 2FA challenge");
+const { tokens } = outcome;
 console.log("login ok, access claims:", await verifyAccessToken(tokens.accessToken));
 
 const bad = await login({ username, password: "wrong" }).then(() => "NO ERROR (BUG)").catch((e) => e.code);

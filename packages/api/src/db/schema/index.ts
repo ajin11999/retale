@@ -4,6 +4,7 @@
 // Populated as domains are built out (products, purchases, ...).
 
 export * from "./auth.ts";
+export * from "./two-factor.ts";
 export * from "./products.ts";
 export * from "./locations.ts";
 export * from "./stock.ts";

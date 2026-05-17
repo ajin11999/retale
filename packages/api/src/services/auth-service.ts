@@ -12,6 +12,11 @@ import {
   parseRefreshToken,
   verifyRefreshSecret,
 } from "../lib/refresh-token.ts";
+import {
+  createChallenge,
+  isTwoFactorEnabled,
+  verifyChallengeCode,
+} from "./two-factor-service.ts";
 
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -122,12 +127,24 @@ async function issueTokens(user: User, ctx: SessionContext): Promise<AuthTokens>
   return { accessToken, refreshToken: token, refreshExpiresAt };
 }
 
-/** Authenticate by username + password. Generic error on any failure. */
+/**
+ * Outcome of a password login. A user with 2FA enabled gets a `challenge`
+ * (no tokens yet); everyone else gets `tokens` directly.
+ */
+export type LoginOutcome =
+  | { kind: "tokens"; user: User; tokens: AuthTokens }
+  | { kind: "challenge"; user: User; challengeToken: string };
+
+/**
+ * Authenticate by username + password. Generic error on any failure. When
+ * the user has 2FA enabled, the password step succeeds into a challenge that
+ * `loginTwoFactor` completes — the password alone never yields tokens.
+ */
 export async function login(input: {
   username: string;
   password: string;
   ctx?: SessionContext;
-}): Promise<{ user: User; tokens: AuthTokens }> {
+}): Promise<LoginOutcome> {
   const user = await db.query.users.findFirst({
     where: eq(users.username, input.username),
   });
@@ -136,6 +153,29 @@ export async function login(input: {
   const ok = await verifyPassword(hash, input.password);
   if (!user || !ok) throw new AuthError("INVALID_CREDENTIALS");
   if (user.archivedAt) throw new AuthError("USER_ARCHIVED");
+
+  if (await isTwoFactorEnabled(user.id)) {
+    return { kind: "challenge", user, challengeToken: await createChallenge(user.id) };
+  }
+  const tokens = await issueTokens(user, input.ctx ?? {});
+  return { kind: "tokens", user, tokens };
+}
+
+/**
+ * Complete a 2FA login: exchange a challenge token plus a TOTP or recovery
+ * code for the actual token pair.
+ */
+export async function loginTwoFactor(input: {
+  challengeToken: string;
+  code: string;
+  ctx?: SessionContext;
+}): Promise<{ user: User; tokens: AuthTokens }> {
+  const userId = await verifyChallengeCode({
+    challengeToken: input.challengeToken,
+    code: input.code,
+  });
+  const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  if (!user || user.archivedAt) throw new AuthError("SESSION_INVALID");
 
   const tokens = await issueTokens(user, input.ctx ?? {});
   return { user, tokens };
