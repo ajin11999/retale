@@ -9,7 +9,9 @@
       "PowerShell(bun *)",
       "PowerShell(Get-Command *)",
       "PowerShell(bun run *)",
-      "PowerShell(Select-String *)"
+      "PowerShell(Select-String *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(taskkill *)"
     ]
   }
 }

@@ -39,6 +39,8 @@ export const typeDefs = /* GraphQL */ `
     snapshotProductName: String!
     "Public name at sale time, if any."
     snapshotPublicName: String
+    "If this line came from a bundle, the bundle's name at sale time."
+    snapshotBundleName: String
     "snapshotPublicName ?? snapshotProductName — the name for a receipt."
     displayName: String!
     snapshotProductSku: String!

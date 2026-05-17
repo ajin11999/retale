@@ -11,6 +11,7 @@ import { customerLedger, customerPrices, customers } from "../db/schema/customer
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
 import { pointsOfSale, posSessions } from "../db/schema/pos.ts";
 import {
+  bundleComponents,
   productCategories,
   productPriceTiers,
   products,
@@ -59,6 +60,7 @@ type Order = typeof orders.$inferSelect;
 type OrderItem = typeof orderItems.$inferSelect;
 type OrderPayment = typeof orderPayments.$inferSelect;
 type Variant = typeof productVariants.$inferSelect;
+type Product = typeof products.$inferSelect;
 
 /** A drizzle transaction handle; structurally a subset of `db`. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -243,48 +245,23 @@ interface BuiltLine {
   isPhysical: boolean;
 }
 
-async function buildLine(
-  tx: Tx,
-  orderId: string,
-  item: PosOrderItemInput,
-  customerId: string | null,
-): Promise<BuiltLine> {
-  if (!Number.isInteger(item.qty) || item.qty <= 0) {
-    throw new OrderError("INVALID_INPUT", "item qty must be a positive integer");
-  }
-  const discount = item.discountMinor ?? 0;
-  if (!Number.isInteger(discount) || discount < 0) {
-    throw new OrderError("INVALID_INPUT", "discount must be a non-negative integer");
-  }
-
-  const variant = await tx.query.productVariants.findFirst({
-    where: eq(productVariants.id, item.variantId),
-  });
-  if (!variant) throw new OrderError("VARIANT_NOT_FOUND", item.variantId);
-  const product = await tx.query.products.findFirst({
-    where: eq(products.id, variant.productId),
-  });
-  if (!product) throw new OrderError("VARIANT_NOT_FOUND", item.variantId);
-
-  const isService = product.kind === "service";
-  if (item.priceOverrideMinor != null && !isService) {
-    throw new OrderError(
-      "PRICE_OVERRIDE_NOT_ALLOWED",
-      "price overrides are allowed only on service products",
-    );
-  }
-
-  let price: number;
-  if (isService && item.priceOverrideMinor != null) {
-    if (!Number.isInteger(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
-      throw new OrderError("INVALID_INPUT", "price override must be a non-negative integer");
-    }
-    price = item.priceOverrideMinor;
-  } else {
-    price = await resolvePrice(tx, variant, customerId, item.qty);
-  }
-
-  const lineTotal = item.qty * price - discount;
+/**
+ * Assemble one order_items row from an already-resolved price and discount.
+ * Shared by ordinary lines and the component lines a bundle explodes into.
+ */
+async function buildSnapshotRow(opts: {
+  tx: Tx;
+  orderId: string;
+  variant: Variant;
+  product: Product;
+  qty: number;
+  priceMinor: number;
+  discountMinor: number;
+  bundleName: string | null;
+  attributionOverrideMinor?: number | null;
+}): Promise<BuiltLine> {
+  const { tx, variant, product, qty, priceMinor, discountMinor } = opts;
+  const lineTotal = qty * priceMinor - discountMinor;
   if (lineTotal < 0) {
     throw new OrderError("INVALID_INPUT", "discount exceeds the line subtotal");
   }
@@ -307,38 +284,38 @@ async function buildLine(
     attributionAccountId = variant.trackingAccountId;
     trackingAccountName = account?.name ?? null;
     attributionAmountMinor = computeAttribution({
-      priceMinor: price,
-      qty: item.qty,
-      discountMinor: discount,
+      priceMinor,
+      qty,
+      discountMinor,
       priceMode: product.priceMode,
       taxRateBps: product.taxRateBps,
       mode: variant.trackingAttributionMode,
       pctBps: variant.trackingAttributionPctBps,
     });
   }
-  if (item.attributionAmountOverrideMinor != null) {
+  if (opts.attributionOverrideMinor != null) {
     if (!attributionAccountId) {
       throw new OrderError(
         "INVALID_INPUT",
         "attribution override requires a tracking account on the variant",
       );
     }
-    if (!Number.isInteger(item.attributionAmountOverrideMinor)) {
+    if (!Number.isInteger(opts.attributionOverrideMinor)) {
       throw new OrderError("INVALID_INPUT", "attribution override must be an integer");
     }
-    attributionAmountMinor = item.attributionAmountOverrideMinor;
+    attributionAmountMinor = opts.attributionOverrideMinor;
   }
 
   return {
-    isPhysical: !isService,
+    isPhysical: product.kind === "physical",
     lineTotal,
     row: {
       id: ulid(),
-      orderId,
+      orderId: opts.orderId,
       variantId: variant.id,
       productId: product.id,
-      qty: item.qty,
-      discountMinor: discount,
+      qty,
+      discountMinor,
       snapshotProductName: product.name,
       snapshotPublicName: product.publicName,
       snapshotProductSku: variant.sku,
@@ -346,15 +323,168 @@ async function buildLine(
       snapshotVariantLabel: variant.label,
       snapshotUnit: variant.unit,
       snapshotCategoryName: category?.name ?? null,
-      snapshotPriceMinor: price,
-      snapshotCostMinor: isService ? 0 : variant.costMinor,
+      snapshotPriceMinor: priceMinor,
+      snapshotCostMinor: product.kind === "service" ? 0 : variant.costMinor,
       snapshotTaxRateBps: product.taxRateBps,
       snapshotPriceMode: product.priceMode,
       snapshotTrackingAccountName: trackingAccountName,
+      snapshotBundleName: opts.bundleName,
       attributionAccountId,
       attributionAmountMinor,
     },
   };
+}
+
+/**
+ * Explode a bundle line into one order line per component. The bundle's price
+ * is distributed across components by their natural value (unit price × qty);
+ * each component shows its own unit price, with its share of the bundle saving
+ * as the line discount, so the component totals sum exactly to the bundle
+ * price. Stock and attribution then fall out per real component.
+ */
+async function buildBundleLines(opts: {
+  tx: Tx;
+  orderId: string;
+  item: PosOrderItemInput;
+  customerId: string | null;
+  bundleVariant: Variant;
+  bundleProduct: Product;
+  discountMinor: number;
+}): Promise<BuiltLine[]> {
+  const { tx, orderId, item, bundleVariant, bundleProduct } = opts;
+  if (item.priceOverrideMinor != null) {
+    throw new OrderError("PRICE_OVERRIDE_NOT_ALLOWED", "price overrides are not allowed on bundles");
+  }
+  if (item.attributionAmountOverrideMinor != null) {
+    throw new OrderError("INVALID_INPUT", "attribution override is not supported on bundle lines");
+  }
+
+  const bundlePrice = await resolvePrice(tx, bundleVariant, opts.customerId, item.qty);
+  const target = bundlePrice * item.qty - opts.discountMinor;
+  if (target < 0) throw new OrderError("INVALID_INPUT", "discount exceeds the bundle price");
+
+  const components = await tx
+    .select()
+    .from(bundleComponents)
+    .where(eq(bundleComponents.bundleVariantId, bundleVariant.id));
+  if (components.length === 0) {
+    throw new OrderError("INVALID_INPUT", "bundle has no components");
+  }
+
+  // Resolve each component and its natural value (own unit price × line qty).
+  const parts: { variant: Variant; product: Product; qty: number; value: number }[] = [];
+  for (const c of components) {
+    const cv = await tx.query.productVariants.findFirst({
+      where: eq(productVariants.id, c.componentVariantId),
+    });
+    if (!cv) throw new OrderError("VARIANT_NOT_FOUND", c.componentVariantId);
+    const cp = await tx.query.products.findFirst({ where: eq(products.id, cv.productId) });
+    if (!cp) throw new OrderError("VARIANT_NOT_FOUND", c.componentVariantId);
+    const lineQty = c.qty * item.qty;
+    parts.push({ variant: cv, product: cp, qty: lineQty, value: cv.priceMinor * lineQty });
+  }
+
+  // Distribute `target` over the components: floor each proportional share,
+  // then hand the rounding remainder out one unit at a time. Sums exactly.
+  const totalValue = parts.reduce((sum, p) => sum + p.value, 0);
+  let shares: number[];
+  if (totalValue > 0) {
+    const floors = parts.map((p) => Math.floor((target * p.value) / totalValue));
+    const remainder = target - floors.reduce((a, b) => a + b, 0);
+    shares = floors.map((f, i) => f + (i < remainder ? 1 : 0));
+  } else {
+    // Zero-value components — put the whole price on the last line.
+    shares = parts.map((_, i) => (i === parts.length - 1 ? target : 0));
+  }
+
+  const lines: BuiltLine[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    lines.push(
+      await buildSnapshotRow({
+        tx,
+        orderId,
+        variant: p.variant,
+        product: p.product,
+        qty: p.qty,
+        priceMinor: p.variant.priceMinor,
+        discountMinor: p.value - shares[i]!,
+        bundleName: bundleProduct.name,
+      }),
+    );
+  }
+  return lines;
+}
+
+/**
+ * Build the order line(s) for one input item. An ordinary product yields a
+ * single line; a `kind = 'bundle'` product explodes into its component lines.
+ */
+async function buildLines(
+  tx: Tx,
+  orderId: string,
+  item: PosOrderItemInput,
+  customerId: string | null,
+): Promise<BuiltLine[]> {
+  if (!Number.isInteger(item.qty) || item.qty <= 0) {
+    throw new OrderError("INVALID_INPUT", "item qty must be a positive integer");
+  }
+  const discount = item.discountMinor ?? 0;
+  if (!Number.isInteger(discount) || discount < 0) {
+    throw new OrderError("INVALID_INPUT", "discount must be a non-negative integer");
+  }
+
+  const variant = await tx.query.productVariants.findFirst({
+    where: eq(productVariants.id, item.variantId),
+  });
+  if (!variant) throw new OrderError("VARIANT_NOT_FOUND", item.variantId);
+  const product = await tx.query.products.findFirst({
+    where: eq(products.id, variant.productId),
+  });
+  if (!product) throw new OrderError("VARIANT_NOT_FOUND", item.variantId);
+
+  if (product.kind === "bundle") {
+    return buildBundleLines({
+      tx,
+      orderId,
+      item,
+      customerId,
+      bundleVariant: variant,
+      bundleProduct: product,
+      discountMinor: discount,
+    });
+  }
+
+  const isService = product.kind === "service";
+  if (item.priceOverrideMinor != null && !isService) {
+    throw new OrderError(
+      "PRICE_OVERRIDE_NOT_ALLOWED",
+      "price overrides are allowed only on service products",
+    );
+  }
+  let price: number;
+  if (isService && item.priceOverrideMinor != null) {
+    if (!Number.isInteger(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
+      throw new OrderError("INVALID_INPUT", "price override must be a non-negative integer");
+    }
+    price = item.priceOverrideMinor;
+  } else {
+    price = await resolvePrice(tx, variant, customerId, item.qty);
+  }
+
+  return [
+    await buildSnapshotRow({
+      tx,
+      orderId,
+      variant,
+      product,
+      qty: item.qty,
+      priceMinor: price,
+      discountMinor: discount,
+      bundleName: null,
+      attributionOverrideMinor: item.attributionAmountOverrideMinor,
+    }),
+  ];
 }
 
 /** Recompute a tracking account's cached `balanceMinor` from the ledger SUM. */
@@ -449,7 +579,7 @@ export async function createPosOrder(input: {
     const orderId = ulid();
     const lines: BuiltLine[] = [];
     for (const item of input.items) {
-      lines.push(await buildLine(tx, orderId, item, customerId));
+      lines.push(...(await buildLines(tx, orderId, item, customerId)));
     }
     const total = lines.reduce((sum, l) => sum + l.lineTotal, 0);
 
@@ -595,40 +725,43 @@ export async function addCustomerSaleItem(input: {
     });
     if (!customer) throw new OrderError("CUSTOMER_NOT_FOUND");
 
-    const line = await buildLine(tx, order.id, input.item, customerId);
+    // One input item may explode into several lines (a bundle).
+    const lines = await buildLines(tx, order.id, input.item, customerId);
+    const addedTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
 
     if (
       customer.creditLimitMinor != null &&
-      customer.balanceMinor + line.lineTotal > customer.creditLimitMinor
+      customer.balanceMinor + addedTotal > customer.creditLimitMinor
     ) {
       throw new OrderError("CREDIT_LIMIT_EXCEEDED");
     }
 
-    await tx.insert(orderItems).values(line.row);
+    await tx.insert(orderItems).values(lines.map((l) => l.row));
 
-    if (line.isPhysical) {
-      await modifyStock(
-        {
-          variantId: line.row.variantId as string,
-          type: "sale",
-          qtyDelta: -(line.row.qty as number),
-          refType: "order",
-          refId: order.id,
-          createdByUserId: input.createdByUserId,
-        },
-        tx,
-      );
+    for (const line of lines) {
+      if (line.isPhysical) {
+        await modifyStock(
+          {
+            variantId: line.row.variantId as string,
+            type: "sale",
+            qtyDelta: -(line.row.qty as number),
+            refType: "order",
+            refId: order.id,
+            createdByUserId: input.createdByUserId,
+          },
+          tx,
+        );
+      }
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId,
+        type: "sale_on_account",
+        amountMinor: line.lineTotal,
+        refType: "order_item",
+        refId: line.row.id as string,
+        createdByUserId: input.createdByUserId,
+      });
     }
-
-    await tx.insert(customerLedger).values({
-      id: ulid(),
-      customerId,
-      type: "sale_on_account",
-      amountMinor: line.lineTotal,
-      refType: "order_item",
-      refId: line.row.id as string,
-      createdByUserId: input.createdByUserId,
-    });
     await syncCustomerBalance(tx, customerId);
     await recomputeOrderTotal(tx, order.id);
 
@@ -1056,6 +1189,7 @@ export async function createReturn(input: {
         snapshotTaxRateBps: orig.snapshotTaxRateBps,
         snapshotPriceMode: orig.snapshotPriceMode,
         snapshotTrackingAccountName: orig.snapshotTrackingAccountName,
+        snapshotBundleName: orig.snapshotBundleName,
         attributionAccountId: orig.attributionAccountId,
         attributionAmountMinor: -proratedAttribution,
       });

@@ -12,7 +12,7 @@ import { db } from "../lib/db.ts";
 import * as products from "../services/product-service.ts";
 
 export const typeDefs = /* GraphQL */ `
-  enum ProductKind { physical service }
+  enum ProductKind { physical service bundle }
   enum PriceMode { tax_inclusive tax_exclusive }
   enum VariantUnit { piece g ml mm }
 
@@ -44,6 +44,21 @@ export const typeDefs = /* GraphQL */ `
     totalQty: Float!
     sortOrder: Int!
     priceTiers: [PriceTier!]!
+    "Components, if this variant belongs to a kind='bundle' product."
+    bundleComponents: [BundleComponent!]!
+  }
+
+  "One component of a bundle: a variant and how many units the bundle holds."
+  type BundleComponent {
+    id: ID!
+    bundleVariantId: ID!
+    componentVariantId: ID!
+    qty: Float!
+  }
+
+  input BundleComponentInput {
+    componentVariantId: ID!
+    qty: Int!
   }
 
   type Product {
@@ -145,6 +160,11 @@ export const typeDefs = /* GraphQL */ `
     ): ProductVariant!
     deleteVariant(id: ID!): Boolean!
     setPriceTiers(variantId: ID!, tiers: [PriceTierInput!]!): [PriceTier!]!
+    "Replace a bundle's components wholesale. The variant's product must be kind='bundle'."
+    setBundleComponents(
+      bundleVariantId: ID!
+      components: [BundleComponentInput!]!
+    ): [BundleComponent!]!
   }
 `;
 
@@ -178,6 +198,7 @@ export const resolvers = {
   },
   ProductVariant: {
     priceTiers: (v: { id: string }) => products.getPriceTiers(v.id),
+    bundleComponents: (v: { id: string }) => products.getBundleComponents(v.id),
   },
 
   Query: {
@@ -353,6 +374,21 @@ export const resolvers = {
       await requirePermission(ctx, "product.edit_price");
       try {
         return await products.setPriceTiers(args.variantId, args.tiers);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    setBundleComponents: async (
+      _: unknown,
+      args: {
+        bundleVariantId: string;
+        components: { componentVariantId: string; qty: number }[];
+      },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "product.edit");
+      try {
+        return await products.setBundleComponents(args.bundleVariantId, args.components);
       } catch (e) {
         asGraphQLError(e);
       }

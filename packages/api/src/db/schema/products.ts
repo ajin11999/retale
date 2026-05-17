@@ -60,7 +60,7 @@ export const products = mysqlTable(
     // Null means public surfaces fall back to `name`.
     publicName: varchar({ length: 300 }),
     description: text(),
-    kind: mysqlEnum(["physical", "service"]).notNull().default("physical"),
+    kind: mysqlEnum(["physical", "service", "bundle"]).notNull().default("physical"),
     categoryId: ulidRef().references(() => productCategories.id, { onDelete: "set null" }),
     taxRateBps: int().notNull().default(0),
     priceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
@@ -149,6 +149,34 @@ export const productPriceTiers = mysqlTable(
     priceMinor: bigint({ mode: "number" }).notNull(),
   },
   (t) => [unique("product_price_tiers_variant_min_qty_unique").on(t.variantId, t.minQty)],
+);
+
+/**
+ * The composition of a `kind = 'bundle'` product. `bundleVariantId` is the
+ * bundle's own (sellable) variant; each row names a component variant and how
+ * many units of it the bundle contains. On sale the bundle line explodes into
+ * one order line per component — see order-service. Component variants use
+ * `restrict` on delete: a variant cannot be removed while a bundle needs it.
+ */
+export const bundleComponents = mysqlTable(
+  "bundle_components",
+  {
+    id: ulidPk(),
+    bundleVariantId: ulidRef()
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "cascade" }),
+    componentVariantId: ulidRef()
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "restrict" }),
+    qty: bigint({ mode: "number" }).notNull(),
+  },
+  (t) => [
+    unique("bundle_components_bundle_component_unique").on(
+      t.bundleVariantId,
+      t.componentVariantId,
+    ),
+    index("bundle_components_bundle_variant_id_idx").on(t.bundleVariantId),
+  ],
 );
 
 // --- Relations ---

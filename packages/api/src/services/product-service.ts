@@ -6,6 +6,7 @@
 import { and, eq, isNull, like } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
+  bundleComponents,
   productCategories,
   productPriceTiers,
   productVariants,
@@ -22,6 +23,8 @@ export type ProductErrorCode =
   | "NO_VARIANTS"
   | "LAST_VARIANT"
   | "SKU_TAKEN"
+  | "NOT_A_BUNDLE"
+  | "BUNDLE_NESTING"
   | "INVALID_INPUT";
 
 export class ProductError extends Error {
@@ -64,11 +67,13 @@ export function listCategories(): Promise<Category[]> {
 }
 
 async function loadCategory(id: string): Promise<Category> {
-  const row = await db.query.productCategories.findFirst({
-    where: eq(productCategories.id, id),
-  });
-  if (!row) throw new ProductError("CATEGORY_NOT_FOUND");
-  return row;
+  const rows = await db
+    .select()
+    .from(productCategories)
+    .where(eq(productCategories.id, id))
+    .limit(1);
+  if (!rows[0]) throw new ProductError("CATEGORY_NOT_FOUND");
+  return rows[0];
 }
 
 /** Walk the parent chain; throw if making `parentId` the parent of `id` loops. */
@@ -152,9 +157,9 @@ export interface VariantInput {
 }
 
 async function loadProductRow(id: string): Promise<Product> {
-  const row = await db.query.products.findFirst({ where: eq(products.id, id) });
-  if (!row) throw new ProductError("PRODUCT_NOT_FOUND");
-  return row;
+  const rows = await db.select().from(products).where(eq(products.id, id)).limit(1);
+  if (!rows[0]) throw new ProductError("PRODUCT_NOT_FOUND");
+  return rows[0];
 }
 
 async function variantsOf(productId: string): Promise<Variant[]> {
@@ -333,11 +338,13 @@ export async function addVariant(
 }
 
 async function loadVariant(id: string): Promise<Variant> {
-  const row = await db.query.productVariants.findFirst({
-    where: eq(productVariants.id, id),
-  });
-  if (!row) throw new ProductError("VARIANT_NOT_FOUND");
-  return row;
+  const rows = await db
+    .select()
+    .from(productVariants)
+    .where(eq(productVariants.id, id))
+    .limit(1);
+  if (!rows[0]) throw new ProductError("VARIANT_NOT_FOUND");
+  return rows[0];
 }
 
 export async function updateVariant(
@@ -417,6 +424,74 @@ export async function setPriceTiers(
     }
   });
   return getPriceTiers(variantId);
+}
+
+// --- Bundles ---
+
+type BundleComponent = typeof bundleComponents.$inferSelect;
+
+/** The component rows of a bundle variant. */
+export async function getBundleComponents(
+  bundleVariantId: string,
+): Promise<BundleComponent[]> {
+  await loadVariant(bundleVariantId);
+  return db
+    .select()
+    .from(bundleComponents)
+    .where(eq(bundleComponents.bundleVariantId, bundleVariantId));
+}
+
+/**
+ * Replace a bundle's components wholesale. The target variant's product must
+ * be `kind = 'bundle'`; components must exist, carry a positive qty, be
+ * distinct, and not themselves be bundles (no nesting).
+ */
+export async function setBundleComponents(
+  bundleVariantId: string,
+  components: { componentVariantId: string; qty: number }[],
+): Promise<BundleComponent[]> {
+  const bundleVariant = await loadVariant(bundleVariantId);
+  const bundleProduct = await loadProductRow(bundleVariant.productId);
+  if (bundleProduct.kind !== "bundle") {
+    throw new ProductError("NOT_A_BUNDLE", "product is not a bundle");
+  }
+
+  const seen = new Set<string>();
+  for (const c of components) {
+    if (!Number.isInteger(c.qty) || c.qty <= 0) {
+      throw new ProductError("INVALID_INPUT", "component qty must be a positive integer");
+    }
+    if (c.componentVariantId === bundleVariantId) {
+      throw new ProductError("INVALID_INPUT", "a bundle cannot contain itself");
+    }
+    if (seen.has(c.componentVariantId)) {
+      throw new ProductError("INVALID_INPUT", "duplicate component variant");
+    }
+    seen.add(c.componentVariantId);
+
+    const compVariant = await loadVariant(c.componentVariantId);
+    const compProduct = await loadProductRow(compVariant.productId);
+    if (compProduct.kind === "bundle") {
+      throw new ProductError("BUNDLE_NESTING", "a bundle component cannot itself be a bundle");
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(bundleComponents)
+      .where(eq(bundleComponents.bundleVariantId, bundleVariantId));
+    if (components.length) {
+      await tx.insert(bundleComponents).values(
+        components.map((c) => ({
+          id: ulid(),
+          bundleVariantId,
+          componentVariantId: c.componentVariantId,
+          qty: c.qty,
+        })),
+      );
+    }
+  });
+  return getBundleComponents(bundleVariantId);
 }
 
 /** Map a MySQL duplicate-key error on `sku` to a ProductError. */

@@ -110,6 +110,9 @@ export const orderItems = mysqlTable(
     snapshotPriceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
     // Survives a hard-delete of the tracking account. Tracking domain pending.
     snapshotTrackingAccountName: varchar({ length: 200 }),
+    // Set on lines that came from exploding a bundle — the bundle's name at
+    // sale time, so a receipt can group the component lines under it.
+    snapshotBundleName: varchar({ length: 300 }),
     attributionAccountId: ulidRef().references(() => trackingAccounts.id, {
       onDelete: "set null",
     }),

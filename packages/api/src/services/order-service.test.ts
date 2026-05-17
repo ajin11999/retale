@@ -31,6 +31,7 @@ import {
   voidCustomerSaleItem,
 } from "./order-service.ts";
 import { closeSession, createPointOfSale, openSession } from "./pos-service.ts";
+import { ProductError, setBundleComponents } from "./product-service.ts";
 import {
   createTrackingAccount,
   getTrackingAccount,
@@ -51,6 +52,7 @@ async function wipe(): Promise<void> {
     "customers",
     "stock_movements",
     "stock_locations",
+    "bundle_components",
     "product_variants",
     "products",
     "product_categories",
@@ -110,7 +112,7 @@ async function seedSession(code: string): Promise<string> {
  * `stockQty` (default 100). Returns the variant id.
  */
 async function seedVariant(opts?: {
-  kind?: "physical" | "service";
+  kind?: "physical" | "service" | "bundle";
   priceMinor?: number;
   costMinor?: number;
   stockQty?: number;
@@ -951,5 +953,99 @@ describe("dual product naming", () => {
     });
     const retItem = (await listOrderItems(ret.id))[0]!;
     expect(retItem.snapshotPublicName).toBe("Premium Widget");
+  });
+});
+
+describe("product bundles", () => {
+  /** Seed a bundle product priced at `priceMinor` with the given components. */
+  async function seedBundle(
+    priceMinor: number,
+    components: { variantId: string; qty: number }[],
+  ): Promise<string> {
+    const bundleVariantId = await seedVariant({ kind: "bundle", priceMinor });
+    await setBundleComponents(
+      bundleVariantId,
+      components.map((c) => ({ componentVariantId: c.variantId, qty: c.qty })),
+    );
+    return bundleVariantId;
+  }
+
+  test("selling a bundle explodes into one line per component", async () => {
+    const sessionId = await seedSession("P1");
+    const a = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const b = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    // Bundle priced at 1500 — a 500 saving versus buying both separately.
+    const bundle = await seedBundle(1500, [
+      { variantId: a, qty: 1 },
+      { variantId: b, qty: 1 },
+    ]);
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: bundle, qty: 1 }],
+      payments: [{ amountMinor: 1500 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(1500);
+
+    const items = await listOrderItems(order.id);
+    expect(items).toHaveLength(2);
+    // No line references the bundle variant itself.
+    expect(items.some((i) => i.variantId === bundle)).toBe(false);
+    // Each component line is tagged with the bundle name.
+    expect(items.every((i) => i.snapshotBundleName === "Widget")).toBe(true);
+    // The split is proportional: 1500 over two equal-value components.
+    const totals = items.map((i) => i.qty * i.snapshotPriceMinor - i.discountMinor);
+    expect(totals.reduce((s, t) => s + t, 0)).toBe(1500);
+
+    // Stock decremented per real component.
+    expect(await stockOf(a)).toBe(99);
+    expect(await stockOf(b)).toBe(99);
+  });
+
+  test("bundle qty and component qty both multiply the component line qty", async () => {
+    const sessionId = await seedSession("P1");
+    const a = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    // The bundle contains 3 of component A.
+    const bundle = await seedBundle(2000, [{ variantId: a, qty: 3 }]);
+
+    // Buy 2 bundles → 2 × 3 = 6 units of A.
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: bundle, qty: 2 }],
+      payments: [{ amountMinor: 4000 }],
+      createdByUserId: userId,
+    });
+    const items = await listOrderItems(order.id);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.qty).toBe(6);
+    expect(order.totalMinor).toBe(4000);
+    expect(await stockOf(a)).toBe(94);
+  });
+
+  test("a bundle with no components is rejected", async () => {
+    const sessionId = await seedSession("P1");
+    const bundle = await seedVariant({ kind: "bundle", priceMinor: 1000 });
+    await expectError("INVALID_INPUT", () =>
+      createPosOrder({
+        posSessionId: sessionId,
+        items: [{ variantId: bundle, qty: 1 }],
+        payments: [{ amountMinor: 1000 }],
+        createdByUserId: userId,
+      }),
+    );
+  });
+
+  test("setBundleComponents rejects nesting a bundle inside a bundle", async () => {
+    const a = await seedVariant({ priceMinor: 1000 });
+    const inner = await seedBundle(1500, [{ variantId: a, qty: 1 }]);
+    const outer = await seedVariant({ kind: "bundle", priceMinor: 3000 });
+    let code: string | undefined;
+    try {
+      await setBundleComponents(outer, [{ componentVariantId: inner, qty: 1 }]);
+    } catch (e) {
+      code = (e as ProductError).code;
+    }
+    expect(code).toBe("BUNDLE_NESTING");
   });
 });
