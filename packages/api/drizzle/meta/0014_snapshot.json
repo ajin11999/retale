@@ -4177,8 +4177,8 @@
         }
       },
       "foreignKeys": {
-        "tracking_account_ledger_tracking_account_id_tracking_accounts_id_fk": {
-          "name": "tracking_account_ledger_tracking_account_id_tracking_accounts_id_fk",
+        "tracking_account_ledger_account_id_fk": {
+          "name": "tracking_account_ledger_account_id_fk",
           "tableFrom": "tracking_account_ledger",
           "tableTo": "tracking_accounts",
           "columnsFrom": [

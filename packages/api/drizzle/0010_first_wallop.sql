@@ -29,7 +29,7 @@ CREATE TABLE `tracking_accounts` (
 	CONSTRAINT `tracking_accounts_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
-ALTER TABLE `tracking_account_ledger` ADD CONSTRAINT `tracking_account_ledger_tracking_account_id_tracking_accounts_id_fk` FOREIGN KEY (`tracking_account_id`) REFERENCES `tracking_accounts`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `tracking_account_ledger` ADD CONSTRAINT `tracking_account_ledger_account_id_fk` FOREIGN KEY (`tracking_account_id`) REFERENCES `tracking_accounts`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `tracking_account_ledger` ADD CONSTRAINT `tracking_account_ledger_pos_session_id_pos_sessions_id_fk` FOREIGN KEY (`pos_session_id`) REFERENCES `pos_sessions`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `tracking_account_ledger` ADD CONSTRAINT `tracking_account_ledger_created_by_user_id_users_id_fk` FOREIGN KEY (`created_by_user_id`) REFERENCES `users`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `tracking_accounts` ADD CONSTRAINT `tracking_accounts_parent_id_tracking_accounts_id_fk` FOREIGN KEY (`parent_id`) REFERENCES `tracking_accounts`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

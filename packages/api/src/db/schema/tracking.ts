@@ -9,6 +9,7 @@ import { relations } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
   bigint,
+  foreignKey,
   index,
   mysqlEnum,
   mysqlTable,
@@ -79,9 +80,9 @@ export const trackingAccountLedger = mysqlTable(
   "tracking_account_ledger",
   {
     id: ulidPk(),
-    trackingAccountId: ulidRef()
-      .notNull()
-      .references(() => trackingAccounts.id, { onDelete: "cascade" }),
+    // FK named explicitly: the drizzle-derived name would exceed MariaDB's
+    // 64-char identifier limit. See `tracking_account_ledger_account_id_fk` below.
+    trackingAccountId: ulidRef().notNull(),
     type: mysqlEnum(TRACKING_LEDGER_TYPES).notNull(),
     // Positive = balance increases (attribution, deposit).
     amountMinor: bigint({ mode: "number" }).notNull(),
@@ -97,6 +98,11 @@ export const trackingAccountLedger = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => [
+    foreignKey({
+      name: "tracking_account_ledger_account_id_fk",
+      columns: [t.trackingAccountId],
+      foreignColumns: [trackingAccounts.id],
+    }).onDelete("cascade"),
     index("tracking_account_ledger_account_id_idx").on(
       t.trackingAccountId,
       t.createdAt,
