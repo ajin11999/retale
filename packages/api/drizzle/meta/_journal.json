@@ -162,6 +162,13 @@
       "when": 1779075582693,
       "tag": "0022_noisy_husk",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1779078417479,
+      "tag": "0023_outgoing_amphibian",
+      "breakpoints": true
     }
   ]
 }
