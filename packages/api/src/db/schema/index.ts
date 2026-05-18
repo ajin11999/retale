@@ -18,3 +18,4 @@ export * from "./orders.ts";
 export * from "./tracking.ts";
 export * from "./transfers.ts";
 export * from "./reorder.ts";
+export * from "./catalog.ts";

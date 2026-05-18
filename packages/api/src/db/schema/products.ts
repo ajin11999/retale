@@ -46,6 +46,19 @@ export const productCategories = mysqlTable(
 );
 
 /**
+ * How a product's price shows on the online catalog: not at all, masked to
+ * its order of magnitude, or in full. Default `exclude` — nothing leaks.
+ */
+export const ONLINE_PRICE_MODES = ["exclude", "peek", "show"] as const;
+
+/**
+ * How a product's stock shows on the online catalog: the real quantity, a
+ * fuzzy band, or nothing. Default `hide` — conservative for items whose
+ * count is uncertain.
+ */
+export const ONLINE_STOCK_MODES = ["show_real", "peek", "hide"] as const;
+
+/**
  * Shared product identity. The sellable SKU lives on `product_variants`;
  * every product has at least one. `kind` distinguishes stock-tracked goods
  * from services (which skip stock movements and allow price overrides).
@@ -72,6 +85,13 @@ export const products = mysqlTable(
     }),
     // When false, the product is excluded from the reorder forecast.
     replenishMonitored: boolean().notNull().default(true),
+    // Online catalog controls. `onlineVisible` is the master switch — false
+    // means the product does not exist as far as the catalog is concerned.
+    // The two modes govern how its price / stock render once visible. All
+    // three default conservative; a product leaks nothing until opted in.
+    onlineVisible: boolean().notNull().default(false),
+    onlinePriceMode: mysqlEnum(ONLINE_PRICE_MODES).notNull().default("exclude"),
+    onlineStockMode: mysqlEnum(ONLINE_STOCK_MODES).notNull().default("hide"),
     archivedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     // Lowercased name for LIKE search (fixes ProDuck empty-keyword bug at the
