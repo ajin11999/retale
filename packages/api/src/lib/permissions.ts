@@ -95,6 +95,7 @@ export const PERMISSIONS = [
   "admin.user.manage",
   "admin.role.manage",
   "admin.import.run",
+  "admin.settings.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[number];
