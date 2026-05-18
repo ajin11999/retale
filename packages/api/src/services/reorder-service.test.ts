@@ -23,6 +23,7 @@ import {
   type ReorderErrorCode,
   runReorderScan,
 } from "./reorder-service.ts";
+import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
 
 let userId: string;
 
@@ -32,6 +33,7 @@ async function wipe(): Promise<void> {
     "reorder_suggestions",
     "purchase_items",
     "purchases",
+    "vendor_variant_codes",
     "product_variants",
     "products",
     "vendors",
@@ -220,6 +222,21 @@ describe("runReorderScan", () => {
     await seedPurchase({ vendorId: lastUsed, variantId: v, qtyOrdered: 1 });
     const out = await runReorderScan();
     expect(out[0]!.vendorId).toBe(lastUsed);
+  });
+
+  test("picks the preferred vendor over the last-used vendor", async () => {
+    const preferred = await seedVendor("Preferred");
+    const lastUsed = await seedVendor("LastUsed");
+    const v = await seedVariant({ totalQty: 2, reorderPoint: 10 });
+    await seedPurchase({ vendorId: lastUsed, variantId: v, qtyOrdered: 1 });
+    await setVendorVariantCode({
+      vendorId: preferred,
+      variantId: v,
+      code: "PREF-1",
+      isPreferred: true,
+    });
+    const out = await runReorderScan();
+    expect(out[0]!.vendorId).toBe(preferred);
   });
 
   test("falls back to the primary vendor with no purchase history", async () => {

@@ -9,6 +9,7 @@ export * from "./products.ts";
 export * from "./locations.ts";
 export * from "./stock.ts";
 export * from "./vendors.ts";
+export * from "./vendor-variant-codes.ts";
 export * from "./purchases.ts";
 export * from "./deliveries.ts";
 export * from "./customers.ts";

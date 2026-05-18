@@ -13,6 +13,7 @@ import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { preferredVendorByVariant } from "./vendor-variant-code-service.ts";
 
 export type ReorderErrorCode =
   | "SUGGESTION_NOT_FOUND"
@@ -72,7 +73,8 @@ async function loadSuggestion(id: string): Promise<Suggestion> {
  * `available = onHand + onOrder` is below the point — netting out `onOrder`
  * so a variant that already has an open PO is not re-suggested every day.
  *
- * Vendor pick, in order: the variant's last-used vendor (most recent
+ * Vendor pick, in order: the variant's preferred vendor (its `isPreferred`
+ * `vendor_variant_codes` mapping), then its last-used vendor (most recent
  * non-cancelled purchase that included it), then the product's primary
  * vendor, then unassigned. The suggested quantity is the variant's
  * `reorderQty`, or — when that is null — enough to bring `available` back up
@@ -153,6 +155,9 @@ export async function runReorderScan(): Promise<Suggestion[]> {
     }
   }
 
+  // Preferred vendor: an explicit `isPreferred` vendor_variant_codes mapping.
+  const preferredByVariant = await preferredVendorByVariant(candidateIds);
+
   const rows: (typeof reorderSuggestions.$inferInsert)[] = [];
   for (const c of candidates) {
     const reorderPoint = c.reorderPoint as number;
@@ -161,7 +166,10 @@ export async function runReorderScan(): Promise<Suggestion[]> {
     if (available >= reorderPoint) continue;
 
     const vendorId =
-      lastVendorByVariant.get(c.variantId) ?? c.primaryVendorId ?? null;
+      preferredByVariant.get(c.variantId) ??
+      lastVendorByVariant.get(c.variantId) ??
+      c.primaryVendorId ??
+      null;
     const suggestedQty =
       c.reorderQty != null
         ? c.reorderQty

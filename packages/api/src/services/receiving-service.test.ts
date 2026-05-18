@@ -15,7 +15,9 @@ import { locations } from "../db/schema/locations.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { stockMovements } from "../db/schema/stock.ts";
+import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
 import {
   commitReceivingCheck,
   getReceivingCheckLines,
@@ -39,8 +41,10 @@ async function wipe(): Promise<void> {
     "purchase_items",
     "purchase_sections",
     "purchases",
+    "vendor_variant_codes",
     "product_variants",
     "products",
+    "vendors",
     "locations",
   ]) {
     await db.execute(sql.raw(`DELETE FROM \`${t}\``));
@@ -92,15 +96,23 @@ async function seedVariant(opts?: { barcode?: string }): Promise<string> {
   return variantId;
 }
 
-/** Create an open purchase. Returns its id. */
-async function seedPurchase(): Promise<string> {
+/** Create an open purchase, optionally tied to a vendor. Returns its id. */
+async function seedPurchase(vendorId?: string): Promise<string> {
   const id = ulid();
   await db.insert(purchases).values({
     id,
+    vendorId: vendorId ?? null,
     snapshotVendorName: "Ad-hoc Supplier",
     date: "2026-05-18",
     createdByUserId: userId,
   });
+  return id;
+}
+
+/** Create a vendor. Returns its id. */
+async function seedVendor(): Promise<string> {
+  const id = ulid();
+  await db.insert(vendors).values({ id, name: "Acme Supply" });
   return id;
 }
 
@@ -287,6 +299,21 @@ describe("resolveReceivingScan", () => {
     expect(bySku.map((i) => i.id)).toEqual([itemId]);
 
     expect(await resolveReceivingScan(purchaseId, "no-such-code")).toEqual([]);
+  });
+
+  test("matches the vendor's part number for a purchase with a vendor", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const purchaseId = await seedPurchase(vendorId);
+    const itemId = await addItem({ purchaseId, variantId, qtyOrdered: 10, unitCostMinor: 500 });
+    await setVendorVariantCode({ vendorId, variantId, code: "VENDOR-PART-7" });
+
+    const matches = await resolveReceivingScan(purchaseId, "VENDOR-PART-7");
+    expect(matches.map((i) => i.id)).toEqual([itemId]);
+
+    // The same code does not resolve on a purchase from a different vendor.
+    const otherPurchaseId = await seedPurchase();
+    expect(await resolveReceivingScan(otherPurchaseId, "VENDOR-PART-7")).toEqual([]);
   });
 
   test("returns every line when the variant appears on the purchase twice", async () => {

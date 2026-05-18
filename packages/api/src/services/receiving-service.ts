@@ -13,6 +13,7 @@ import { productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { db } from "../lib/db.ts";
 import * as deliveries from "./delivery-service.ts";
+import { resolveVendorCode } from "./vendor-variant-code-service.ts";
 
 export type ReceivingErrorCode =
   | "PURCHASE_NOT_FOUND"
@@ -190,8 +191,10 @@ async function lineLabel(pi: PurchaseItem): Promise<string> {
 
 /**
  * Resolve a scanned code to the purchase line(s) it counts against. The code
- * is matched against variant barcode / SKU; more than one result means the
- * same variant appears on several lines of the purchase and staff must pick.
+ * is matched against our own variant barcode / SKU, and — when the purchase
+ * has a vendor — against that vendor's part numbers (`vendor_variant_codes`),
+ * so a scan of the vendor's own label on the box resolves. More than one
+ * result means the same variant appears on several lines and staff must pick.
  * Non-stock lines (no variant) have no code and are never returned here.
  */
 export async function resolveReceivingScan(
@@ -201,13 +204,25 @@ export async function resolveReceivingScan(
   const trimmed = code.trim();
   if (!trimmed) throw new ReceivingError("INVALID_INPUT", "scan code is empty");
 
-  const variants = await db
+  const purchase = await db.query.purchases.findFirst({
+    where: eq(purchases.id, purchaseId),
+  });
+  if (!purchase) throw new ReceivingError("PURCHASE_NOT_FOUND");
+
+  const ownMatches = await db
     .select({ id: productVariants.id })
     .from(productVariants)
     .where(
       or(eq(productVariants.barcode, trimmed), eq(productVariants.sku, trimmed)),
     );
-  if (variants.length === 0) return [];
+  const variantIds = new Set(ownMatches.map((v) => v.id));
+
+  if (purchase.vendorId) {
+    for (const vid of await resolveVendorCode(purchase.vendorId, trimmed)) {
+      variantIds.add(vid);
+    }
+  }
+  if (variantIds.size === 0) return [];
 
   return db
     .select()
@@ -215,10 +230,7 @@ export async function resolveReceivingScan(
     .where(
       and(
         eq(purchaseItems.purchaseId, purchaseId),
-        inArray(
-          purchaseItems.variantId,
-          variants.map((v) => v.id),
-        ),
+        inArray(purchaseItems.variantId, [...variantIds]),
       ),
     );
 }
