@@ -1,5 +1,5 @@
 // Purchase message service: render a purchase order into a vendor-ready text
-// message — the body a clerk sends over WhatsApp / email. The workshop's
+// message — the body a clerk sends over WhatsApp / email. The business's
 // configurable greeting and footer wrap the rendered order; each line shows
 // the vendor's own code where one is mapped, falling back to our product
 // name. Pure read — no side effects, no deep links, no PDF.
@@ -7,6 +7,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { products, productVariants } from "../db/schema/products.ts";
 import { db } from "../lib/db.ts";
+import { getBusinessSettings } from "./business-service.ts";
 import {
   getPurchase,
   invoiceTotalMinor,
@@ -14,7 +15,6 @@ import {
   listSections,
 } from "./purchase-service.ts";
 import { listCodesForVendor } from "./vendor-variant-code-service.ts";
-import { getWorkshopSettings } from "./workshop-service.ts";
 
 export interface PurchaseMessage {
   subject: string;
@@ -38,10 +38,10 @@ export async function renderPurchaseOrderMessage(
   purchaseId: string,
 ): Promise<PurchaseMessage> {
   const purchase = await getPurchase(purchaseId);
-  const [items, sections, workshop] = await Promise.all([
+  const [items, sections, business] = await Promise.all([
     listItems(purchaseId),
     listSections(purchaseId),
-    getWorkshopSettings(),
+    getBusinessSettings(),
   ]);
 
   // The vendor's own code for each variant, where mapped.
@@ -88,11 +88,11 @@ export async function renderPurchaseOrderMessage(
   };
 
   const out: string[] = [];
-  if (workshop.poGreeting?.trim()) out.push(workshop.poGreeting.trim(), "");
+  if (business.poGreeting?.trim()) out.push(business.poGreeting.trim(), "");
 
   out.push("PURCHASE ORDER");
-  if (workshop.name.trim()) out.push(`From: ${workshop.name.trim()}`);
-  const contact = [workshop.phone, workshop.email].filter(Boolean).join(" · ");
+  if (business.name.trim()) out.push(`From: ${business.name.trim()}`);
+  const contact = [business.phone, business.email].filter(Boolean).join(" · ");
   if (contact) out.push(contact);
   out.push(`Date: ${purchase.date}`);
   if (purchase.sourceDocument?.trim()) {
@@ -119,10 +119,10 @@ export async function renderPurchaseOrderMessage(
   }
 
   out.push(`Total: ${rp(await invoiceTotalMinor(purchaseId))}`);
-  if (workshop.poFooter?.trim()) out.push("", workshop.poFooter.trim());
+  if (business.poFooter?.trim()) out.push("", business.poFooter.trim());
 
-  const subject = workshop.name.trim()
-    ? `Purchase Order from ${workshop.name.trim()}`
+  const subject = business.name.trim()
+    ? `Purchase Order from ${business.name.trim()}`
     : "Purchase Order";
 
   return { subject, body: out.join("\n") };

@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "184c2f3e-c84e-4d28-acb5-7f024bd4ce83",
+  "id": "0c31937c-f1bd-4396-b265-73b6f0962524",
   "prevId": "773996f5-4001-4e4b-af12-c5b758f3f282",
   "tables": {
     "login_attempts": {
@@ -5427,8 +5427,8 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "workshop_settings": {
-      "name": "workshop_settings",
+    "business_settings": {
+      "name": "business_settings",
       "columns": {
         "id": {
           "name": "id",
@@ -5493,8 +5493,8 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "workshop_settings_id": {
-          "name": "workshop_settings_id",
+        "business_settings_id": {
+          "name": "business_settings_id",
           "columns": [
             "id"
           ]

@@ -1,6 +1,7 @@
 import { createSchema } from "graphql-yoga";
 import type { GraphQLContext } from "../lib/context.ts";
 import * as authDomain from "./auth.ts";
+import * as businessDomain from "./business.ts";
 import * as catalogDomain from "./catalog.ts";
 import * as customersDomain from "./customers.ts";
 import * as deliveriesDomain from "./deliveries.ts";
@@ -19,7 +20,6 @@ import * as stockDomain from "./stock.ts";
 import * as trackingDomain from "./tracking.ts";
 import * as transfersDomain from "./transfers.ts";
 import * as vendorVariantCodesDomain from "./vendor-variant-codes.ts";
-import * as workshopDomain from "./workshop.ts";
 import * as vendorsDomain from "./vendors.ts";
 
 // GraphQL schema root. The base defines `Query`/`Mutation` with one field
@@ -65,7 +65,7 @@ export const schema = createSchema<GraphQLContext>({
     catalogDomain.typeDefs,
     purchaseAlertsDomain.typeDefs,
     productImagesDomain.typeDefs,
-    workshopDomain.typeDefs,
+    businessDomain.typeDefs,
   ],
   resolvers: [
     baseResolvers,
@@ -89,6 +89,6 @@ export const schema = createSchema<GraphQLContext>({
     catalogDomain.resolvers,
     purchaseAlertsDomain.resolvers,
     productImagesDomain.resolvers,
-    workshopDomain.resolvers,
+    businessDomain.resolvers,
   ],
 });

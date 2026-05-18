@@ -1,6 +1,6 @@
-// Integration tests for workshop settings and the purchase-order message
+// Integration tests for business settings and the purchase-order message
 // renderer. Runs against the local Docker MariaDB (DATABASE_URL) and WIPEs
-// the workshop / purchase / product tables between tests.
+// the business / purchase / product tables between tests.
 //
 //   bun test src/services/purchase-message-service.test.ts
 
@@ -12,6 +12,7 @@ import { users } from "../db/schema/auth.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { getBusinessSettings, updateBusinessSettings } from "./business-service.ts";
 import { renderPurchaseOrderMessage } from "./purchase-message-service.ts";
 import {
   createItem,
@@ -20,14 +21,13 @@ import {
   PurchaseError,
 } from "./purchase-service.ts";
 import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
-import { getWorkshopSettings, updateWorkshopSettings } from "./workshop-service.ts";
 
 let userId: string;
 
 async function wipe(): Promise<void> {
   await db.execute(sql`SET FOREIGN_KEY_CHECKS = 0`);
   for (const t of [
-    "workshop_settings",
+    "business_settings",
     "vendor_variant_codes",
     "purchase_items",
     "purchase_sections",
@@ -83,30 +83,30 @@ async function seedVariant(productName: string, label?: string): Promise<string>
   return variantId;
 }
 
-describe("workshop settings", () => {
+describe("business settings", () => {
   test("returns blank defaults before anything is saved", async () => {
-    const s = await getWorkshopSettings();
+    const s = await getBusinessSettings();
     expect(s.name).toBe("");
     expect(s.poGreeting).toBeNull();
   });
 
   test("upserts and patches only the given fields", async () => {
-    await updateWorkshopSettings({ name: "Frans Workshop", poGreeting: "Hi vendor," });
-    let s = await getWorkshopSettings();
-    expect(s.name).toBe("Frans Workshop");
+    await updateBusinessSettings({ name: "Frans Retail", poGreeting: "Hi vendor," });
+    let s = await getBusinessSettings();
+    expect(s.name).toBe("Frans Retail");
     expect(s.poGreeting).toBe("Hi vendor,");
 
-    await updateWorkshopSettings({ phone: "+62811" });
-    s = await getWorkshopSettings();
-    expect(s.name).toBe("Frans Workshop"); // untouched
+    await updateBusinessSettings({ phone: "+62811" });
+    s = await getBusinessSettings();
+    expect(s.name).toBe("Frans Retail"); // untouched
     expect(s.phone).toBe("+62811");
   });
 });
 
 describe("renderPurchaseOrderMessage", () => {
   test("renders header, lines and total; wraps with greeting and footer", async () => {
-    await updateWorkshopSettings({
-      name: "Frans Workshop",
+    await updateBusinessSettings({
+      name: "Frans Retail",
       poGreeting: "Dear supplier,",
       poFooter: "Thank you.",
     });
@@ -125,10 +125,10 @@ describe("renderPurchaseOrderMessage", () => {
     });
 
     const { subject, body } = await renderPurchaseOrderMessage(purchase.id);
-    expect(subject).toBe("Purchase Order from Frans Workshop");
+    expect(subject).toBe("Purchase Order from Frans Retail");
     expect(body.startsWith("Dear supplier,")).toBe(true);
     expect(body.endsWith("Thank you.")).toBe(true);
-    expect(body).toContain("From: Frans Workshop");
+    expect(body).toContain("From: Frans Retail");
     expect(body).toContain("To: Acme Supply");
     expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
     expect(body).toContain("Total: Rp 100.000");

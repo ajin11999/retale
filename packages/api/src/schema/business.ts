@@ -1,20 +1,20 @@
-// Workshop GraphQL domain: the workshop settings (identity + the configurable
+// Business GraphQL domain: the business settings (identity + the configurable
 // PO message template) and the rendered purchase-order message that applies
 // it. Rendering is a pure read; editing settings is admin-gated.
 
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
+import {
+  getBusinessSettings,
+  updateBusinessSettings,
+} from "../services/business-service.ts";
 import { renderPurchaseOrderMessage } from "../services/purchase-message-service.ts";
 import { PurchaseError } from "../services/purchase-service.ts";
-import {
-  getWorkshopSettings,
-  updateWorkshopSettings,
-} from "../services/workshop-service.ts";
 
 export const typeDefs = /* GraphQL */ `
-  "Workshop-level configuration: identity and the PO message template."
-  type WorkshopSettings {
+  "Business-level configuration: identity and the PO message template."
+  type BusinessSettings {
     name: String!
     phone: String
     email: String
@@ -32,19 +32,19 @@ export const typeDefs = /* GraphQL */ `
   }
 
   extend type Query {
-    workshopSettings: WorkshopSettings!
+    businessSettings: BusinessSettings!
     "Render a purchase order into a sendable message (greeting + lines + footer)."
     purchaseMessage(purchaseId: ID!): PurchaseMessage!
   }
 
   extend type Mutation {
-    updateWorkshopSettings(
+    updateBusinessSettings(
       name: String
       phone: String
       email: String
       poGreeting: String
       poFooter: String
-    ): WorkshopSettings!
+    ): BusinessSettings!
   }
 `;
 
@@ -52,14 +52,14 @@ const iso = (v: Date | string | null | undefined): string | null =>
   v ? new Date(v).toISOString() : null;
 
 export const resolvers = {
-  WorkshopSettings: {
+  BusinessSettings: {
     updatedAt: (s: { updatedAt: Date | string | null }) => iso(s.updatedAt),
   },
 
   Query: {
-    workshopSettings: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+    businessSettings: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       await requirePermission(ctx, "admin.settings.manage");
-      return getWorkshopSettings();
+      return getBusinessSettings();
     },
     purchaseMessage: async (
       _: unknown,
@@ -79,13 +79,13 @@ export const resolvers = {
   },
 
   Mutation: {
-    updateWorkshopSettings: async (
+    updateBusinessSettings: async (
       _: unknown,
       args: Record<string, string | null | undefined>,
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "admin.settings.manage");
-      return updateWorkshopSettings(args);
+      return updateBusinessSettings(args);
     },
   },
 };
