@@ -5,7 +5,11 @@
 
 import { desc, eq, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
-import { vendorLedger, vendors } from "../db/schema/vendors.ts";
+import {
+  type VENDOR_SEND_CHANNELS,
+  vendorLedger,
+  vendors,
+} from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 
 export type VendorErrorCode =
@@ -25,6 +29,7 @@ export class VendorError extends Error {
 
 type Vendor = typeof vendors.$inferSelect;
 type LedgerEntry = typeof vendorLedger.$inferSelect;
+type SendChannel = (typeof VENDOR_SEND_CHANNELS)[number];
 
 /** A drizzle transaction handle; structurally a subset of `db`. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -52,6 +57,7 @@ export async function createVendor(input: {
   taxId?: string | null;
   notes?: string | null;
   leadTimeDays?: number | null;
+  preferredSendChannel?: SendChannel | null;
   createdByUserId: string;
 }): Promise<Vendor> {
   if (!input.name.trim()) throw new VendorError("INVALID_INPUT", "name is required");
@@ -72,6 +78,7 @@ export async function createVendor(input: {
     taxId: input.taxId ?? null,
     notes: input.notes ?? null,
     leadTimeDays: input.leadTimeDays ?? null,
+    preferredSendChannel: input.preferredSendChannel ?? null,
     createdByUserId: input.createdByUserId,
   });
   return loadVendor(id);
@@ -87,6 +94,7 @@ export async function updateVendor(
     taxId?: string | null;
     notes?: string | null;
     leadTimeDays?: number | null;
+    preferredSendChannel?: SendChannel | null;
   },
 ): Promise<Vendor> {
   await loadVendor(id);
@@ -110,6 +118,9 @@ export async function updateVendor(
       ...(patch.taxId !== undefined && { taxId: patch.taxId }),
       ...(patch.notes !== undefined && { notes: patch.notes }),
       ...(patch.leadTimeDays !== undefined && { leadTimeDays: patch.leadTimeDays }),
+      ...(patch.preferredSendChannel !== undefined && {
+        preferredSendChannel: patch.preferredSendChannel,
+      }),
     })
     .where(eq(vendors.id, id));
   return loadVendor(id);

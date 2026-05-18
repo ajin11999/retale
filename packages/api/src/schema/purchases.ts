@@ -98,6 +98,8 @@ export const typeDefs = /* GraphQL */ `
       memo: String
     ): Purchase!
     cancelPurchase(id: ID!): Purchase!
+    "Duplicate a purchase as a fresh open draft (recurring-order shortcut)."
+    clonePurchase(id: ID!): Purchase!
 
     createPurchaseSection(purchaseId: ID!, name: String!, sortOrder: Int): PurchaseSection!
     updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
@@ -237,6 +239,14 @@ export const resolvers = {
       const viewer = await requirePermission(ctx, "purchase.cancel");
       try {
         return await purchases.cancelPurchase(args.id, viewer.userId);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    clonePurchase: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
+      const viewer = await requirePermission(ctx, "purchase.create");
+      try {
+        return await purchases.clonePurchase(args.id, viewer.userId);
       } catch (e) {
         asGraphQLError(e);
       }

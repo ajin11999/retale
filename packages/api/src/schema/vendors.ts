@@ -18,6 +18,9 @@ export const typeDefs = /* GraphQL */ `
 
   enum VendorLedgerRefType { purchase purchase_delivery payment adjustment import }
 
+  "Channel the send screen pre-selects for a vendor's purchase orders."
+  enum VendorSendChannel { whatsapp email }
+
   type Vendor {
     id: ID!
     name: String!
@@ -28,6 +31,8 @@ export const typeDefs = /* GraphQL */ `
     notes: String
     "Typical delivery lead time in days; feeds the reorder forecast."
     leadTimeDays: Int
+    "Default send channel pre-selected on the send screen; null = no preference."
+    preferredSendChannel: VendorSendChannel
     "Cached AP balance, minor units. Positive = we owe the vendor."
     balanceMinor: Float!
     archivedAt: String
@@ -63,6 +68,7 @@ export const typeDefs = /* GraphQL */ `
       taxId: String
       notes: String
       leadTimeDays: Int
+      preferredSendChannel: VendorSendChannel
     ): Vendor!
     updateVendor(
       id: ID!
@@ -73,6 +79,7 @@ export const typeDefs = /* GraphQL */ `
       taxId: String
       notes: String
       leadTimeDays: Int
+      preferredSendChannel: VendorSendChannel
     ): Vendor!
     setVendorArchived(id: ID!, archived: Boolean!): Vendor!
     "Hard delete — root-only. Refused if the vendor carries a non-zero AP balance."

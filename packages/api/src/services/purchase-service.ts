@@ -233,6 +233,60 @@ export async function cancelPurchase(id: string, userId: string): Promise<Purcha
   return loadPurchase(id);
 }
 
+/**
+ * Clone a purchase as a fresh open draft — for workshops that reorder the
+ * same basket. Copies the vendor, memo, sections and lines (with
+ * `qtyDelivered` reset to 0); the clone dates today, starts at `revision` 1,
+ * and carries no send history. `sourceDocument` is intentionally dropped — it
+ * points at the original vendor invoice, which the clone is not. The source
+ * may be in any status; the clone is always a fresh open purchase.
+ */
+export async function clonePurchase(id: string, userId: string): Promise<Purchase> {
+  const source = await loadPurchase(id);
+  const sourceSections = await listSections(id);
+  const sourceItems = await listItems(id);
+
+  const newId = ulid();
+  await db.transaction(async (tx) => {
+    await tx.insert(purchases).values({
+      id: newId,
+      vendorId: source.vendorId,
+      snapshotVendorName: source.snapshotVendorName,
+      date: new Date().toISOString().slice(0, 10),
+      memo: source.memo,
+      createdByUserId: userId,
+    });
+
+    // Sections get fresh ids; remember the mapping to reparent items.
+    const sectionIdMap = new Map<string, string>();
+    for (const s of sourceSections) {
+      const sid = ulid();
+      sectionIdMap.set(s.id, sid);
+      await tx.insert(purchaseSections).values({
+        id: sid,
+        purchaseId: newId,
+        name: s.name,
+        sortOrder: s.sortOrder,
+      });
+    }
+
+    for (const it of sourceItems) {
+      await tx.insert(purchaseItems).values({
+        id: ulid(),
+        purchaseId: newId,
+        sectionId: it.sectionId ? (sectionIdMap.get(it.sectionId) ?? null) : null,
+        variantId: it.variantId,
+        description: it.description,
+        qtyOrdered: it.qtyOrdered,
+        qtyDelivered: 0,
+        unitCostMinor: it.unitCostMinor,
+        sortOrder: it.sortOrder,
+      });
+    }
+  });
+  return loadPurchase(newId);
+}
+
 // --- Sections ---
 
 export async function createSection(input: {

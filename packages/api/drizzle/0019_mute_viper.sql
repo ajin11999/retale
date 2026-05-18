@@ -1,0 +1,1 @@
+ALTER TABLE `vendors` ADD `preferred_send_channel` enum('whatsapp','email');

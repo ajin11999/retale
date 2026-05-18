@@ -19,6 +19,13 @@ import { users } from "./auth.ts";
 import { posSessions } from "./pos.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
+/**
+ * Channels a purchase order can be sent over from the send screen. A vendor's
+ * `preferredSendChannel` pre-selects one; `manual` is not offered as a default
+ * (it means "handled off-system" — never something to pre-pick).
+ */
+export const VENDOR_SEND_CHANNELS = ["whatsapp", "email"] as const;
+
 /** Ledger event categories. `amount_minor` is positive when we owe more. */
 export const VENDOR_LEDGER_TYPES = [
   "purchase_on_account",
@@ -56,6 +63,9 @@ export const vendors = mysqlTable(
     // Typical days from placing a purchase order to stock arriving. Feeds the
     // reorder forecast; null = unknown lead time.
     leadTimeDays: int(),
+    // Default channel the send screen pre-selects for this vendor's POs;
+    // null = no preference (the clerk picks each time).
+    preferredSendChannel: mysqlEnum(VENDOR_SEND_CHANNELS),
     // Cached sum of vendor_ledger.amount_minor. Positive = we owe them.
     balanceMinor: bigint({ mode: "number" }).notNull().default(0),
     archivedAt: timestamp(),
