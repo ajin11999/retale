@@ -6,6 +6,7 @@ import * as catalogDomain from "./catalog.ts";
 import * as customersDomain from "./customers.ts";
 import * as deliveriesDomain from "./deliveries.ts";
 import * as forecastDomain from "./forecast.ts";
+import * as journalDomain from "./journal.ts";
 import * as locationsDomain from "./locations.ts";
 import * as ordersDomain from "./orders.ts";
 import * as posDomain from "./pos.ts";
@@ -70,6 +71,7 @@ export const schema = createSchema<GraphQLContext>({
     productAlertsDomain.typeDefs,
     businessDomain.typeDefs,
     reportsDomain.typeDefs,
+    journalDomain.typeDefs,
   ],
   resolvers: [
     baseResolvers,
@@ -96,5 +98,6 @@ export const schema = createSchema<GraphQLContext>({
     productAlertsDomain.resolvers,
     businessDomain.resolvers,
     reportsDomain.resolvers,
+    journalDomain.resolvers,
   ],
 });
