@@ -102,6 +102,8 @@ export async function createDelivery(input: {
   date: string;
   biller?: string | null;
   targetLocationId: string;
+  /** Set only when the delivery is a receiving check for a single purchase. */
+  purchaseId?: string | null;
   createdByUserId: string;
 }): Promise<Delivery> {
   if (!input.date?.trim()) throw new DeliveryError("INVALID_INPUT", "date is required");
@@ -116,6 +118,7 @@ export async function createDelivery(input: {
     date: input.date,
     biller: input.biller ?? null,
     targetLocationId: input.targetLocationId,
+    purchaseId: input.purchaseId ?? null,
     createdByUserId: input.createdByUserId,
   });
   return loadDelivery(id);

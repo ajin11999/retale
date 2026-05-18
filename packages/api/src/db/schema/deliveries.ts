@@ -20,7 +20,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { locations } from "./locations.ts";
-import { purchaseItems } from "./purchases.ts";
+import { purchaseItems, purchases } from "./purchases.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** `delivered` is set by the commit transaction; `cancelled` reverses it (root only). */
@@ -38,6 +38,12 @@ export const purchaseDeliveries = mysqlTable("purchase_deliveries", {
   targetLocationId: ulidRef()
     .notNull()
     .references(() => locations.id, { onDelete: "restrict" }),
+  // Set when the delivery is a receiving check tied to a single purchase: it
+  // is the resumable draft the purchase detail page reopens. Null marks a
+  // hand-built delivery (e.g. a multi-purchase landed-cost receipt). SET NULL
+  // on delete keeps a committed receiving check intact if its purchase is
+  // later removed.
+  purchaseId: ulidRef().references(() => purchases.id, { onDelete: "set null" }),
   status: mysqlEnum(DELIVERY_STATUSES).notNull().default("draft"),
   deliveredAt: timestamp(),
   deliveredByUserId: ulidRef().references(() => users.id),
@@ -90,6 +96,10 @@ export const purchaseDeliveriesRelations = relations(
     targetLocation: one(locations, {
       fields: [purchaseDeliveries.targetLocationId],
       references: [locations.id],
+    }),
+    purchase: one(purchases, {
+      fields: [purchaseDeliveries.purchaseId],
+      references: [purchases.id],
     }),
     items: many(purchaseDeliveryItems),
   }),

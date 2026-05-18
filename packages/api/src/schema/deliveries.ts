@@ -18,6 +18,8 @@ export const typeDefs = /* GraphQL */ `
     biller: String
     targetLocationId: ID!
     targetLocation: Location
+    "Set when this delivery is a receiving check tied to a single purchase."
+    purchaseId: ID
     status: DeliveryStatus!
     deliveredAt: String
     "Denormalized sum of the cost tree's root nodes — for list views."

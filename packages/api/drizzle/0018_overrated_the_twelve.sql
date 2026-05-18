@@ -1,0 +1,2 @@
+ALTER TABLE `purchase_deliveries` ADD `purchase_id` varchar(26);--> statement-breakpoint
+ALTER TABLE `purchase_deliveries` ADD CONSTRAINT `purchase_deliveries_purchase_id_purchases_id_fk` FOREIGN KEY (`purchase_id`) REFERENCES `purchases`(`id`) ON DELETE set null ON UPDATE no action;
