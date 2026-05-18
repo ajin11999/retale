@@ -155,3 +155,61 @@ a:hover {
   white-space: pre-wrap;
   margin-top: 1rem;
 }
+
+.card-img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 0.6rem;
+  background: var(--bg);
+}
+
+.card-img.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.gallery {
+  margin: 1rem 0 1.5rem;
+}
+
+.gallery-main {
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.gallery-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.gallery-thumb {
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.gallery-thumb.selected {
+  border-color: var(--accent);
+}
+
+.gallery-thumb img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+}

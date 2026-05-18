@@ -20,6 +20,13 @@ export interface CatalogVariant {
   stockPeek?: string;
 }
 
+export interface CatalogImage {
+  thumbnailUrl: string;
+  detailUrl: string;
+  width: number;
+  height: number;
+}
+
 export interface CatalogProduct {
   id: string;
   name: string;
@@ -29,6 +36,8 @@ export interface CatalogProduct {
   priceMode: PriceMode;
   stockMode: StockMode;
   variants: CatalogVariant[];
+  /** Gallery images, ordered; the first is the card thumbnail. */
+  images: CatalogImage[];
 }
 
 export interface CatalogCategory {

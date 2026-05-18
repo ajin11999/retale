@@ -205,6 +205,33 @@ export const bundleComponents = mysqlTable(
   ],
 );
 
+/**
+ * A product's catalog gallery image. The Retale API optimizes every upload
+ * (resize + WebP) before storing it on Vercel Blob — `detailUrl` is the
+ * ~1280px image, `thumbnailUrl` the ~400px card image. `sortOrder` 0 is the
+ * primary image (the card thumbnail). Product-level only; no per-variant
+ * images. Rows cascade-delete with the product.
+ */
+export const productImages = mysqlTable(
+  "product_images",
+  {
+    id: ulidPk(),
+    productId: ulidRef()
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    detailUrl: varchar({ length: 500 }).notNull(),
+    thumbnailUrl: varchar({ length: 500 }).notNull(),
+    // Dimensions of the detail image, for layout / aspect-ratio hints.
+    width: int().notNull(),
+    height: int().notNull(),
+    sortOrder: int().notNull().default(0),
+    createdAt: timestamp()
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [index("product_images_product_id_idx").on(t.productId)],
+);
+
 // --- Relations ---
 
 export const productCategoriesRelations = relations(productCategories, ({ one, many }) => ({
@@ -223,6 +250,14 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     references: [productCategories.id],
   }),
   variants: many(productVariants),
+  images: many(productImages),
+}));
+
+export const productImagesRelations = relations(productImages, ({ one }) => ({
+  product: one(products, {
+    fields: [productImages.productId],
+    references: [products.id],
+  }),
 }));
 
 export const productVariantsRelations = relations(productVariants, ({ one, many }) => ({

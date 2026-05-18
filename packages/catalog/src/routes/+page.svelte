@@ -55,7 +55,18 @@
     <div class="grid">
       {#each filtered as p (p.id)}
         {@const price = fromPriceLabel(p)}
+        {@const cover = p.images[0]}
         <a class="card" href="/product/{p.id}">
+          {#if cover}
+            <img
+              class="card-img"
+              src={cover.thumbnailUrl}
+              alt={p.name}
+              loading="lazy"
+            />
+          {:else}
+            <div class="card-img placeholder">No image</div>
+          {/if}
           <h3>{p.name}</h3>
           <div class="category">{categoryName(p.categoryId)}</div>
           {#if price}

@@ -14,6 +14,7 @@ import {
   type ONLINE_PRICE_MODES,
   type ONLINE_STOCK_MODES,
   productCategories,
+  productImages,
   products,
   productVariants,
 } from "../db/schema/products.ts";
@@ -132,6 +133,13 @@ export interface CatalogVariant {
   stockPeek?: string;
 }
 
+export interface CatalogImage {
+  thumbnailUrl: string;
+  detailUrl: string;
+  width: number;
+  height: number;
+}
+
 export interface CatalogProduct {
   id: string;
   name: string;
@@ -141,6 +149,8 @@ export interface CatalogProduct {
   priceMode: PriceMode;
   stockMode: StockMode;
   variants: CatalogVariant[];
+  /** Gallery images, ordered; the first is the card thumbnail. */
+  images: CatalogImage[];
 }
 
 export interface CatalogCategory {
@@ -201,6 +211,25 @@ export async function buildCatalogSnapshot(): Promise<CatalogSnapshot> {
     variantsByProduct.set(v.productId, list);
   }
 
+  const imageRows = productIds.length
+    ? await db
+        .select()
+        .from(productImages)
+        .where(inArray(productImages.productId, productIds))
+        .orderBy(productImages.sortOrder)
+    : [];
+  const imagesByProduct = new Map<string, CatalogImage[]>();
+  for (const im of imageRows) {
+    const list = imagesByProduct.get(im.productId) ?? [];
+    list.push({
+      thumbnailUrl: im.thumbnailUrl,
+      detailUrl: im.detailUrl,
+      width: im.width,
+      height: im.height,
+    });
+    imagesByProduct.set(im.productId, list);
+  }
+
   const categories = await db
     .select({
       id: productCategories.id,
@@ -221,6 +250,7 @@ export async function buildCatalogSnapshot(): Promise<CatalogSnapshot> {
     variants: (variantsByProduct.get(p.id) ?? []).map((v) =>
       renderVariant(v, p.onlinePriceMode, p.onlineStockMode),
     ),
+    images: imagesByProduct.get(p.id) ?? [],
   }));
 
   return {

@@ -169,6 +169,13 @@
       "when": 1779078417479,
       "tag": "0023_outgoing_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1779082817642,
+      "tag": "0024_loose_harrier",
+      "breakpoints": true
     }
   ]
 }
