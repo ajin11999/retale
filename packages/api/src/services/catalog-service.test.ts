@@ -203,7 +203,7 @@ describe("settings", () => {
 
 describe("publishCatalog", () => {
   test("logs an error row when the push target is not configured", async () => {
-    // CATALOG_PUBLISH_URL is unset in the test env.
+    // BLOB_READ_WRITE_TOKEN is unset in the test env.
     await seedProduct({ onlineVisible: true });
     await expectError(publishCatalog("manual", userId), "NOT_CONFIGURED");
 

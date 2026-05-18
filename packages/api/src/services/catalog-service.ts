@@ -6,6 +6,7 @@
 // log the attempt. The catalog app reads only the snapshot — see
 // docs/future-features.md → "Online catalog website".
 
+import { put } from "@vercel/blob";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 import { catalogPublishes } from "../db/schema/catalog.ts";
@@ -232,42 +233,37 @@ export async function buildCatalogSnapshot(): Promise<CatalogSnapshot> {
 
 // --- Publish ---
 
+/** The fixed Vercel Blob key the snapshot is written to (overwritten each publish). */
+const SNAPSHOT_BLOB_KEY = "catalog/snapshot.json";
+
 /**
- * Push a built snapshot to the catalog's storage. Configured by env:
- * `CATALOG_PUBLISH_URL` (the receiving endpoint) and `CATALOG_PUBLISH_TOKEN`
- * (a bearer token). The push is a single JSON POST — the storage side keys
- * it by `snapshot.version` so readers see one whole snapshot or the prior
- * one, never a half-applied state.
+ * Push a built snapshot to Vercel Blob — the catalog app reads it from there.
+ * Configured by `BLOB_READ_WRITE_TOKEN`. The snapshot is written to one fixed
+ * public key, overwritten on every publish; each `put` is atomic, so a reader
+ * gets either the whole new snapshot or the previous one, never a partial.
+ * A short cache TTL keeps the live catalog fresh after a publish.
  */
 async function pushSnapshot(snapshot: CatalogSnapshot): Promise<void> {
-  const url = process.env.CATALOG_PUBLISH_URL;
-  if (!url) {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
     throw new CatalogError(
       "NOT_CONFIGURED",
-      "CATALOG_PUBLISH_URL is not set — cannot publish",
+      "BLOB_READ_WRITE_TOKEN is not set — cannot publish",
     );
   }
-  const token = process.env.CATALOG_PUBLISH_TOKEN;
-  let res: Response;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(snapshot),
+    await put(SNAPSHOT_BLOB_KEY, JSON.stringify(snapshot), {
+      access: "public",
+      token,
+      contentType: "application/json",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      cacheControlMaxAge: 60,
     });
   } catch (e) {
     throw new CatalogError(
       "UPLOAD_FAILED",
-      `snapshot push failed: ${(e as Error).message}`,
-    );
-  }
-  if (!res.ok) {
-    throw new CatalogError(
-      "UPLOAD_FAILED",
-      `snapshot push rejected: HTTP ${res.status}`,
+      `snapshot push to blob failed: ${(e as Error).message}`,
     );
   }
 }
