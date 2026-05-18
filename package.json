@@ -9,6 +9,7 @@
     "typecheck": "bun run --filter @retale/api typecheck",
     "db:generate": "bun run --filter @retale/api db:generate",
     "db:migrate": "bun run --filter @retale/api db:migrate",
-    "db:seed": "bun run --filter @retale/api db:seed"
+    "db:seed": "bun run --filter @retale/api db:seed",
+    "jobs:run": "bun run --filter @retale/api jobs:run"
   }
 }

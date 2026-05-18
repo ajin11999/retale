@@ -5,7 +5,7 @@
 // one, so a daily run does not pile up duplicates. Alerts are never
 // auto-closed (the locked product-alert philosophy).
 
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { ulid } from "ulid";
 import { purchaseAlerts } from "../db/schema/purchase-alerts.ts";
 import { purchaseSends, purchases } from "../db/schema/purchases.ts";
@@ -30,6 +30,9 @@ type PurchaseAlert = typeof purchaseAlerts.$inferSelect;
 
 /** Default grace period for a PO with no recorded expected-delivery date. */
 export const DEFAULT_GRACE_DAYS = 14;
+
+/** Acknowledged alerts older than this are purged by the retention job. */
+export const ACK_RETENTION_DAYS = 365;
 
 const MS_PER_DAY = 86_400_000;
 
@@ -187,4 +190,33 @@ export async function acknowledgePurchaseAlert(input: {
     })
     .where(eq(purchaseAlerts.id, input.id));
   return loadAlert(input.id);
+}
+
+/**
+ * Hard-delete acknowledged alerts older than `olderThanDays` — table-bloat
+ * control. Open (unacknowledged) alerts are never purged: a year-old open
+ * alert is its own signal. Returns the count removed.
+ * See docs/design-decisions.md → "Product alerts → Retention".
+ */
+export async function purgeAcknowledgedAlerts(
+  olderThanDays: number = ACK_RETENTION_DAYS,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanDays * 86_400_000);
+  const stale = await db
+    .select({ id: purchaseAlerts.id })
+    .from(purchaseAlerts)
+    .where(
+      and(
+        isNotNull(purchaseAlerts.acknowledgedAt),
+        lt(purchaseAlerts.acknowledgedAt, cutoff),
+      ),
+    );
+  if (stale.length === 0) return 0;
+  await db.delete(purchaseAlerts).where(
+    inArray(
+      purchaseAlerts.id,
+      stale.map((s) => s.id),
+    ),
+  );
+  return stale.length;
 }

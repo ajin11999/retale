@@ -16,6 +16,7 @@ import { db } from "../lib/db.ts";
 import {
   acknowledgePurchaseAlert,
   listPurchaseAlerts,
+  purgeAcknowledgedAlerts,
   PurchaseAlertError,
   type PurchaseAlertErrorCode,
   raiseDeliveryOverdueAlerts,
@@ -209,5 +210,39 @@ describe("acknowledgePurchaseAlert", () => {
     const second = await raiseDeliveryOverdueAlerts();
     expect(second).toHaveLength(1);
     expect(second[0]?.id).not.toBe(first!.id);
+  });
+});
+
+describe("purgeAcknowledgedAlerts", () => {
+  /** Insert an alert row directly, with chosen timestamps. Returns its id. */
+  async function seedAlert(opts: {
+    acknowledgedAt?: Date | null;
+    triggeredAt?: Date;
+  }): Promise<string> {
+    const purchaseId = await seedPurchase("open");
+    const id = ulid();
+    await db.insert(purchaseAlerts).values({
+      id,
+      purchaseId,
+      type: "delivery_overdue",
+      triggeredAt: opts.triggeredAt ?? new Date(),
+      acknowledgedAt: opts.acknowledgedAt ?? null,
+    });
+    return id;
+  }
+
+  test("purges acknowledged alerts past the retention window, keeps the rest", async () => {
+    await seedAlert({ acknowledgedAt: daysAgo(400) }); // old → purged
+    const recent = await seedAlert({ acknowledgedAt: daysAgo(10) }); // kept
+
+    expect(await purgeAcknowledgedAlerts()).toBe(1);
+    const remaining = await listPurchaseAlerts();
+    expect(remaining.map((a) => a.id)).toEqual([recent]);
+  });
+
+  test("never purges an open alert, however old", async () => {
+    await seedAlert({ acknowledgedAt: null, triggeredAt: daysAgo(800) });
+    expect(await purgeAcknowledgedAlerts()).toBe(0);
+    expect(await listPurchaseAlerts({ acknowledged: false })).toHaveLength(1);
   });
 });
