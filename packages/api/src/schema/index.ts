@@ -9,6 +9,7 @@ import * as forecastDomain from "./forecast.ts";
 import * as locationsDomain from "./locations.ts";
 import * as ordersDomain from "./orders.ts";
 import * as posDomain from "./pos.ts";
+import * as productAlertsDomain from "./product-alerts.ts";
 import * as productImagesDomain from "./product-images.ts";
 import * as productsDomain from "./products.ts";
 import * as purchaseAlertsDomain from "./purchase-alerts.ts";
@@ -65,6 +66,7 @@ export const schema = createSchema<GraphQLContext>({
     catalogDomain.typeDefs,
     purchaseAlertsDomain.typeDefs,
     productImagesDomain.typeDefs,
+    productAlertsDomain.typeDefs,
     businessDomain.typeDefs,
   ],
   resolvers: [
@@ -89,6 +91,7 @@ export const schema = createSchema<GraphQLContext>({
     catalogDomain.resolvers,
     purchaseAlertsDomain.resolvers,
     productImagesDomain.resolvers,
+    productAlertsDomain.resolvers,
     businessDomain.resolvers,
   ],
 });

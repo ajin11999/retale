@@ -6,6 +6,10 @@
 
 import { CatalogError, publishCatalog } from "./catalog-service.ts";
 import {
+  purgeAcknowledgedProductAlerts,
+  scanProductAlerts,
+} from "./product-alert-service.ts";
+import {
   purgeAcknowledgedAlerts,
   raiseDeliveryOverdueAlerts,
   raiseSendDueAlerts,
@@ -75,6 +79,12 @@ export async function runScheduledJobs(): Promise<JobsSummary> {
     }),
   );
   results.push(
+    await runJob("product-alert-scan", async () => {
+      const raised = await scanProductAlerts();
+      return `${raised.length} product alert(s) raised`;
+    }),
+  );
+  results.push(
     await runJob("catalog-publish", async () => {
       const publish = await publishCatalog("scheduled", null);
       return `published ${publish.snapshotVersion} (${publish.productCount} product(s))`;
@@ -82,7 +92,9 @@ export async function runScheduledJobs(): Promise<JobsSummary> {
   );
   results.push(
     await runJob("alert-retention-purge", async () => {
-      const purged = await purgeAcknowledgedAlerts();
+      const purged =
+        (await purgeAcknowledgedAlerts()) +
+        (await purgeAcknowledgedProductAlerts());
       return `${purged} acknowledged alert(s) purged`;
     }),
   );
