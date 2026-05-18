@@ -44,6 +44,10 @@ export const purchases = mysqlTable("purchases", {
   date: date({ mode: "string" }).notNull(),
   sourceDocument: varchar({ length: 300 }),
   memo: text(),
+  // Optional "get this PO sent by" date — for a draft accumulated over time
+  // ahead of a vendor's delivery run. Drives the `send_due` alert; null = no
+  // deadline tracked.
+  sendDueDate: date({ mode: "string" }),
   status: mysqlEnum(PURCHASE_STATUSES).notNull().default("open"),
   // Bumped by content edits (items, sections). Sending snapshots it but does
   // not bump it — `revision` tracks content only.

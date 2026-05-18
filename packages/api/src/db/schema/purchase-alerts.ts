@@ -11,8 +11,11 @@ import { users } from "./auth.ts";
 import { purchases } from "./purchases.ts";
 import { ulidPk, ulidRef } from "./_helpers.ts";
 
-/** `delivery_overdue` = a sent PO that is past due with stock still owed. */
-export const PURCHASE_ALERT_TYPES = ["delivery_overdue"] as const;
+/**
+ * `delivery_overdue` — a sent PO past due with stock still owed.
+ * `send_due` — a draft PO whose "send by" date has arrived, still unsent.
+ */
+export const PURCHASE_ALERT_TYPES = ["delivery_overdue", "send_due"] as const;
 
 /**
  * One alert about a purchase. `triggerContext` snapshots the values that

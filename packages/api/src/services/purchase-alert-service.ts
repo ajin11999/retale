@@ -5,7 +5,7 @@
 // one, so a daily run does not pile up duplicates. Alerts are never
 // auto-closed (the locked product-alert philosophy).
 
-import { and, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, lte } from "drizzle-orm";
 import { ulid } from "ulid";
 import { purchaseAlerts } from "../db/schema/purchase-alerts.ts";
 import { purchaseSends, purchases } from "../db/schema/purchases.ts";
@@ -148,6 +148,79 @@ export async function raiseDeliveryOverdueAlerts(
         expectedDeliveryDate: send.expectedDeliveryDate ?? null,
         graceDays,
       },
+    });
+  }
+
+  if (rows.length === 0) return [];
+  await db.insert(purchaseAlerts).values(rows);
+  return db
+    .select()
+    .from(purchaseAlerts)
+    .where(
+      inArray(
+        purchaseAlerts.id,
+        rows.map((r) => r.id as string),
+      ),
+    );
+}
+
+/**
+ * Scan for draft purchase orders whose "send by" date has arrived and raise a
+ * `send_due` alert for each. A purchase qualifies when it is still `open`, has
+ * a `sendDueDate` of today or earlier, and has never been confirmed-sent (a
+ * merely-prepared send link does not count). Idempotent — one open alert per
+ * PO. Returns the alerts newly raised.
+ */
+export async function raiseSendDueAlerts(): Promise<PurchaseAlert[]> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const due = await db
+    .select({ id: purchases.id, sendDueDate: purchases.sendDueDate })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.status, "open"),
+        isNotNull(purchases.sendDueDate),
+        lte(purchases.sendDueDate, today),
+      ),
+    );
+  if (due.length === 0) return [];
+  const dueIds = due.map((d) => d.id);
+
+  // Purchases already confirmed-sent — nothing left to chase.
+  const sent = await db
+    .select({ purchaseId: purchaseSends.purchaseId })
+    .from(purchaseSends)
+    .where(
+      and(
+        inArray(purchaseSends.purchaseId, dueIds),
+        eq(purchaseSends.status, "sent"),
+      ),
+    );
+  const alreadySent = new Set(sent.map((s) => s.purchaseId));
+
+  // Purchases that already carry an open send_due alert — skip them.
+  const openAlerts = await db
+    .select({ purchaseId: purchaseAlerts.purchaseId })
+    .from(purchaseAlerts)
+    .where(
+      and(
+        eq(purchaseAlerts.type, "send_due"),
+        isNull(purchaseAlerts.acknowledgedAt),
+      ),
+    );
+  const alreadyAlerted = new Set(openAlerts.map((a) => a.purchaseId));
+
+  const now = new Date();
+  const rows: (typeof purchaseAlerts.$inferInsert)[] = [];
+  for (const d of due) {
+    if (alreadySent.has(d.id) || alreadyAlerted.has(d.id)) continue;
+    rows.push({
+      id: ulid(),
+      purchaseId: d.id,
+      type: "send_due",
+      triggeredAt: now,
+      triggerContext: { sendDueDate: d.sendDueDate },
     });
   }
 

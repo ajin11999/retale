@@ -23,6 +23,8 @@ export const typeDefs = /* GraphQL */ `
     date: String!
     sourceDocument: String
     memo: String
+    "Optional 'send by' deadline; once reached, an unsent draft raises a send_due alert."
+    sendDueDate: String
     status: PurchaseStatus!
     "Bumped by every content edit; snapshotted into each send row."
     revision: Int!
@@ -92,6 +94,7 @@ export const typeDefs = /* GraphQL */ `
       date: String!
       sourceDocument: String
       memo: String
+      sendDueDate: String
     ): Purchase!
     updatePurchase(
       id: ID!
@@ -100,6 +103,7 @@ export const typeDefs = /* GraphQL */ `
       date: String
       sourceDocument: String
       memo: String
+      sendDueDate: String
     ): Purchase!
     cancelPurchase(id: ID!): Purchase!
     "Duplicate a purchase as a fresh open draft (recurring-order shortcut)."

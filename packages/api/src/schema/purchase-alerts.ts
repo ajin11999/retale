@@ -9,7 +9,7 @@ import * as alerts from "../services/purchase-alert-service.ts";
 import * as purchaseService from "../services/purchase-service.ts";
 
 export const typeDefs = /* GraphQL */ `
-  enum PurchaseAlertType { delivery_overdue }
+  enum PurchaseAlertType { delivery_overdue send_due }
 
   "An acknowledgeable signal about a purchase order."
   type PurchaseAlert {
@@ -33,6 +33,8 @@ export const typeDefs = /* GraphQL */ `
   extend type Mutation {
     "Scan sent-but-undelivered POs and raise overdue alerts. Returns the new alerts."
     scanDeliveryOverdue(graceDays: Int): [PurchaseAlert!]!
+    "Scan draft POs past their send-by date and raise send_due alerts. Returns the new alerts."
+    scanSendDue: [PurchaseAlert!]!
     "Acknowledge an alert — a person has seen it."
     acknowledgePurchaseAlert(id: ID!, resolutionNote: String): PurchaseAlert!
   }
@@ -96,6 +98,14 @@ export const resolvers = {
         return await alerts.raiseDeliveryOverdueAlerts(
           args.graceDays ?? alerts.DEFAULT_GRACE_DAYS,
         );
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    scanSendDue: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "purchase.edit");
+      try {
+        return await alerts.raiseSendDueAlerts();
       } catch (e) {
         asGraphQLError(e);
       }

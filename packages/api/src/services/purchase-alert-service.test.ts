@@ -20,6 +20,7 @@ import {
   PurchaseAlertError,
   type PurchaseAlertErrorCode,
   raiseDeliveryOverdueAlerts,
+  raiseSendDueAlerts,
 } from "./purchase-alert-service.ts";
 
 let userId: string;
@@ -55,6 +56,7 @@ const dateStr = (d: Date) => d.toISOString().slice(0, 10);
 /** Insert a purchase. Returns its id. */
 async function seedPurchase(
   status: "open" | "complete" | "cancelled" = "open",
+  sendDueDate?: string,
 ): Promise<string> {
   const id = ulid();
   await db.insert(purchases).values({
@@ -62,6 +64,7 @@ async function seedPurchase(
     snapshotVendorName: "Acme",
     date: "2026-01-01",
     status,
+    sendDueDate: sendDueDate ?? null,
     createdByUserId: userId,
   });
   return id;
@@ -157,6 +160,47 @@ describe("raiseDeliveryOverdueAlerts", () => {
 
   test("rejects an invalid grace period", async () => {
     await expectError(raiseDeliveryOverdueAlerts(-1), "INVALID_INPUT");
+  });
+});
+
+describe("raiseSendDueAlerts", () => {
+  test("raises an alert once the send-by date has arrived", async () => {
+    const past = await seedPurchase("open", dateStr(daysAgo(1)));
+    const today = await seedPurchase("open", dateStr(daysAgo(0)));
+
+    const raised = await raiseSendDueAlerts();
+    expect(raised.map((a) => a.purchaseId).sort()).toEqual([past, today].sort());
+    expect(raised.every((a) => a.type === "send_due")).toBe(true);
+  });
+
+  test("does not raise before the date, or with no date set", async () => {
+    await seedPurchase("open", dateStr(daysAgo(-5))); // future
+    await seedPurchase("open"); // no send-by date
+    expect(await raiseSendDueAlerts()).toHaveLength(0);
+  });
+
+  test("does not raise once the PO has a confirmed send", async () => {
+    const purchaseId = await seedPurchase("open", dateStr(daysAgo(2)));
+    await seedSend({ purchaseId, status: "sent", sentAt: daysAgo(1) });
+    expect(await raiseSendDueAlerts()).toHaveLength(0);
+  });
+
+  test("still raises when only a prepared (unconfirmed) send exists", async () => {
+    const purchaseId = await seedPurchase("open", dateStr(daysAgo(2)));
+    await seedSend({ purchaseId, status: "prepared", sentAt: null });
+    expect(await raiseSendDueAlerts()).toHaveLength(1);
+  });
+
+  test("ignores non-open purchases", async () => {
+    await seedPurchase("complete", dateStr(daysAgo(2)));
+    await seedPurchase("cancelled", dateStr(daysAgo(2)));
+    expect(await raiseSendDueAlerts()).toHaveLength(0);
+  });
+
+  test("is idempotent — a second scan raises no duplicate", async () => {
+    await seedPurchase("open", dateStr(daysAgo(1)));
+    expect(await raiseSendDueAlerts()).toHaveLength(1);
+    expect(await raiseSendDueAlerts()).toHaveLength(0);
   });
 });
 

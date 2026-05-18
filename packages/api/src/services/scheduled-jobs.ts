@@ -8,6 +8,7 @@ import { CatalogError, publishCatalog } from "./catalog-service.ts";
 import {
   purgeAcknowledgedAlerts,
   raiseDeliveryOverdueAlerts,
+  raiseSendDueAlerts,
 } from "./purchase-alert-service.ts";
 import { runReorderScan } from "./reorder-service.ts";
 
@@ -65,6 +66,12 @@ export async function runScheduledJobs(): Promise<JobsSummary> {
     await runJob("delivery-overdue-scan", async () => {
       const raised = await raiseDeliveryOverdueAlerts();
       return `${raised.length} overdue alert(s) raised`;
+    }),
+  );
+  results.push(
+    await runJob("send-due-scan", async () => {
+      const raised = await raiseSendDueAlerts();
+      return `${raised.length} send-due alert(s) raised`;
     }),
   );
   results.push(

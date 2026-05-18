@@ -128,6 +128,8 @@ export async function createPurchase(input: {
   date: string;
   sourceDocument?: string | null;
   memo?: string | null;
+  /** Optional "send by" deadline; drives the send_due alert. */
+  sendDueDate?: string | null;
   createdByUserId: string;
 }): Promise<Purchase> {
   if (!input.date?.trim()) throw new PurchaseError("INVALID_INPUT", "date is required");
@@ -157,6 +159,7 @@ export async function createPurchase(input: {
     date: input.date,
     sourceDocument: input.sourceDocument ?? null,
     memo: input.memo ?? null,
+    sendDueDate: input.sendDueDate?.trim() || null,
     createdByUserId: input.createdByUserId,
   });
   return loadPurchase(id);
@@ -176,6 +179,7 @@ export async function updatePurchase(
     date?: string;
     sourceDocument?: string | null;
     memo?: string | null;
+    sendDueDate?: string | null;
   },
 ): Promise<Purchase> {
   const purchase = await loadPurchase(id);
@@ -222,6 +226,9 @@ export async function updatePurchase(
   }
   if (patch.sourceDocument !== undefined) set.sourceDocument = patch.sourceDocument;
   if (patch.memo !== undefined) set.memo = patch.memo;
+  if (patch.sendDueDate !== undefined) {
+    set.sendDueDate = patch.sendDueDate?.trim() || null;
+  }
 
   if (Object.keys(set).length > 0) {
     await db.update(purchases).set(set).where(eq(purchases.id, id));

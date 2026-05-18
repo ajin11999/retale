@@ -16,6 +16,7 @@ describe("runScheduledJobs", () => {
     expect(summary.results.map((r) => r.job)).toEqual([
       "reorder-scan",
       "delivery-overdue-scan",
+      "send-due-scan",
       "catalog-publish",
       "alert-retention-purge",
     ]);
@@ -24,6 +25,7 @@ describe("runScheduledJobs", () => {
     // The scans and the purge complete cleanly against any DB state.
     expect(byJob.get("reorder-scan")?.status).toBe("ok");
     expect(byJob.get("delivery-overdue-scan")?.status).toBe("ok");
+    expect(byJob.get("send-due-scan")?.status).toBe("ok");
     expect(byJob.get("alert-retention-purge")?.status).toBe("ok");
     // No BLOB_READ_WRITE_TOKEN in the test env → catalog publish is skipped,
     // not failed, so it raises no nightly alarm.
