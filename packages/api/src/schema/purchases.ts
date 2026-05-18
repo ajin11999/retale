@@ -6,6 +6,7 @@
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
+import { buildPurchaseSendDraft } from "../services/purchase-message-service.ts";
 import * as purchases from "../services/purchase-service.ts";
 import * as vendors from "../services/vendor-service.ts";
 
@@ -64,6 +65,19 @@ export const typeDefs = /* GraphQL */ `
     sortOrder: Int!
   }
 
+  "A purchase order rendered for one send channel: message + recipient + deep link."
+  type PurchaseSendDraft {
+    channel: PurchaseSendChannel!
+    "The recipient on file or overridden; raw, for display."
+    recipient: String
+    "False when the recipient is missing or unusable for this channel."
+    recipientAvailable: Boolean!
+    subject: String!
+    body: String!
+    "wa.me / mailto: URL; null when the recipient is unusable or channel is manual."
+    deepLink: String
+  }
+
   type PurchaseSend {
     id: ID!
     purchaseId: ID!
@@ -85,6 +99,12 @@ export const typeDefs = /* GraphQL */ `
       includeCancelled: Boolean
     ): [Purchase!]!
     purchase(id: ID!): Purchase
+    "Render a PO for sending: message body + recipient + wa.me / mailto: deep link."
+    purchaseSendDraft(
+      purchaseId: ID!
+      channel: PurchaseSendChannel!
+      recipientOverride: String
+    ): PurchaseSendDraft!
   }
 
   extend type Mutation {
@@ -216,6 +236,26 @@ export const resolvers = {
         if (e instanceof purchases.PurchaseError && e.code === "PURCHASE_NOT_FOUND") {
           return null;
         }
+        asGraphQLError(e);
+      }
+    },
+    purchaseSendDraft: async (
+      _: unknown,
+      args: {
+        purchaseId: string;
+        channel: "whatsapp" | "email" | "manual";
+        recipientOverride?: string | null;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.send");
+      try {
+        return await buildPurchaseSendDraft(
+          args.purchaseId,
+          args.channel,
+          args.recipientOverride ?? null,
+        );
+      } catch (e) {
         asGraphQLError(e);
       }
     },

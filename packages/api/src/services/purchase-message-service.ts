@@ -1,8 +1,9 @@
-// Purchase message service: render a purchase order into a vendor-ready text
-// message — the body a clerk sends over WhatsApp / email. The business's
-// configurable greeting and footer wrap the rendered order; each line shows
-// the vendor's own code where one is mapped, falling back to our product
-// name. Pure read — no side effects, no deep links, no PDF.
+// Purchase message service: render a purchase order into a vendor-ready
+// message — the body a clerk sends over WhatsApp / email — and build the
+// send draft (recipient + wa.me / mailto: deep link) for one channel. The
+// business's configurable greeting and footer wrap the rendered order; each
+// line shows the vendor's own code where one is mapped, falling back to our
+// product name. Pure read — no side effects, no PDF.
 
 import { eq, inArray } from "drizzle-orm";
 import { products, productVariants } from "../db/schema/products.ts";
@@ -14,6 +15,7 @@ import {
   listItems,
   listSections,
 } from "./purchase-service.ts";
+import { getVendor } from "./vendor-service.ts";
 import { listCodesForVendor } from "./vendor-variant-code-service.ts";
 
 export interface PurchaseMessage {
@@ -126,4 +128,80 @@ export async function renderPurchaseOrderMessage(
     : "Purchase Order";
 
   return { subject, body: out.join("\n") };
+}
+
+export type SendChannel = "whatsapp" | "email" | "manual";
+
+export interface PurchaseSendDraft {
+  channel: SendChannel;
+  /** The recipient as held / overridden — raw, for display. */
+  recipient: string | null;
+  /** False when the recipient is missing or not usable for this channel. */
+  recipientAvailable: boolean;
+  subject: string;
+  body: string;
+  /** wa.me / mailto: URL; null when the recipient is unusable or channel is manual. */
+  deepLink: string | null;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Normalize an Indonesian phone number for `wa.me`: strip non-digits, turn a
+ * leading `0` into `62`. Returns null when the field is unparseable — empty,
+ * implausibly short/long, or holding more than one number (a `/` or `,`).
+ */
+export function normalizePhone(raw: string): string | null {
+  if (raw.includes("/") || raw.includes(",")) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return null;
+  return digits.startsWith("0") ? `62${digits.slice(1)}` : digits;
+}
+
+/**
+ * Build the send draft for one channel: the rendered message plus the
+ * resolved recipient and a deep link the client opens with the device's own
+ * connectivity. `recipientOverride` lets a clerk supply a contact the vendor
+ * record lacks. `manual` carries no recipient or link — the body is for the
+ * clerk to send off-system. Pure read.
+ */
+export async function buildPurchaseSendDraft(
+  purchaseId: string,
+  channel: SendChannel,
+  recipientOverride?: string | null,
+): Promise<PurchaseSendDraft> {
+  const { subject, body } = await renderPurchaseOrderMessage(purchaseId);
+  const purchase = await getPurchase(purchaseId);
+  const vendor = purchase.vendorId ? await getVendor(purchase.vendorId) : null;
+
+  const base = { channel, subject, body };
+
+  if (channel === "whatsapp") {
+    const recipient = recipientOverride?.trim() || vendor?.phone || null;
+    const normalized = recipient ? normalizePhone(recipient) : null;
+    return {
+      ...base,
+      recipient,
+      recipientAvailable: normalized !== null,
+      deepLink: normalized
+        ? `https://wa.me/${normalized}?text=${encodeURIComponent(body)}`
+        : null,
+    };
+  }
+
+  if (channel === "email") {
+    const recipient = recipientOverride?.trim() || vendor?.email || null;
+    const available = recipient !== null && EMAIL_RE.test(recipient);
+    return {
+      ...base,
+      recipient,
+      recipientAvailable: available,
+      deepLink: available
+        ? `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+        : null,
+    };
+  }
+
+  // manual — handled off-system; the body is all the clerk needs.
+  return { ...base, recipient: null, recipientAvailable: false, deepLink: null };
 }

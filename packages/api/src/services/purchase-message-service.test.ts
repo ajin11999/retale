@@ -13,7 +13,11 @@ import { products, productVariants } from "../db/schema/products.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import { getBusinessSettings, updateBusinessSettings } from "./business-service.ts";
-import { renderPurchaseOrderMessage } from "./purchase-message-service.ts";
+import {
+  buildPurchaseSendDraft,
+  normalizePhone,
+  renderPurchaseOrderMessage,
+} from "./purchase-message-service.ts";
 import {
   createItem,
   createPurchase,
@@ -58,9 +62,17 @@ afterAll(async () => {
 
 beforeEach(wipe);
 
-async function seedVendor(): Promise<string> {
+async function seedVendor(opts?: {
+  phone?: string;
+  email?: string;
+}): Promise<string> {
   const id = ulid();
-  await db.insert(vendors).values({ id, name: "Acme Supply" });
+  await db.insert(vendors).values({
+    id,
+    name: "Acme Supply",
+    phone: opts?.phone ?? null,
+    email: opts?.email ?? null,
+  });
   return id;
 }
 
@@ -181,5 +193,81 @@ describe("renderPurchaseOrderMessage", () => {
     );
     expect(err).toBeInstanceOf(PurchaseError);
     expect((err as PurchaseError).code).toBe("PURCHASE_NOT_FOUND");
+  });
+});
+
+describe("normalizePhone", () => {
+  test("strips formatting and maps a leading 0 to 62", () => {
+    expect(normalizePhone("081234567890")).toBe("6281234567890");
+    expect(normalizePhone("+62 812-3456-7890")).toBe("6281234567890");
+  });
+
+  test("returns null for unparseable input", () => {
+    expect(normalizePhone("call the store")).toBeNull();
+    expect(normalizePhone("0812 / 0813")).toBeNull(); // two numbers
+    expect(normalizePhone("123")).toBeNull(); // too short
+  });
+});
+
+describe("buildPurchaseSendDraft", () => {
+  async function seedPurchaseFor(vendorId: string | null): Promise<string> {
+    const p = await createPurchase({
+      ...(vendorId ? { vendorId } : { snapshotVendorName: "Ad-hoc" }),
+      date: "2026-05-18",
+      createdByUserId: userId,
+    });
+    return p.id;
+  }
+
+  test("whatsapp: builds a wa.me link from the vendor's phone", async () => {
+    const vendorId = await seedVendor({ phone: "081234567890" });
+    const purchaseId = await seedPurchaseFor(vendorId);
+
+    const draft = await buildPurchaseSendDraft(purchaseId, "whatsapp");
+    expect(draft.recipientAvailable).toBe(true);
+    expect(draft.deepLink).toContain("https://wa.me/6281234567890?text=");
+    expect(draft.body.length).toBeGreaterThan(0);
+  });
+
+  test("whatsapp: an unparseable phone leaves no link", async () => {
+    const vendorId = await seedVendor({ phone: "call the store" });
+    const purchaseId = await seedPurchaseFor(vendorId);
+
+    const draft = await buildPurchaseSendDraft(purchaseId, "whatsapp");
+    expect(draft.recipientAvailable).toBe(false);
+    expect(draft.deepLink).toBeNull();
+  });
+
+  test("a recipient override takes precedence over the vendor record", async () => {
+    const vendorId = await seedVendor({ phone: "081234567890" });
+    const purchaseId = await seedPurchaseFor(vendorId);
+
+    const draft = await buildPurchaseSendDraft(purchaseId, "whatsapp", "089999999999");
+    expect(draft.recipient).toBe("089999999999");
+    expect(draft.deepLink).toContain("wa.me/6289999999999");
+  });
+
+  test("email: builds a mailto link, or none when the address is missing", async () => {
+    const withEmail = await seedVendor({ email: "sales@acme.test" });
+    let draft = await buildPurchaseSendDraft(
+      await seedPurchaseFor(withEmail),
+      "email",
+    );
+    expect(draft.recipientAvailable).toBe(true);
+    expect(draft.deepLink).toContain("mailto:sales@acme.test?subject=");
+
+    const noEmail = await seedVendor({});
+    draft = await buildPurchaseSendDraft(await seedPurchaseFor(noEmail), "email");
+    expect(draft.recipientAvailable).toBe(false);
+    expect(draft.deepLink).toBeNull();
+  });
+
+  test("manual: carries the body but no recipient or link", async () => {
+    const purchaseId = await seedPurchaseFor(null);
+    const draft = await buildPurchaseSendDraft(purchaseId, "manual");
+    expect(draft.recipient).toBeNull();
+    expect(draft.deepLink).toBeNull();
+    expect(draft.recipientAvailable).toBe(false);
+    expect(draft.subject.length).toBeGreaterThan(0);
   });
 });
