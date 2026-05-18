@@ -76,6 +76,8 @@ export const typeDefs = /* GraphQL */ `
     body: String!
     "wa.me / mailto: URL; null when the recipient is unusable or channel is manual."
     deepLink: String
+    "API path to the PO PDF, for sharing as an attachment. Always present."
+    pdfUrl: String!
   }
 
   type PurchaseSend {

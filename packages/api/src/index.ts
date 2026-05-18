@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { createYoga } from "graphql-yoga";
 import { productImagesRoute } from "./http/product-images-route.ts";
+import { purchasePdfRoute } from "./http/purchase-pdf-route.ts";
 import { buildContext } from "./lib/context.ts";
 import { env } from "./lib/env.ts";
 import { schema } from "./schema/index.ts";
@@ -15,6 +16,7 @@ const yoga = createYoga({
 const app = new Elysia()
   .get("/", () => ({ name: "retale-api", status: "ok" }))
   .use(productImagesRoute)
+  .use(purchasePdfRoute)
   .mount(yoga)
   .listen(env.port);
 

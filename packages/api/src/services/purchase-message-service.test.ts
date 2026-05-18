@@ -18,6 +18,7 @@ import {
   normalizePhone,
   renderPurchaseOrderMessage,
 } from "./purchase-message-service.ts";
+import { renderPurchaseOrderPdf } from "./purchase-pdf-service.ts";
 import {
   createItem,
   createPurchase,
@@ -269,5 +270,37 @@ describe("buildPurchaseSendDraft", () => {
     expect(draft.deepLink).toBeNull();
     expect(draft.recipientAvailable).toBe(false);
     expect(draft.subject.length).toBeGreaterThan(0);
+    expect(draft.pdfUrl).toBe(`/purchases/${purchaseId}/po.pdf`);
+  });
+});
+
+describe("renderPurchaseOrderPdf", () => {
+  test("produces a non-empty PDF document", async () => {
+    const vendorId = await seedVendor({});
+    const variantId = await seedVariant("M6 Bolt");
+    const purchase = await createPurchase({
+      vendorId,
+      date: "2026-05-18",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: purchase.id,
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 2000,
+    });
+
+    const pdf = await renderPurchaseOrderPdf(purchase.id);
+    expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(500);
+  });
+
+  test("rejects an unknown purchase", async () => {
+    const err = await renderPurchaseOrderPdf(ulid()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(PurchaseError);
+    expect((err as PurchaseError).code).toBe("PURCHASE_NOT_FOUND");
   });
 });

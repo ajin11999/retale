@@ -142,6 +142,8 @@ export interface PurchaseSendDraft {
   body: string;
   /** wa.me / mailto: URL; null when the recipient is unusable or channel is manual. */
   deepLink: string | null;
+  /** API path to the PO PDF — for the share-sheet attachment path. Always set. */
+  pdfUrl: string;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -174,7 +176,12 @@ export async function buildPurchaseSendDraft(
   const purchase = await getPurchase(purchaseId);
   const vendor = purchase.vendorId ? await getVendor(purchase.vendorId) : null;
 
-  const base = { channel, subject, body };
+  const base = {
+    channel,
+    subject,
+    body,
+    pdfUrl: `/purchases/${purchaseId}/po.pdf`,
+  };
 
   if (channel === "whatsapp") {
     const recipient = recipientOverride?.trim() || vendor?.phone || null;
