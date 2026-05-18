@@ -17,12 +17,16 @@ import { db } from "../lib/db.ts";
 import {
   cancelPurchase,
   clonePurchase,
+  confirmPurchaseSend,
   createItem,
   createPurchase,
   createSection,
+  getPurchase,
   listItems,
   listSections,
   listSends,
+  PurchaseError,
+  type PurchaseErrorCode,
   recordPurchaseSend,
   unmappedLines,
 } from "./purchase-service.ts";
@@ -89,6 +93,19 @@ async function seedVendor(): Promise<string> {
   const id = ulid();
   await db.insert(vendors).values({ id, name: "Acme Supply" });
   return id;
+}
+
+/** Assert a promise rejects with a PurchaseError carrying the given code. */
+async function expectError(
+  p: Promise<unknown>,
+  code: PurchaseErrorCode,
+): Promise<void> {
+  const err = await p.then(
+    () => null,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(PurchaseError);
+  expect((err as PurchaseError).code).toBe(code);
 }
 
 describe("clonePurchase", () => {
@@ -265,5 +282,80 @@ describe("unmappedLines", () => {
       unitCostMinor: 100,
     });
     expect(await unmappedLines(adHoc.id)).toHaveLength(0);
+  });
+});
+
+describe("recordPurchaseSend / confirmPurchaseSend", () => {
+  async function seedPurchase(): Promise<string> {
+    const p = await createPurchase({
+      snapshotVendorName: "Acme",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    return p.id;
+  }
+
+  test("a whatsapp send starts prepared and does not stamp lastSentAt", async () => {
+    const purchaseId = await seedPurchase();
+    const send = await recordPurchaseSend({
+      purchaseId,
+      channel: "whatsapp",
+      recipient: "+15550001",
+      createdByUserId: userId,
+    });
+    expect(send.status).toBe("prepared");
+    expect(send.sentAt).toBeNull();
+    expect((await getPurchase(purchaseId)).lastSentAt).toBeNull();
+  });
+
+  test("a manual send is sent at once and stamps lastSentAt", async () => {
+    const purchaseId = await seedPurchase();
+    const send = await recordPurchaseSend({
+      purchaseId,
+      channel: "manual",
+      recipient: "walk-in",
+      createdByUserId: userId,
+    });
+    expect(send.status).toBe("sent");
+    expect(send.sentAt).not.toBeNull();
+    expect((await getPurchase(purchaseId)).lastSentAt).not.toBeNull();
+  });
+
+  test("confirming a prepared send flips it to sent with the expected date", async () => {
+    const purchaseId = await seedPurchase();
+    const prepared = await recordPurchaseSend({
+      purchaseId,
+      channel: "email",
+      recipient: "sales@acme.test",
+      createdByUserId: userId,
+    });
+
+    const confirmed = await confirmPurchaseSend({
+      id: prepared.id,
+      expectedDeliveryDate: "2026-02-01",
+    });
+    expect(confirmed.status).toBe("sent");
+    expect(confirmed.sentAt).not.toBeNull();
+    expect(confirmed.expectedDeliveryDate).toBe("2026-02-01");
+    expect((await getPurchase(purchaseId)).lastSentAt).not.toBeNull();
+  });
+
+  test("a send cannot be confirmed twice", async () => {
+    const purchaseId = await seedPurchase();
+    const prepared = await recordPurchaseSend({
+      purchaseId,
+      channel: "email",
+      recipient: "sales@acme.test",
+      createdByUserId: userId,
+    });
+    await confirmPurchaseSend({ id: prepared.id });
+    await expectError(
+      confirmPurchaseSend({ id: prepared.id }),
+      "SEND_ALREADY_SENT",
+    );
+  });
+
+  test("confirming an unknown send is rejected", async () => {
+    await expectError(confirmPurchaseSend({ id: ulid() }), "SEND_NOT_FOUND");
   });
 });

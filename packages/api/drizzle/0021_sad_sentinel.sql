@@ -1,0 +1,1 @@
+ALTER TABLE `purchase_sends` ADD `expected_delivery_date` date;

@@ -21,6 +21,8 @@ export type PurchaseErrorCode =
   | "PURCHASE_NOT_FOUND"
   | "SECTION_NOT_FOUND"
   | "ITEM_NOT_FOUND"
+  | "SEND_NOT_FOUND"
+  | "SEND_ALREADY_SENT"
   | "VENDOR_NOT_FOUND"
   | "VARIANT_NOT_FOUND"
   | "INVALID_INPUT"
@@ -76,6 +78,14 @@ async function loadSection(id: string): Promise<Section> {
     where: eq(purchaseSections.id, id),
   });
   if (!row) throw new PurchaseError("SECTION_NOT_FOUND");
+  return row;
+}
+
+async function loadSend(id: string): Promise<Send> {
+  const row = await db.query.purchaseSends.findFirst({
+    where: eq(purchaseSends.id, id),
+  });
+  if (!row) throw new PurchaseError("SEND_NOT_FOUND");
   return row;
 }
 
@@ -643,9 +653,12 @@ export async function unmappedLines(purchaseId: string): Promise<Item[]> {
 // --- Send log ---
 
 /**
- * Record that a purchase order was sent. Append-only — re-sending adds another
- * row. Snapshots the current `revision` and stamps `purchases.lastSentAt`;
- * does not bump `revision` (sending is not a content change).
+ * Open a send: log that a purchase-order deep link was generated. Append-only
+ * — re-sending adds another row. Snapshots the current `revision` (sending is
+ * not a content change, so `revision` is not bumped). A `whatsapp` / `email`
+ * row starts `prepared` and is finished by `confirmPurchaseSend`; a `manual`
+ * row is sent off-system with nothing to confirm, so it is `sent` at once and
+ * stamps `purchases.lastSentAt` immediately.
  */
 export async function recordPurchaseSend(input: {
   purchaseId: string;
@@ -661,6 +674,7 @@ export async function recordPurchaseSend(input: {
 
   const id = ulid();
   const now = new Date();
+  const isManual = input.channel === "manual";
   await db.transaction(async (tx) => {
     await tx.insert(purchaseSends).values({
       id,
@@ -668,18 +682,47 @@ export async function recordPurchaseSend(input: {
       channel: input.channel,
       recipient: input.recipient.trim(),
       revision: purchase.revision,
-      status: "sent",
-      sentAt: now,
+      status: isManual ? "sent" : "prepared",
+      sentAt: isManual ? now : null,
       note: input.note ?? null,
       createdByUserId: input.createdByUserId,
     });
+    if (isManual) {
+      await tx
+        .update(purchases)
+        .set({ lastSentAt: now })
+        .where(eq(purchases.id, input.purchaseId));
+    }
+  });
+  return loadSend(id);
+}
+
+/**
+ * Confirm a `prepared` send — the clerk has verified the vendor received the
+ * PO. Flips the row to `sent`, stamps `sentAt` and `purchases.lastSentAt`, and
+ * optionally records the vendor's expected-delivery date. A send can only be
+ * confirmed once.
+ */
+export async function confirmPurchaseSend(input: {
+  id: string;
+  expectedDeliveryDate?: string | null;
+}): Promise<Send> {
+  const send = await loadSend(input.id);
+  if (send.status === "sent") {
+    throw new PurchaseError("SEND_ALREADY_SENT", "this send is already confirmed");
+  }
+  const expectedDeliveryDate = input.expectedDeliveryDate?.trim() || null;
+
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(purchaseSends)
+      .set({ status: "sent", sentAt: now, expectedDeliveryDate })
+      .where(eq(purchaseSends.id, input.id));
     await tx
       .update(purchases)
       .set({ lastSentAt: now })
-      .where(eq(purchases.id, input.purchaseId));
+      .where(eq(purchases.id, send.purchaseId));
   });
-  const row = await db.query.purchaseSends.findFirst({
-    where: eq(purchaseSends.id, id),
-  });
-  return row as Send;
+  return loadSend(input.id);
 }

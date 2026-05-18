@@ -99,7 +99,10 @@ export const purchaseItems = mysqlTable(
 /**
  * Append-only send log. Re-sending adds a row; `revision` snapshots
  * `purchases.revision` at send time so the UI can detect unsent edits
- * (`purchases.revision > MAX(purchase_sends.revision)`).
+ * (`purchases.revision > MAX(purchase_sends.revision)` over `sent` rows).
+ * A row is `prepared` when the deep link is generated and `sent` once the
+ * clerk confirms the vendor received it; `manual` sends skip straight to
+ * `sent`. `expectedDeliveryDate` is captured at confirmation.
  */
 export const purchaseSends = mysqlTable(
   "purchase_sends",
@@ -113,6 +116,9 @@ export const purchaseSends = mysqlTable(
     revision: int().notNull(),
     status: mysqlEnum(PURCHASE_SEND_STATUSES).notNull().default("prepared"),
     sentAt: timestamp(),
+    // When the vendor expects to deliver; recorded at confirmation. Feeds the
+    // (future) no-delivery reminder. Null = not captured.
+    expectedDeliveryDate: date({ mode: "string" }),
     note: text(),
     createdByUserId: ulidRef().references(() => users.id),
     createdAt: timestamp()

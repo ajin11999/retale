@@ -70,6 +70,8 @@ export const typeDefs = /* GraphQL */ `
     revision: Int!
     status: PurchaseSendStatus!
     sentAt: String
+    "Vendor's expected delivery date, captured at confirmation."
+    expectedDeliveryDate: String
     note: String
     createdAt: String!
   }
@@ -129,13 +131,15 @@ export const typeDefs = /* GraphQL */ `
     deletePurchaseItem(id: ID!): Boolean!
     reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
 
-    "Log that a purchase order was sent to the vendor. Append-only."
+    "Open a send: log a generated PO link. whatsapp/email start 'prepared'; manual is 'sent' at once."
     recordPurchaseSend(
       purchaseId: ID!
       channel: PurchaseSendChannel!
       recipient: String!
       note: String
     ): PurchaseSend!
+    "Confirm a prepared send: flip it to 'sent' and capture the expected delivery date."
+    confirmPurchaseSend(id: ID!, expectedDeliveryDate: String): PurchaseSend!
   }
 `;
 
@@ -165,8 +169,12 @@ export const resolvers = {
     sends: (p: PurchaseRow) => purchases.listSends(p.id),
     totalInvoiceCost: (p: PurchaseRow) => purchases.invoiceTotalMinor(p.id),
     hasUnsentChanges: async (p: PurchaseRow) => {
+      // Only confirmed (`sent`) sends count — a prepared-but-unconfirmed link
+      // has not reached the vendor, so its revision does not cover edits.
       const sends = await purchases.listSends(p.id);
-      const lastSentRevision = sends.reduce((max, s) => Math.max(max, s.revision), 0);
+      const lastSentRevision = sends
+        .filter((s) => s.status === "sent")
+        .reduce((max, s) => Math.max(max, s.revision), 0);
       return p.revision > lastSentRevision;
     },
     unmappedLines: (p: PurchaseRow) => purchases.unmappedLines(p.id),
@@ -377,6 +385,21 @@ export const resolvers = {
           recipient: args.recipient,
           note: args.note ?? null,
           createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    confirmPurchaseSend: async (
+      _: unknown,
+      args: { id: string; expectedDeliveryDate?: string | null },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.send");
+      try {
+        return await purchases.confirmPurchaseSend({
+          id: args.id,
+          expectedDeliveryDate: args.expectedDeliveryDate ?? null,
         });
       } catch (e) {
         asGraphQLError(e);
