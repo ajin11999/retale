@@ -14,7 +14,7 @@ Per-product show/hide governs whether a product appears on the catalog at all. T
 
 - `online_visible = false` — the product does not exist as far as the catalog is concerned: not listed, not searchable, no detail page.
 - `online_visible = true` — the product is discoverable: appears in listings, search, and category browsing on the catalog.
-- Default is `false` — a product is invisible online until the workshop explicitly opts it in. Nothing leaks by accident.
+- Default is `false` — a product is invisible online until the business explicitly opts it in. Nothing leaks by accident.
 - The admin UI gets a catalog-management view for toggling visibility in bulk (filter by category, multi-select, show/hide) — opting products in one at a time is too slow for a large catalog.
 
 Visibility only takes effect on the next **publish** (see Publishing model) — toggling `online_visible` edits the local DB; the live catalog doesn't change until a snapshot is uploaded.
@@ -46,7 +46,7 @@ online_price_mode    ENUM('exclude','peek','show') NOT NULL DEFAULT 'exclude'
 online_stock_mode    ENUM('show_real','peek','hide') NOT NULL DEFAULT 'hide'
 ```
 
-Defaults are conservative — nothing leaks until the workshop explicitly opts a product in.
+Defaults are conservative — nothing leaks until the business explicitly opts a product in.
 
 ### Publishing model — static catalog, separate online DB
 
@@ -62,7 +62,7 @@ Flow:
 
 **Triggers** — two ways to publish:
 
-- **On demand** — an admin "Publish to catalog now" action. Used after a batch of edits the workshop wants live immediately.
+- **On demand** — an admin "Publish to catalog now" action. Used after a batch of edits the business wants live immediately.
 - **Daily schedule** — a server-side scheduled job pushes a snapshot once a day (configurable time). Keeps the catalog reasonably fresh without anyone remembering to click.
 
 Both run the same snapshot-build + push code path; the schedule is just an automated caller.
@@ -74,7 +74,7 @@ Both run the same snapshot-build + push code path; the schedule is just an autom
 
 Both default to root (or a senior role); neither belongs in `cashier_lite` or `clerk`. The **daily scheduled job runs as the system**, not a user, so it bypasses RBAC by design — only the manual trigger is gated.
 
-**Freshness disclaimer.** Because the catalog is static between publishes, a visitor can see a stale price or stock figure. The catalog UI should show "prices/stock as of `<last publish date>`, subject to confirmation" — sourced from the `catalog_publishes` log — so the workshop is never held to an outdated number.
+**Freshness disclaimer.** Because the catalog is static between publishes, a visitor can see a stale price or stock figure. The catalog UI should show "prices/stock as of `<last publish date>`, subject to confirmation" — sourced from the `catalog_publishes` log — so the business is never held to an outdated number.
 
 **Notes for when this is built:**
 
@@ -82,7 +82,7 @@ Both default to root (or a senior role); neither belongs in `cashier_lite` or `c
 - Snapshot push should be atomic on the online side — readers see either the old snapshot or the new one, never a half-applied one (publish to a staging table / version, then flip).
 - Only masked/fuzzed values cross the boundary; the masking happens during snapshot build, on the local side.
 
-**Why static + separate DB:** The catalog faces the public internet; the main DB must not. A separate online DB with a one-way push keeps the local network unreachable, lets the workshop control exactly what (and when) competitors see, and means catalog traffic never touches the POS database.
+**Why static + separate DB:** The catalog faces the public internet; the main DB must not. A separate online DB with a one-way push keeps the local network unreachable, lets the business control exactly what (and when) competitors see, and means catalog traffic never touches the POS database.
 
 **Why:** Customer-facing window to check stock and read product details, without exposing pricing to competitors and without lying about stock for uncountable items.
 
@@ -156,7 +156,7 @@ The base feature is specified in `design-decisions.md` (Purchases & deliveries �
 
 ### Reorder-point → suggested reorders *(biggest win)*
 
-Stock depletes; the workshop should be told what to reorder before it runs out — without anyone watching levels by hand.
+Stock depletes; the business should be told what to reorder before it runs out — without anyone watching levels by hand.
 
 **Schema:**
 
@@ -203,10 +203,10 @@ A new scan supersedes the previous `open` suggestions (re-scan from current stoc
 ### Other automation
 
 - **Per-vendor default channel** — `preferred_send_channel ENUM('whatsapp','email')` column on `vendors`; the send screen pre-selects the channel instead of asking each time.
-- **Clone / recurring PO** — "duplicate this purchase as a new draft." Workshops reorder the same basket repeatedly.
+- **Clone / recurring PO** — "duplicate this purchase as a new draft." Businesses reorder the same basket repeatedly.
 - **Unmapped-line pre-send warning** — if a PO line has no `vendor_variant_codes` entry for that vendor, warn before sending (the vendor won't recognize the part) and offer to add the mapping inline.
 - **No-delivery reminder alert** — tie into the product `alerts` system: a PO sent N days ago with nothing received raises an acknowledgeable alert.
 - **Send-confirmation capture** — when the vendor replies "confirmed," let the clerk flip `purchase_sends.status → sent` and optionally record an expected-delivery date that feeds the reminder above.
-- **Configurable message template** — workshop-level greeting/footer for the WhatsApp/email body.
+- **Configurable message template** — business-level greeting/footer for the WhatsApp/email body.
 
 **Why:** Sending is the manual touchpoint between "we need parts" and "parts arrive." Removing the keystrokes around it — noticing what's low, knowing the vendor and channel, drafting the PO, chasing late deliveries — is where the time goes.

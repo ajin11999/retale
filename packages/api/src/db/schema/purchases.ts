@@ -67,7 +67,7 @@ export const purchaseSections = mysqlTable("purchase_sections", {
 });
 
 /**
- * A purchase line. `variantId IS NULL` flags a non-stock line (workshop
+ * A purchase line. `variantId IS NULL` flags a non-stock line (shop
  * consumable, tool) — those count toward the invoice total but are excluded
  * from landed-cost allocation and write no stock movement on delivery.
  * `qtyDelivered` is a denormalized running total kept by the delivery domain.

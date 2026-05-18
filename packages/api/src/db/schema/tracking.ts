@@ -45,7 +45,7 @@ export const TRACKING_LEDGER_REF_TYPES = [
  * balance side and `counterCategory` the offsetting side used when an
  * attribution posts — both carry the accounting meaning explicitly, so there
  * is no `kind` enum. `balanceMinor` is owned by the ledger writers; CRUD never
- * sets it. Positive balance = the workshop owes the account.
+ * sets it. Positive balance = the business owes the account.
  */
 export const trackingAccounts = mysqlTable(
   "tracking_accounts",

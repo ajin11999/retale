@@ -28,7 +28,7 @@ export const typeDefs = /* GraphQL */ `
     "Offsetting side on attribution, e.g. 'expense.commission'."
     counterCategory: String!
     notes: String
-    "Cached balance, minor units. Positive = the workshop owes the account."
+    "Cached balance, minor units. Positive = the business owes the account."
     balanceMinor: Float!
     archivedAt: String
     createdAt: String!

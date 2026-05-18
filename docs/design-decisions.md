@@ -314,7 +314,7 @@ purchase_items:
   id              ULID PK
   purchase_id     ULID FK → purchases  ON DELETE CASCADE
   section_id      ULID FK → purchase_sections  ON DELETE SET NULL  NULL  -- NULL = "Uncategorized"
-  variant_id      ULID FK → product_variants  NULL                  -- NULL = non-stock line (workshop consumable, tool, etc.)
+  variant_id      ULID FK → product_variants  NULL                  -- NULL = non-stock line (shop consumable, tool, etc.)
   description     VARCHAR NULL                  -- vendor free text override; REQUIRED when variant_id IS NULL
   qty_ordered     BIGINT NOT NULL               -- variant's smallest unit (non-stock: arbitrary integer, treated as "1 unit each")
   qty_delivered   BIGINT NOT NULL DEFAULT 0     -- DENORM running total from delivered deliveries
@@ -359,7 +359,7 @@ purchase_delivery_items:
 
 ### Non-stock lines
 
-Workshop consumables, tools, office supplies bought from the same vendor — appear on the purchase invoice but never enter the product catalog.
+Shop consumables, tools, office supplies bought from the same vendor — appear on the purchase invoice but never enter the product catalog.
 
 - `purchase_items.variant_id IS NULL` flags a non-stock line. `description` is required (it's the line label).
 - **Counts toward** `totalInvoiceCost` so the vendor invoice reconciles.
@@ -472,7 +472,7 @@ Editing a sent PO is never blocked (a typo fix shouldn't force a cancel-and-recr
 #### API surface
 
 1. **`purchaseSendDraft(purchaseId, channel, recipientOverride?)`** — pure read, no side effects. Returns `{ channel, recipient, recipientAvailable, subject, body, deepLink, pdfUrl }`.
-   - `body` — rendered PO: header (ref, date, workshop), vendor name, sections → lines. Each line shows the **vendor's** code/label via a `vendor_variant_codes` lookup on `(vendor_id, variant_id)`, falling back to our variant name when unmapped; includes qty and unit cost.
+   - `body` — rendered PO: header (ref, date, business), vendor name, sections → lines. Each line shows the **vendor's** code/label via a `vendor_variant_codes` lookup on `(vendor_id, variant_id)`, falling back to our variant name when unmapped; includes qty and unit cost.
    - `deepLink` — `wa.me` / `mailto:` URL; phone normalized server-side (strip non-digits, leading `0` → `62`).
    - `pdfUrl` — points at the binary route below; independent of contact info, so it always renders.
 2. **`recordPurchaseSend(purchaseId, channel, recipient)`** — mutation. Writes a `purchase_sends` row and sets `purchases.last_sent_at`. Client calls it after opening the link.
@@ -482,7 +482,7 @@ Editing a sent PO is never blocked (a typo fix shouldn't force a cancel-and-recr
 
 `vendors.phone` / `vendors.email` are nullable and have no format validation, so the renderer must degrade gracefully, never throw:
 
-- `recipientAvailable` is reported **per channel** — `false` when the field is null **or** unparseable (e.g. `"0812 / 0813"`, `"call the workshop"`).
+- `recipientAvailable` is reported **per channel** — `false` when the field is null **or** unparseable (e.g. `"0812 / 0813"`, `"call the store"`).
 - The client greys out *that channel's* button independently, showing why ("No phone number on file") with an inline shortcut to edit the vendor (clerk has `vendor.edit`).
 - It is never a dead end: the clerk can supply a one-off `recipientOverride` (snapshotted into `purchase_sends.recipient`, vendor row untouched), and the PDF share-sheet path works with no recipient at all.
 - **Ad-hoc purchases** (`vendor_id IS NULL`) have no contact info by definition — same code path, `recipientOverride` is simply required rather than optional.
@@ -617,7 +617,7 @@ locations:
 ### Hierarchy rules
 
 - Forest: any number of roots (`parent_id IS NULL`). Costs nothing to allow; one-root setups still work naturally.
-- Stock allowed at any node, including non-leaves. Useful for "10 of these somewhere in the workshop, not pinned to a shelf yet." (`stock_locations.location_id` is also nullable for the unlocated-root entry — see Cost accounting / stock section.)
+- Stock allowed at any node, including non-leaves. Useful for "10 of these somewhere in the store, not pinned to a shelf yet." (`stock_locations.location_id` is also nullable for the unlocated-root entry — see Cost accounting / stock section.)
 - **Reparenting** allowed freely while not archived — UPDATE `parent_id`. One cycle check on save: target must not be self or a descendant.
 
 ### Lifecycle: archive + hard delete
@@ -1054,7 +1054,7 @@ Access tokens include `role_ids[]`, not the flattened permission set. Permission
 
 ### Per-location scoping: deferred
 
-Single workshop, one location effectively. If a future site needs "clerk at POS A only," add `user_roles.scope_location_id ULID NULL` — easy bolt-on.
+Single business, one location effectively. If a future site needs "clerk at POS A only," add `user_roles.scope_location_id ULID NULL` — easy bolt-on.
 
 ### Migration from ProDuck
 
@@ -1067,7 +1067,7 @@ ProDuck's `claims = role names per user` collapses into:
 
 ## POS sessions
 
-Cashier shift model. Sessions exist to (a) reconcile the cash drawer at end of day and (b) group orders/payments for reporting. The workshop counts cash daily, so the variance dance is real, not theater.
+Cashier shift model. Sessions exist to (a) reconcile the cash drawer at end of day and (b) group orders/payments for reporting. The business counts cash daily, so the variance dance is real, not theater.
 
 ### Lifecycle
 
@@ -1260,7 +1260,7 @@ orders (additions):
 
 ### Identity & lookup
 
-- `name` required, everything else optional. A workshop customer is "Pak Budi" first, a phone number maybe.
+- `name` required, everything else optional. A retail customer is "Pak Budi" first, a phone number maybe.
 - Phone is the primary fast-lookup key — POS clerk types phone digits, exact match wins. No uniqueness constraint (one phone can legitimately belong to two customer rows — household, business + personal).
 - Free-text search: same pattern as products — generated `search_text` column, lowercase, LIKE-prefix friendly, AND tokens on whitespace.
 - **Customer attachment is optional at POS.** Walk-in (NULL `customer_id`) is the default. Search is for *finding a customer when needed*, not a required step in the payment flow. Walk-in orders must have payments = total (already locked in Payments section).
@@ -1279,7 +1279,7 @@ Importer writes one `customer_ledger` row per imported customer with `type = 'op
 
 ### AR aging: computed, not stored
 
-"Who owes >30 days" runs as a resolver over `customer_ledger`: FIFO-allocate `payment` rows against `sale_on_account` rows oldest-first, age = NOW − oldest unallocated entry per customer. Workshop scale is small; the SQL is cheap. Denormalize only if profiling later shows it's a bottleneck.
+"Who owes >30 days" runs as a resolver over `customer_ledger`: FIFO-allocate `payment` rows against `sale_on_account` rows oldest-first, age = NOW − oldest unallocated entry per customer. Retail scale is small; the SQL is cheap. Denormalize only if profiling later shows it's a bottleneck.
 
 ### Lifecycle: archive + hard delete
 
@@ -1416,7 +1416,7 @@ Internal subsidiary accounts for tracking money owed to/from non-customer-non-ve
 
 ### Use case
 
-Workshop sells service through specific mechanics. A "Brake service by Abu Bakar" line on an order should credit Abu Bakar's tracking account by some portion of the revenue (typically a commission split). When the workshop pays Abu Bakar from the drawer, his balance reduces.
+A business may sell services performed by specific people. A "Brake service by Abu Bakar" line on an order should credit Abu Bakar's tracking account by some portion of the revenue (typically a commission split). When the business pays Abu Bakar from the drawer, his balance reduces.
 
 Same pattern handles: staff commissions, partner draws, owner draws, equipment-fund contributions, internal cost centers — anything where money flows attached to a named bucket that isn't a customer or vendor.
 
@@ -1431,7 +1431,7 @@ tracking_accounts:
   account_category     VARCHAR NOT NULL    -- balance side, e.g. 'liability.tracking.staff'
   counter_category     VARCHAR NOT NULL    -- offsetting side on attribution, e.g. 'expense.commission'
   notes                TEXT NULL
-  balance_minor        BIGINT NOT NULL DEFAULT 0             -- positive = workshop owes account
+  balance_minor        BIGINT NOT NULL DEFAULT 0             -- positive = business owes account
   archived_at          TIMESTAMP NULL
   created_at, updated_at
   created_by_user_id   ULID FK → users
@@ -1493,7 +1493,7 @@ attribution_amount_minor = mode = 'full'
                               : pre_tax_revenue * tracking_attribution_pct_bps / 10000
 ```
 
-Mechanic's cut is on the goods/service portion — never on tax (which is remitted to government) and never on a discount the workshop chose to absorb.
+Mechanic's cut is on the goods/service portion — never on tax (which is remitted to government) and never on a discount the business chose to absorb.
 
 Cashier override (requires `order.attribute` permission) replaces the computed value directly on `order_items.attribution_amount_minor`. The variant's mode/pct config remains the default for subsequent lines.
 
@@ -1510,21 +1510,21 @@ Per-event writes, consistent with `customer_ledger` / `vendor_ledger`. Trigger e
 
 Console-specific rule: attribution does **not** fire on item-add. Open orders accumulate without ledger writes. When the order is paid in full *and* closed (in either order), the service layer scans the order's non-voided items and writes the attribution rows in one transaction.
 
-**Bad-debt handling (all-or-nothing):** if a Console order never fully pays — write-off via customer adjustment — the mechanic earns nothing for it. Workshop absorbs the loss. (Pro-rata bad-debt sharing is an additive future enhancement; don't pre-build.)
+**Bad-debt handling (all-or-nothing):** if a Console order never fully pays — write-off via customer adjustment — the mechanic earns nothing for it. The business absorbs the loss. (Pro-rata bad-debt sharing is an additive future enhancement; don't pre-build.)
 
 ### Manual ops
 
 - **Payout** — cash-out from drawer to the account. `recordTrackingPayout(accountId, amountMinor, posSessionId, note?)`. Writes a `payout` ledger row (negative amount), reduces drawer expected cash via `pos_sessions` variance machinery.
-- **Deposit** — cash-in / preload (workshop advances money to an account). `recordTrackingDeposit(accountId, amountMinor, posSessionId, note?)`. Writes a `deposit` row (positive amount).
+- **Deposit** — cash-in / preload (the business advances money to an account). `recordTrackingDeposit(accountId, amountMinor, posSessionId, note?)`. Writes a `deposit` row (positive amount).
 - **Adjustment** — root only. Write-off, correction, opening balance. `counter_category_override` may be set when the offset isn't the account's default `counter_category` (e.g. an adjustment that hits `expense.other` instead of `expense.commission`). Note required.
 
 ### Negative balance allowed
 
-If workshop pays the mechanic upfront and they haven't earned it back, balance goes negative (the account owes the workshop). Same model as customer store credit.
+If the business pays the mechanic upfront and they haven't earned it back, balance goes negative (the account owes the business). Same model as customer store credit.
 
 ### Two mechanics on one job
 
-Split into separate order lines: one line per mechanic, each with its own `attribution_account_id`. No join table, no special math. Workshop convention follows the schema.
+Split into separate order lines: one line per mechanic, each with its own `attribution_account_id`. No join table, no special math. Business convention follows the schema.
 
 ### Snapshot for hard-delete safety
 
@@ -1611,7 +1611,7 @@ cogs.inventory_loss.theft     -- stock write-off, theft
 cogs.inventory_loss.variance  -- recount variance
 
 # Expenses (mostly from non-stock purchase items)
-expense.tools                 -- workshop tools, equipment <capitalize threshold
+expense.tools                 -- shop tools, equipment <capitalize threshold
 expense.consumables           -- shop consumables (rags, cleaners, etc.)
 expense.freight               -- standalone freight bills not allocated to inventory
 expense.office                -- office supplies
@@ -1728,7 +1728,7 @@ CSV generation is a thin formatter over the JSON; no separate query path.
 
 - Each order line carries `snapshot_tax_rate_bps` and `snapshot_price_mode` (locked earlier). Export uses these directly — no live tax lookup, no drift.
 - For each sale entry, the resolver splits revenue into `revenue.sales` (net) and `liability.tax.output` (tax portion). For tax_inclusive lines, it computes `tax = total * rate / (10000 + rate)`; for tax_exclusive, `tax = total * rate / 10000`.
-- Vendor purchases handled symmetrically: if the workshop is PKP and tracks input PPN, the resolver splits the inventory leg into `asset.inventory` + `liability.tax.input`. (For non-PKP, set a config flag and skip the split — input PPN goes into inventory cost.)
+- Vendor purchases handled symmetrically: if the business is PKP and tracks input PPN, the resolver splits the inventory leg into `asset.inventory` + `liability.tax.input`. (For non-PKP, set a config flag and skip the split — input PPN goes into inventory cost.)
 - One `pkp_mode BOOLEAN` setting on a `tenant_settings` row (or env var for v1) controls whether input PPN is split out.
 
 ### Permissions

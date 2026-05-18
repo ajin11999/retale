@@ -245,7 +245,7 @@ export async function cancelPurchase(id: string, userId: string): Promise<Purcha
 }
 
 /**
- * Clone a purchase as a fresh open draft — for workshops that reorder the
+ * Clone a purchase as a fresh open draft — for businesses that reorder the
  * same basket. Copies the vendor, memo, sections and lines (with
  * `qtyDelivered` reset to 0); the clone dates today, starts at `revision` 1,
  * and carries no send history. `sourceDocument` is intentionally dropped — it

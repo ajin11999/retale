@@ -41,7 +41,7 @@ export const CUSTOMER_LEDGER_REF_TYPES = [
 
 /**
  * Customer master row. Contact fields are denormalized and unvalidated — a
- * workshop customer is "Pak Budi" first, a phone number maybe. `balanceMinor`
+ * retail customer is "Pak Budi" first, a phone number maybe. `balanceMinor`
  * is owned by the ledger writers below; customer CRUD never sets it.
  * `creditLimitMinor` is null when the customer has no limit. Hard delete is
  * guarded against a non-zero balance (root may still override later, once the

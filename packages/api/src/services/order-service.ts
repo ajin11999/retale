@@ -169,7 +169,7 @@ function dateStamp(d = new Date()): string {
  * Next `<posCode>-<date>-<seq>` display number. The daily sequence resets at
  * midnight per POS. The unique index on `orders.display_number` is the
  * race-safe backstop; concurrent creates on one POS are not expected at
- * workshop scale.
+ * retail scale.
  */
 async function nextDisplayNumber(tx: Tx, posCode: string): Promise<string> {
   const prefix = `${posCode}-${dateStamp()}-`;
@@ -217,7 +217,7 @@ async function resolvePrice(
 /**
  * Tracking-account attribution for a line: the mechanic's cut falls on the
  * pre-tax goods/service revenue — never on tax, never on a discount the
- * workshop absorbed. `qty` may be negative (return lines), yielding a negative
+ * business absorbed. `qty` may be negative (return lines), yielding a negative
  * attribution. See docs/design-decisions.md → "Attribution compute formula".
  */
 function computeAttribution(args: {
