@@ -76,7 +76,7 @@ export const resolvers = {
       args: { vendorId: string },
       ctx: GraphQLContext,
     ) => {
-      await requirePermission(ctx, "vendor.edit");
+      await requirePermission(ctx, "vendor.variant_code.manage");
       return codes.listCodesForVendor(args.vendorId);
     },
     codesForVariant: async (
@@ -84,7 +84,7 @@ export const resolvers = {
       args: { variantId: string },
       ctx: GraphQLContext,
     ) => {
-      await requirePermission(ctx, "vendor.edit");
+      await requirePermission(ctx, "vendor.variant_code.manage");
       return codes.listCodesForVariant(args.variantId);
     },
   },
@@ -100,7 +100,7 @@ export const resolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      await requirePermission(ctx, "vendor.edit");
+      await requirePermission(ctx, "vendor.variant_code.manage");
       try {
         return await codes.setVendorVariantCode(args);
       } catch (e) {
@@ -112,7 +112,7 @@ export const resolvers = {
       args: { id: string },
       ctx: GraphQLContext,
     ): Promise<boolean> => {
-      await requirePermission(ctx, "vendor.edit");
+      await requirePermission(ctx, "vendor.variant_code.manage");
       try {
         await codes.deleteVendorVariantCode(args.id);
         return true;
