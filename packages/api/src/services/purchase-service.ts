@@ -3,7 +3,7 @@
 // in the same transaction. No stock is touched here — that happens at delivery
 // commit (Phase 3). See docs/design-decisions.md → "Purchases & deliveries".
 
-import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { productVariants } from "../db/schema/products.ts";
 import {
@@ -13,6 +13,7 @@ import {
   purchaseSends,
   purchases,
 } from "../db/schema/purchases.ts";
+import { vendorVariantCodes } from "../db/schema/vendor-variant-codes.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 
@@ -607,6 +608,36 @@ export async function invoiceTotalMinor(purchaseId: string): Promise<number> {
     .from(purchaseItems)
     .where(eq(purchaseItems.purchaseId, purchaseId));
   return Number(rows[0]?.total ?? 0);
+}
+
+/**
+ * Stock lines whose variant the purchase's vendor has no `vendor_variant_codes`
+ * mapping for — the vendor will not recognize those parts. The send screen
+ * surfaces these as a pre-send warning and offers to map them inline. An
+ * ad-hoc purchase (no vendor) and non-stock lines (no variant) have no
+ * mapping to miss, so both are excluded.
+ */
+export async function unmappedLines(purchaseId: string): Promise<Item[]> {
+  const purchase = await loadPurchase(purchaseId);
+  if (!purchase.vendorId) return [];
+
+  const stockLines = (await listItems(purchaseId)).filter((i) => i.variantId);
+  if (stockLines.length === 0) return [];
+
+  const mapped = await db
+    .select({ variantId: vendorVariantCodes.variantId })
+    .from(vendorVariantCodes)
+    .where(
+      and(
+        eq(vendorVariantCodes.vendorId, purchase.vendorId),
+        inArray(
+          vendorVariantCodes.variantId,
+          stockLines.map((i) => i.variantId as string),
+        ),
+      ),
+    );
+  const mappedVariants = new Set(mapped.map((m) => m.variantId));
+  return stockLines.filter((i) => !mappedVariants.has(i.variantId as string));
 }
 
 // --- Send log ---

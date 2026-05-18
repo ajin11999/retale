@@ -1,7 +1,7 @@
-// Integration tests for purchase-service. Currently covers `clonePurchase` —
-// the recurring-order shortcut. Runs against the local Docker MariaDB
-// (DATABASE_URL) and WIPEs the purchase / product / vendor tables between
-// tests, so point it only at a dev database.
+// Integration tests for purchase-service — `clonePurchase` (the recurring-
+// order shortcut) and `unmappedLines` (the pre-send vendor-code warning).
+// Runs against the local Docker MariaDB (DATABASE_URL) and WIPEs the purchase
+// / product / vendor tables between tests, so point it only at a dev database.
 //
 //   bun test src/services/purchase-service.test.ts
 
@@ -12,6 +12,7 @@ import { ulid } from "ulid";
 import { users } from "../db/schema/auth.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchaseSections, purchases } from "../db/schema/purchases.ts";
+import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import {
   cancelPurchase,
@@ -23,7 +24,9 @@ import {
   listSections,
   listSends,
   recordPurchaseSend,
+  unmappedLines,
 } from "./purchase-service.ts";
+import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
 
 let userId: string;
 
@@ -34,8 +37,10 @@ async function wipe(): Promise<void> {
     "purchase_items",
     "purchase_sections",
     "purchases",
+    "vendor_variant_codes",
     "product_variants",
     "products",
+    "vendors",
   ]) {
     await db.execute(sql.raw(`DELETE FROM \`${t}\``));
   }
@@ -78,6 +83,13 @@ async function seedVariant(): Promise<string> {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+/** Create a vendor; returns its id. */
+async function seedVendor(): Promise<string> {
+  const id = ulid();
+  await db.insert(vendors).values({ id, name: "Acme Supply" });
+  return id;
+}
 
 describe("clonePurchase", () => {
   test("clones the header as a fresh open draft, dropping sourceDocument", async () => {
@@ -172,5 +184,86 @@ describe("clonePurchase", () => {
     const clone = await clonePurchase(source.id, userId);
     expect(clone.status).toBe("open");
     expect(await listSends(clone.id)).toHaveLength(0);
+  });
+});
+
+describe("unmappedLines", () => {
+  test("returns stock lines the vendor has no code mapping for", async () => {
+    const vendorId = await seedVendor();
+    const mappedVariant = await seedVariant();
+    const unmappedVariant = await seedVariant();
+    const purchase = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: purchase.id,
+      variantId: mappedVariant,
+      qtyOrdered: 1,
+      unitCostMinor: 100,
+    });
+    const unmappedItem = await createItem({
+      purchaseId: purchase.id,
+      variantId: unmappedVariant,
+      qtyOrdered: 1,
+      unitCostMinor: 100,
+    });
+    await setVendorVariantCode({ vendorId, variantId: mappedVariant, code: "VC-1" });
+
+    const out = await unmappedLines(purchase.id);
+    expect(out.map((i) => i.id)).toEqual([unmappedItem.id]);
+  });
+
+  test("is empty when every stock line is mapped", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const purchase = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: purchase.id,
+      variantId,
+      qtyOrdered: 1,
+      unitCostMinor: 100,
+    });
+    await setVendorVariantCode({ vendorId, variantId, code: "VC-1" });
+
+    expect(await unmappedLines(purchase.id)).toHaveLength(0);
+  });
+
+  test("ignores non-stock lines and ad-hoc purchases with no vendor", async () => {
+    // Non-stock line on a vendor PO — has no variant, so cannot be unmapped.
+    const vendorId = await seedVendor();
+    const withVendor = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: withVendor.id,
+      variantId: null,
+      description: "Shop rags",
+      qtyOrdered: 1,
+      unitCostMinor: 100,
+    });
+    expect(await unmappedLines(withVendor.id)).toHaveLength(0);
+
+    // Ad-hoc purchase — no vendor to recognize parts, so no warning.
+    const variantId = await seedVariant();
+    const adHoc = await createPurchase({
+      snapshotVendorName: "Ad-hoc",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: adHoc.id,
+      variantId,
+      qtyOrdered: 1,
+      unitCostMinor: 100,
+    });
+    expect(await unmappedLines(adHoc.id)).toHaveLength(0);
   });
 });

@@ -37,6 +37,8 @@ export const typeDefs = /* GraphQL */ `
     totalInvoiceCost: Float!
     "True when the PO has content edits not covered by the latest send."
     hasUnsentChanges: Boolean!
+    "Stock lines the vendor has no part-number mapping for — a pre-send warning."
+    unmappedLines: [PurchaseItem!]!
   }
 
   type PurchaseSection {
@@ -167,6 +169,7 @@ export const resolvers = {
       const lastSentRevision = sends.reduce((max, s) => Math.max(max, s.revision), 0);
       return p.revision > lastSentRevision;
     },
+    unmappedLines: (p: PurchaseRow) => purchases.unmappedLines(p.id),
   },
   PurchaseSection: {
     items: (s: { id: string }) => purchases.listSectionItems(s.id),
