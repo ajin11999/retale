@@ -1,6 +1,7 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import { page } from "$app/state";
+  import { marked } from "marked";
   import { formatMoney } from "$lib/utils";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -370,6 +371,12 @@
 
   const categoryName = (id: string | null | undefined) =>
     id ? (categories.find((c) => c.id === id)?.name ?? "Unknown") : "—";
+
+  // Live markdown preview of the description. The content is authored by
+  // staff with product.edit, so it is rendered trusted.
+  const descriptionHtml = $derived(
+    marked.parse(form.description, { async: false }),
+  );
 </script>
 
 <svelte:head>
@@ -445,10 +452,28 @@
         </label>
       </div>
 
-      <label class="space-y-1">
+      <div class="space-y-1">
         <span class="text-sm font-medium">Description</span>
-        <Textarea bind:value={form.description} disabled={!canEdit} />
-      </label>
+        <div class="grid grid-cols-2 gap-3">
+          <Textarea
+            bind:value={form.description}
+            disabled={!canEdit}
+            placeholder="Markdown supported…"
+            class="h-48 resize-none"
+          />
+          <div
+            class="md-preview h-48 overflow-auto rounded-md border bg-muted/30 px-3 py-2 text-sm"
+            aria-label="Description preview"
+          >
+            {#if form.description.trim()}
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+              {@html descriptionHtml}
+            {:else}
+              <span class="text-muted-foreground">Nothing to preview.</span>
+            {/if}
+          </div>
+        </div>
+      </div>
 
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
