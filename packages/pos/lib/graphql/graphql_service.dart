@@ -88,6 +88,6 @@ class GraphQLService {
           : 'Unknown server error';
       throw GraphQLAppException(msg);
     }
-    return (result.data ?? const {}) as Map<String, dynamic>;
+    return result.data ?? const <String, dynamic>{};
   }
 }
