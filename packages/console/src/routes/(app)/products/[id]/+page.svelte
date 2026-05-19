@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { graphql } from "$houdini";
   import { page } from "$app/state";
   import { formatMoney } from "$lib/utils";
@@ -45,13 +44,6 @@
       }
     }
   `);
-
-  // Fetch on mount from the route param — explicit, no route auto-load.
-  // The [id] route guarantees the param exists.
-  const productId = page.params.id as string;
-  onMount(() => {
-    ProductDetail.fetch({ variables: { id: productId } });
-  });
 
   const UpdateProduct = graphql(`
     mutation ConsoleUpdateProduct(

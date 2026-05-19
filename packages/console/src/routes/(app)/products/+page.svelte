@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { graphql } from "$houdini";
   import {
     getCoreRowModel,
@@ -34,11 +33,6 @@
       }
     }
   `);
-
-  // Fetch on mount — explicit and reliable, no dependence on route auto-load.
-  onMount(() => {
-    ProductList.fetch();
-  });
 
   interface Row {
     id: string;
