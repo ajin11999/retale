@@ -1,0 +1,35 @@
+name: retale_pos
+description: "Retale POS — point-of-sale register for the Retale GraphQL API."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # GraphQL client (chosen: graphql_flutter — built-in normalized cache).
+  graphql_flutter: ^5.2.0
+
+  # Local config, token storage, and the offline cache + order queue.
+  # shared_preferences backs the cache so it works uniformly on web too.
+  shared_preferences: ^2.5.2
+  flutter_secure_storage: ^9.2.2
+  connectivity_plus: ^6.1.0
+
+  # Decode JWT exp claim for proactive token refresh.
+  jwt_decoder: ^2.0.1
+
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
