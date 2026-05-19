@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { graphql } from "$houdini";
   import {
     getCoreRowModel,
@@ -13,7 +14,6 @@
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
 
-  // Houdini auto-loads this query for the route (no required variables).
   const ProductList = graphql(`
     query ProductList {
       products(includeArchived: true) {
@@ -34,6 +34,11 @@
       }
     }
   `);
+
+  // Fetch on mount — explicit and reliable, no dependence on route auto-load.
+  onMount(() => {
+    ProductList.fetch();
+  });
 
   interface Row {
     id: string;

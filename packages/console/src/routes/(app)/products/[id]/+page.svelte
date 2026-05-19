@@ -1,14 +1,5 @@
-<script module lang="ts">
-  // Houdini computes the query variables for the auto-loaded ProductDetail
-  // query from the route param.
-  export function _ProductDetailVariables(event: {
-    params: Record<string, string>;
-  }) {
-    return { id: event.params.id };
-  }
-</script>
-
 <script lang="ts">
+  import { onMount } from "svelte";
   import { graphql } from "$houdini";
   import { page } from "$app/state";
   import { formatMoney } from "$lib/utils";
@@ -54,6 +45,13 @@
       }
     }
   `);
+
+  // Fetch on mount from the route param — explicit, no route auto-load.
+  // The [id] route guarantees the param exists.
+  const productId = page.params.id as string;
+  onMount(() => {
+    ProductDetail.fetch({ variables: { id: productId } });
+  });
 
   const UpdateProduct = graphql(`
     mutation ConsoleUpdateProduct(
