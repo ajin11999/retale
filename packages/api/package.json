@@ -13,6 +13,7 @@
     "db:migrate": "bun run scripts/migrate.ts",
     "db:seed": "bun run scripts/seed-templates.ts",
     "schema:dump": "bun run scripts/dump-schema.ts",
+    "dev:seed-user": "bun run scripts/seed-dev-user.ts",
     "jobs:run": "bun run scripts/run-scheduled-jobs.ts"
   },
   "dependencies": {
