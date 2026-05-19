@@ -20,7 +20,9 @@
       "PowerShell(\"console .env: \" + \\(Test-Path packages/console/.env\\); \"root .env: \" + \\(Test-Path .env\\))",
       "PowerShell(docker compose up *)",
       "PowerShell(Get-NetTCPConnection *)",
-      "PowerShell(bunx houdini generate 2>&1 | Select-Object -Last 25)"
+      "PowerShell(bunx houdini generate 2>&1 | Select-Object -Last 25)",
+      "Bash(flutter --version)",
+      "Bash(flutter pub *)"
     ]
   }
 }
