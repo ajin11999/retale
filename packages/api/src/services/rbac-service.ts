@@ -76,6 +76,16 @@ export async function getRolePermissions(roleId: string): Promise<string[]> {
   return rows.map((r) => r.key);
 }
 
+/** Distinct permission keys granted to a user through their assigned roles. */
+export async function getUserPermissionKeys(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ key: rolePermissions.permissionKey })
+    .from(userRoles)
+    .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoles.roleId))
+    .where(eq(userRoles.userId, userId));
+  return [...new Set(rows.map((r) => r.key))];
+}
+
 /** Create a regular (non-template) role with an initial permission set. */
 export async function createRole(input: {
   name: string;

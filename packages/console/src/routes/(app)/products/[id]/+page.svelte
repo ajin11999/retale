@@ -10,7 +10,9 @@
 
 <script lang="ts">
   import { graphql } from "$houdini";
+  import { page } from "$app/state";
   import { formatMoney } from "$lib/utils";
+  import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
@@ -163,6 +165,18 @@
   const product = $derived($ProductDetail.data?.product);
   const categories = $derived($ProductDetail.data?.categories ?? []);
 
+  // ---- Viewer permissions --------------------------------------------------
+  // The API gates product writes, with extra keys for tax / price / cost.
+  // We mirror that here: disable fields the viewer can't change, and omit
+  // those fields from mutations so a partial edit isn't rejected wholesale.
+  const viewer = $derived(page.data.user as Viewer | undefined);
+  const has = (key: string) => !!viewer && viewer.permissions.includes(key);
+  const canEdit = $derived(has("product.edit"));
+  const canEditTax = $derived(has("product.edit_tax"));
+  const canEditPrice = $derived(has("product.edit_price"));
+  const canEditCost = $derived(has("product.edit_cost"));
+  const canArchive = $derived(has("product.archive"));
+
   // ---- Product-detail form -------------------------------------------------
   interface ProductForm {
     name: string;
@@ -248,8 +262,10 @@
         description: form.description.trim() || null,
         kind: form.kind as never,
         categoryId: form.categoryId || null,
-        priceMode: form.priceMode as never,
-        taxRateBps: form.taxRateBps,
+        // Tax fields require product.edit_tax — omit them otherwise so an
+        // edit to the other fields still goes through.
+        priceMode: canEditTax ? (form.priceMode as never) : undefined,
+        taxRateBps: canEditTax ? form.taxRateBps : undefined,
         minQty: form.minQty,
         minMarginBps: form.minMarginBps,
         replenishMonitored: form.replenishMonitored,
@@ -322,8 +338,9 @@
           label: d.label.trim() || null,
           unit: d.unit as never,
           qtyDecimals: d.qtyDecimals,
-          priceMinor: d.priceMinor,
-          costMinor: d.costMinor,
+          // Price / cost edits each need their own permission key.
+          priceMinor: canEditPrice ? d.priceMinor : undefined,
+          costMinor: canEditCost ? d.costMinor : undefined,
           sortOrder: d.sortOrder,
         });
       }
@@ -388,7 +405,12 @@
         >
           {product.archivedAt ? "Archived" : "Active"}
         </Badge>
-        <Button variant="outline" size="sm" disabled={busy} onclick={toggleArchived}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !canArchive}
+          onclick={toggleArchived}
+        >
           {product.archivedAt ? "Restore" : "Archive"}
         </Button>
       </div>
@@ -400,6 +422,14 @@
       </p>
     {/if}
 
+    {#if !canEdit}
+      <p
+        class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+      >
+        You have read-only access to products — editing is disabled.
+      </p>
+    {/if}
+
     <!-- Product details -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">Details</h2>
@@ -407,29 +437,33 @@
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Name</span>
-          <Input bind:value={form.name} />
+          <Input bind:value={form.name} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Public name</span>
-          <Input bind:value={form.publicName} placeholder="Falls back to name" />
+          <Input
+            bind:value={form.publicName}
+            placeholder="Falls back to name"
+            disabled={!canEdit}
+          />
         </label>
       </div>
 
       <label class="space-y-1">
         <span class="text-sm font-medium">Description</span>
-        <Textarea bind:value={form.description} />
+        <Textarea bind:value={form.description} disabled={!canEdit} />
       </label>
 
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Kind</span>
-          <Select bind:value={form.kind}>
+          <Select bind:value={form.kind} disabled={!canEdit}>
             {#each KINDS as k (k)}<option value={k}>{k}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Category</span>
-          <Select bind:value={form.categoryId}>
+          <Select bind:value={form.categoryId} disabled={!canEdit}>
             <option value="">Uncategorized</option>
             {#each categories as c (c.id)}
               <option value={c.id}>{c.name}</option>
@@ -438,31 +472,50 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Price mode</span>
-          <Select bind:value={form.priceMode}>
+          <Select bind:value={form.priceMode} disabled={!canEdit || !canEditTax}>
             {#each PRICE_MODES as m (m)}<option value={m}>{m}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Tax rate (basis points)</span>
-          <Input type="number" bind:value={form.taxRateBps} />
+          <Input
+            type="number"
+            bind:value={form.taxRateBps}
+            disabled={!canEdit || !canEditTax}
+          />
+          {#if canEdit && !canEditTax}
+            <span class="text-xs text-muted-foreground"
+              >Requires the product.edit_tax permission.</span
+            >
+          {/if}
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min qty</span>
-          <Input type="number" bind:value={form.minQty} />
+          <Input type="number" bind:value={form.minQty} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min margin (basis points)</span>
-          <Input type="number" bind:value={form.minMarginBps} />
+          <Input
+            type="number"
+            bind:value={form.minMarginBps}
+            disabled={!canEdit}
+          />
         </label>
       </div>
 
       <label class="flex items-center gap-2">
-        <input type="checkbox" bind:checked={form.replenishMonitored} />
+        <input
+          type="checkbox"
+          bind:checked={form.replenishMonitored}
+          disabled={!canEdit}
+        />
         <span class="text-sm font-medium">Monitored by the reorder forecast</span>
       </label>
 
       <div class="flex justify-end">
-        <Button disabled={busy} onclick={saveProduct}>Save details</Button>
+        <Button disabled={busy || !canEdit} onclick={saveProduct}>
+          Save details
+        </Button>
       </div>
     </section>
 
@@ -472,7 +525,12 @@
         <h2 class="text-sm font-semibold">
           Variants ({product.variants.length})
         </h2>
-        <Button variant="outline" size="sm" disabled={busy} onclick={newVariant}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !canEdit}
+          onclick={newVariant}
+        >
           Add variant
         </Button>
       </div>
@@ -500,11 +558,13 @@
               <td class="py-1.5 text-right">{v.totalQty}</td>
               <td class="py-1.5 text-right">
                 <button
-                  class="text-xs text-primary hover:underline"
+                  class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
                   onclick={() => editVariant(v)}>Edit</button
                 >
                 <button
-                  class="ml-2 text-xs text-destructive hover:underline"
+                  class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canEdit}
                   onclick={() => deleteVariant(v.id)}>Delete</button
                 >
               </td>
@@ -531,37 +591,64 @@
               <Input
                 bind:value={variantDraft.sku}
                 placeholder={variantDraft.id ? "" : "Auto-generated"}
+                disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Barcode</span>
-              <Input bind:value={variantDraft.barcode} />
+              <Input bind:value={variantDraft.barcode} disabled={!canEdit} />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Label</span>
-              <Input bind:value={variantDraft.label} />
+              <Input bind:value={variantDraft.label} disabled={!canEdit} />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Unit</span>
-              <Select bind:value={variantDraft.unit}>
+              <Select bind:value={variantDraft.unit} disabled={!canEdit}>
                 {#each UNITS as u (u)}<option value={u}>{u}</option>{/each}
               </Select>
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Qty decimals</span>
-              <Input type="number" bind:value={variantDraft.qtyDecimals} />
+              <Input
+                type="number"
+                bind:value={variantDraft.qtyDecimals}
+                disabled={!canEdit}
+              />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Sort order</span>
-              <Input type="number" bind:value={variantDraft.sortOrder} />
+              <Input
+                type="number"
+                bind:value={variantDraft.sortOrder}
+                disabled={!canEdit}
+              />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Price (minor units)</span>
-              <Input type="number" bind:value={variantDraft.priceMinor} />
+              <Input
+                type="number"
+                bind:value={variantDraft.priceMinor}
+                disabled={!canEdit || (variantDraft.id != null && !canEditPrice)}
+              />
+              {#if variantDraft.id != null && canEdit && !canEditPrice}
+                <span class="text-xs text-muted-foreground"
+                  >Requires product.edit_price.</span
+                >
+              {/if}
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Cost (minor units)</span>
-              <Input type="number" bind:value={variantDraft.costMinor} />
+              <Input
+                type="number"
+                bind:value={variantDraft.costMinor}
+                disabled={!canEdit || (variantDraft.id != null && !canEditCost)}
+              />
+              {#if variantDraft.id != null && canEdit && !canEditCost}
+                <span class="text-xs text-muted-foreground"
+                  >Requires product.edit_cost.</span
+                >
+              {/if}
             </label>
           </div>
           <div class="flex justify-end gap-2">
@@ -571,7 +658,7 @@
               disabled={busy}
               onclick={() => (variantDraft = null)}>Cancel</Button
             >
-            <Button size="sm" disabled={busy} onclick={saveVariant}>
+            <Button size="sm" disabled={busy || !canEdit} onclick={saveVariant}>
               {variantDraft.id ? "Save variant" : "Add variant"}
             </Button>
           </div>

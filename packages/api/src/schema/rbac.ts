@@ -24,6 +24,8 @@ export const typeDefs = /* GraphQL */ `
   extend type User {
     "Ids of the roles assigned to this user."
     roleIds: [String!]!
+    "Effective permission keys — every key the user's roles grant (or the full catalog, for root)."
+    permissions: [String!]!
   }
 
   extend type Query {
@@ -83,6 +85,12 @@ export const resolvers = {
         .from(userRoles)
         .where(eq(userRoles.userId, u.id));
       return rows.map((r) => r.roleId);
+    },
+    permissions: async (u: { id: string; isRoot: boolean }): Promise<string[]> => {
+      // Root short-circuits every permission check (see authz.ts), so it
+      // effectively holds the entire catalog.
+      if (u.isRoot) return [...PERMISSIONS];
+      return rbac.getUserPermissionKeys(u.id);
     },
   },
 

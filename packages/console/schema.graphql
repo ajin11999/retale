@@ -440,6 +440,11 @@ type User {
 
   """Ids of the roles assigned to this user."""
   roleIds: [String!]!
+
+  """
+  Effective permission keys — every key the user's roles grant (or the full catalog, for root).
+  """
+  permissions: [String!]!
 }
 
 """

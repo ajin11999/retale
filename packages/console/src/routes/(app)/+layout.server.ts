@@ -9,12 +9,21 @@ const ME = /* GraphQL */ `
       username
       name
       isRoot
+      permissions
     }
   }
 `;
 
+export interface Viewer {
+  id: string;
+  username: string;
+  name: string;
+  isRoot: boolean;
+  permissions: string[];
+}
+
 interface MeData {
-  me: { id: string; username: string; name: string; isRoot: boolean } | null;
+  me: Viewer | null;
 }
 
 // Auth guard for every screen under (app): the access-token cookie must
