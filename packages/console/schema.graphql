@@ -1,0 +1,1557 @@
+type Query {
+  """Liveness probe — returns 'ok' when the API is up."""
+  health: String!
+
+  """The currently authenticated user, or null if the request is anonymous."""
+  me: User
+
+  """Every permission key the server recognises."""
+  permissionCatalog: [String!]!
+
+  """All roles, with their permission keys."""
+  roles: [Role!]!
+
+  """All users, with their assigned role ids."""
+  users: [User!]!
+  categories: [Category!]!
+  products(search: String, includeArchived: Boolean): [Product!]!
+  product(id: ID!): Product
+  locations(includeArchived: Boolean): [Location!]!
+  location(id: ID!): Location
+  variantStock(variantId: ID!): [StockLocation!]!
+  variantStockMovements(variantId: ID!, limit: Int): [StockMovement!]!
+  vendors(includeArchived: Boolean): [Vendor!]!
+  vendor(id: ID!): Vendor
+  vendorLedger(vendorId: ID!, limit: Int): [VendorLedgerEntry!]!
+  purchases(status: PurchaseStatus, vendorId: ID, includeCancelled: Boolean): [Purchase!]!
+  purchase(id: ID!): Purchase
+
+  """
+  Render a PO for sending: message body + recipient + wa.me / mailto: deep link.
+  """
+  purchaseSendDraft(purchaseId: ID!, channel: PurchaseSendChannel!, recipientOverride: String): PurchaseSendDraft!
+  deliveries(status: DeliveryStatus): [PurchaseDelivery!]!
+  delivery(id: ID!): PurchaseDelivery
+  customers(includeArchived: Boolean): [Customer!]!
+  customer(id: ID!): Customer
+  customerLedger(customerId: ID!, limit: Int): [CustomerLedgerEntry!]!
+  customerPrices(customerId: ID!): [CustomerPrice!]!
+  pointsOfSale(includeArchived: Boolean): [PointOfSale!]!
+  pointOfSale(id: ID!): PointOfSale
+  posSessions(posId: ID, limit: Int): [PosSession!]!
+  posSession(id: ID!): PosSession
+  order(id: ID!): Order
+  orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
+  trackingAccounts(includeArchived: Boolean): [TrackingAccount!]!
+  trackingAccount(id: ID!): TrackingAccount
+  trackingAccountLedger(accountId: ID!, limit: Int): [TrackingAccountLedgerEntry!]!
+  stockTransfers(limit: Int): [StockTransfer!]!
+  stockTransfer(id: ID!): StockTransfer
+
+  """Reorder forecast for every monitored physical product variant."""
+  reorderForecast(windowDays: Int, recentWindowDays: Int, soonHorizonDays: Int): [ReorderForecastRow!]!
+
+  """Reorder suggestions, newest scan first; optionally filtered by status."""
+  reorderSuggestions(status: ReorderSuggestionStatus): [ReorderSuggestion!]!
+
+  """
+  The open (draft) receiving check for a purchase, or null if none is in progress.
+  """
+  openReceivingCheck(purchaseId: ID!): PurchaseDelivery
+
+  """
+  Every purchase line with ordered / delivered / remaining and completeness.
+  """
+  receivingCheckLines(purchaseId: ID!): [ReceivingCheckLine!]!
+
+  """
+  Resolve a scanned barcode / SKU to the purchase line(s) it counts against.
+  """
+  resolveReceivingScan(purchaseId: ID!, code: String!): [PurchaseItem!]!
+
+  """Every variant code mapped for a vendor."""
+  codesForVendor(vendorId: ID!): [VendorVariantCode!]!
+
+  """Every vendor that has a code mapped for a variant."""
+  codesForVariant(variantId: ID!): [VendorVariantCode!]!
+
+  """Catalog publish history, newest first."""
+  catalogPublishes(limit: Int): [CatalogPublish!]!
+
+  """
+  Purchase alerts, newest first. acknowledged: true / false / omitted (all).
+  """
+  purchaseAlerts(acknowledged: Boolean): [PurchaseAlert!]!
+  productImages(productId: ID!): [ProductImage!]!
+
+  """
+  Product alerts, newest first. acknowledged: true / false / omitted (all).
+  """
+  productAlerts(acknowledged: Boolean): [ProductAlert!]!
+  businessSettings: BusinessSettings!
+
+  """Sales volume — orders, units, revenue, by day."""
+  salesReport(periodStart: String!, periodEnd: String!): SalesReport!
+
+  """Cost / margin — revenue vs COGS over the period."""
+  profitReport(periodStart: String!, periodEnd: String!): ProfitReport!
+
+  """Customer debt aging as of now."""
+  arAgingReport: AgingReport!
+
+  """Vendor debt aging as of now."""
+  apAgingReport: AgingReport!
+
+  """Cash-drawer variance for sessions closed in the period."""
+  sessionVarianceReport(periodStart: String!, periodEnd: String!): SessionVarianceReport!
+
+  """Balanced double-entry journal for the period, for external accounting."""
+  journalExport(periodStart: String!, periodEnd: String!): JournalExport!
+}
+
+type Mutation {
+  """Placeholder so domains have a Mutation type to extend."""
+  _noop: Boolean
+
+  """Create the first (root) user. Fails once any user exists."""
+  bootstrap(username: String!, password: String!, name: String!): AuthPayload!
+
+  """Authenticate with username + password. May return a 2FA challenge."""
+  login(username: String!, password: String!): LoginResult!
+
+  """Complete a 2FA login with a TOTP or recovery code."""
+  loginTwoFactor(challengeToken: String!, code: String!): AuthPayload!
+
+  """Rotate a refresh token, returning a fresh token pair."""
+  refreshToken(refreshToken: String!): AuthPayload!
+
+  """Revoke the session behind a refresh token. Idempotent."""
+  logout(refreshToken: String!): Boolean!
+
+  """
+  Begin TOTP enrolment for the current user — returns a secret + recovery codes.
+  """
+  setupTwoFactor: TwoFactorSetup!
+
+  """
+  Confirm a pending TOTP setup by entering a current code; activates 2FA.
+  """
+  confirmTwoFactor(code: String!): Boolean!
+
+  """Disable 2FA for the current user."""
+  disableTwoFactor: Boolean!
+
+  """Replace the current user's recovery codes; the old set is invalidated."""
+  regenerateRecoveryCodes: [String!]!
+  createRole(name: String!, description: String, permissionKeys: [String!]!): Role!
+
+  """Clone a role (typically a template) into a new editable role."""
+  cloneRole(roleId: ID!, name: String!): Role!
+
+  """Replace a role's permission set. Template roles are immutable."""
+  setRolePermissions(roleId: ID!, permissionKeys: [String!]!): Role!
+  deleteRole(roleId: ID!): Boolean!
+  createUser(username: String!, password: String!, name: String!, isRoot: Boolean, roleIds: [ID!]): User!
+  assignRole(userId: ID!, roleId: ID!): User!
+  unassignRole(userId: ID!, roleId: ID!): User!
+  createCategory(name: String!, parentId: ID, minQty: Int, minMarginBps: Int): Category!
+  updateCategory(id: ID!, name: String, parentId: ID, minQty: Int, minMarginBps: Int): Category!
+  setCategoryArchived(id: ID!, archived: Boolean!): Category!
+  deleteCategory(id: ID!): Boolean!
+  createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
+  updateProduct(id: ID!, name: String, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode, minQty: Int, minMarginBps: Int, primaryVendorId: ID, replenishMonitored: Boolean): Product!
+  setProductArchived(id: ID!, archived: Boolean!): Product!
+
+  """Hard delete — root-only. Prefer archiving."""
+  hardDeleteProduct(id: ID!): Boolean!
+  addVariant(productId: ID!, variant: VariantInput!): ProductVariant!
+  updateVariant(id: ID!, sku: String, barcode: String, label: String, unit: VariantUnit, qtyDecimals: Int, priceMinor: Float, costMinor: Float, sortOrder: Int): ProductVariant!
+  deleteVariant(id: ID!): Boolean!
+  setPriceTiers(variantId: ID!, tiers: [PriceTierInput!]!): [PriceTier!]!
+
+  """
+  Replace a bundle's components wholesale. The variant's product must be kind='bundle'.
+  """
+  setBundleComponents(bundleVariantId: ID!, components: [BundleComponentInput!]!): [BundleComponent!]!
+  createLocation(name: String!, parentId: ID, code: String, notes: String, sortOrder: Int): Location!
+  updateLocation(id: ID!, name: String, parentId: ID, code: String, notes: String, sortOrder: Int): Location!
+  setLocationArchived(id: ID!, archived: Boolean!): Location!
+
+  """
+  Hard delete — root-only. Refused if the location has children or holds stock.
+  """
+  hardDeleteLocation(id: ID!): Boolean!
+
+  """
+  Manual stock write-on (positive) or write-off (negative). Reason required.
+  """
+  adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String!): StockMovement!
+
+  """Snap a variant's weighted-average cost to an exact value."""
+  overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
+  createVendor(name: String!, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel): Vendor!
+  updateVendor(id: ID!, name: String, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel): Vendor!
+  setVendorArchived(id: ID!, archived: Boolean!): Vendor!
+
+  """
+  Hard delete — root-only. Refused if the vendor carries a non-zero AP balance.
+  """
+  hardDeleteVendor(id: ID!): Boolean!
+
+  """Record a payment to a vendor. amountMinor is the positive sum paid."""
+  recordVendorPayment(vendorId: ID!, amountMinor: Float!, posSessionId: ID, note: String): Vendor!
+
+  """
+  Root-only manual balance correction. Signed amountMinor; note required.
+  """
+  adjustVendorBalance(vendorId: ID!, amountMinor: Float!, note: String!): Vendor!
+  createPurchase(vendorId: ID, snapshotVendorName: String, date: String!, sourceDocument: String, memo: String, sendDueDate: String): Purchase!
+  updatePurchase(id: ID!, vendorId: ID, snapshotVendorName: String, date: String, sourceDocument: String, memo: String, sendDueDate: String): Purchase!
+  cancelPurchase(id: ID!): Purchase!
+
+  """Duplicate a purchase as a fresh open draft (recurring-order shortcut)."""
+  clonePurchase(id: ID!): Purchase!
+  createPurchaseSection(purchaseId: ID!, name: String!, sortOrder: Int): PurchaseSection!
+  updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
+  deletePurchaseSection(id: ID!): Boolean!
+  reorderPurchaseSections(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseSection!]!
+  createPurchaseItem(purchaseId: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float!, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
+  updatePurchaseItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
+  deletePurchaseItem(id: ID!): Boolean!
+  reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
+
+  """
+  Open a send: log a generated PO link. whatsapp/email start 'prepared'; manual is 'sent' at once.
+  """
+  recordPurchaseSend(purchaseId: ID!, channel: PurchaseSendChannel!, recipient: String!, note: String): PurchaseSend!
+
+  """
+  Confirm a prepared send: flip it to 'sent' and capture the expected delivery date.
+  """
+  confirmPurchaseSend(id: ID!, expectedDeliveryDate: String): PurchaseSend!
+  createDelivery(date: String!, biller: String, targetLocationId: ID!): PurchaseDelivery!
+  updateDelivery(id: ID!, date: String, biller: String, targetLocationId: ID): PurchaseDelivery!
+
+  """Discard a draft delivery and its cost tree."""
+  deleteDelivery(id: ID!): Boolean!
+  createDeliveryItem(deliveryId: ID!, parentItemId: ID, purchaseItemId: ID, description: String!, qty: Float, costMinor: Float!, sortOrder: Int): PurchaseDeliveryItem!
+  updateDeliveryItem(id: ID!, description: String, qty: Float, costMinor: Float, sortOrder: Int): PurchaseDeliveryItem!
+  deleteDeliveryItem(id: ID!): Boolean!
+
+  """
+  Commit a draft delivery: receives stock, recomputes WAC, advances the PO.
+  """
+  commitDelivery(id: ID!): PurchaseDelivery!
+
+  """
+  Reverse a delivered delivery (root only). Stock returns; WAC is not re-valued.
+  """
+  cancelDelivery(id: ID!): PurchaseDelivery!
+  createCustomer(name: String!, phone: String, email: String, address: String, notes: String): Customer!
+  updateCustomer(id: ID!, name: String, phone: String, email: String, address: String, notes: String): Customer!
+  setCustomerArchived(id: ID!, archived: Boolean!): Customer!
+
+  """Root-only. creditLimitMinor of null clears the limit."""
+  setCustomerCreditLimit(id: ID!, creditLimitMinor: Float): Customer!
+
+  """
+  Hard delete — root-only. Refused if the customer carries a non-zero AR balance.
+  """
+  hardDeleteCustomer(id: ID!): Boolean!
+
+  """
+  Record a cash payment against existing customer debt. amountMinor is the positive sum received.
+  """
+  recordDebtPayment(customerId: ID!, amountMinor: Float!, posSessionId: ID, note: String): Customer!
+
+  """
+  Root-only manual balance correction. Signed amountMinor; note required.
+  """
+  adjustCustomerBalance(customerId: ID!, amountMinor: Float!, note: String!): Customer!
+
+  """Upsert a per-customer price override for a variant."""
+  setCustomerPrice(customerId: ID!, variantId: ID!, priceMinor: Float!): CustomerPrice!
+  removeCustomerPrice(customerId: ID!, variantId: ID!): Boolean!
+  createPointOfSale(locationId: ID!, code: String!, name: String!, notes: String): PointOfSale!
+  updatePointOfSale(id: ID!, locationId: ID, code: String, name: String, notes: String): PointOfSale!
+
+  """Archive a POS. Refused while a session is open on it."""
+  setPointOfSaleArchived(id: ID!, archived: Boolean!): PointOfSale!
+
+  """Hard delete — root-only. Refused while any session references the POS."""
+  hardDeletePointOfSale(id: ID!): Boolean!
+
+  """
+  Open a cashier shift. Fails if the POS is archived or already has an open session.
+  """
+  openSession(posId: ID!, openingCashMinor: Float!, notes: String): PosSession!
+
+  """Close a session. Records the cash variance; never blocks on it."""
+  closeSession(id: ID!, closingCashMinor: Float!): PosSession!
+
+  """Force-close a stranded session — root-only. Leaves it unreconciled."""
+  forceCloseSession(id: ID!): PosSession!
+
+  """Reopen a session to amend mistakes — root-only, within 24h of close."""
+  reopenSession(id: ID!): PosSession!
+
+  """
+  Create an atomic POS order — closed on create against an open POS session.
+  """
+  createPosOrder(posSessionId: ID!, customerId: ID, items: [PosOrderItemInput!]!, payments: [PosOrderPaymentInput!]!): Order!
+
+  """Open an empty Console customer sale (stateful, root-only)."""
+  createCustomerSale(customerId: ID!): Order!
+
+  """Add a line to an open Console sale."""
+  addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
+
+  """
+  Void a line on an open Console sale — returns stock, reverses the ledger.
+  """
+  voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
+
+  """Record a payment against an open Console sale."""
+  addCustomerSalePayment(orderId: ID!, amountMinor: Float!, posSessionId: ID): Order!
+
+  """Close a Console sale — assigns its display number; immutable after."""
+  closeCustomerSale(orderId: ID!): Order!
+
+  """Cancel an open Console sale — voids every line. reason is required."""
+  cancelCustomerSale(orderId: ID!, reason: String!): Order!
+
+  """Reassign an open Console sale to a different customer (root-only)."""
+  changeCustomerSaleCustomer(orderId: ID!, newCustomerId: ID!): Order!
+
+  """
+  Create a return order against a closed original. Refund as cash or store credit.
+  """
+  createReturn(originalOrderId: ID!, posSessionId: ID!, items: [ReturnItemInput!]!, refundMethod: RefundMethod!): Order!
+  createTrackingAccount(name: String!, accountCategory: String!, counterCategory: String!, parentId: ID, code: String, notes: String): TrackingAccount!
+  updateTrackingAccount(id: ID!, name: String, accountCategory: String, counterCategory: String, parentId: ID, code: String, notes: String): TrackingAccount!
+  setTrackingAccountArchived(id: ID!, archived: Boolean!): TrackingAccount!
+
+  """
+  Hard delete — root-only. Refused if the account has children or a non-zero balance.
+  """
+  hardDeleteTrackingAccount(id: ID!): Boolean!
+
+  """
+  Pay an account out of the drawer. amountMinor is the positive sum paid.
+  """
+  recordTrackingPayout(accountId: ID!, amountMinor: Float!, posSessionId: ID, note: String): TrackingAccount!
+
+  """
+  Advance cash into an account. amountMinor is the positive sum deposited.
+  """
+  recordTrackingDeposit(accountId: ID!, amountMinor: Float!, posSessionId: ID, note: String): TrackingAccount!
+
+  """
+  Root-only manual balance correction. Signed amountMinor; note required.
+  """
+  adjustTrackingBalance(accountId: ID!, amountMinor: Float!, note: String!, counterCategoryOverride: String): TrackingAccount!
+
+  """Draft a transfer between two locations. Moves no stock yet."""
+  createStockTransfer(sourceLocationId: ID!, targetLocationId: ID!, items: [StockTransferItemInput!]!, notes: String): StockTransfer!
+
+  """Dispatch a draft — debits stock from the source location."""
+  dispatchStockTransfer(id: ID!): StockTransfer!
+
+  """Receive an in-transit transfer — credits stock to the target location."""
+  receiveStockTransfer(id: ID!): StockTransfer!
+
+  """Cancel a transfer; an in-transit one has its stock returned to source."""
+  cancelStockTransfer(id: ID!, reason: String!): StockTransfer!
+
+  """Rescan tracked variants and rebuild the open suggestion set."""
+  runReorderScan: [ReorderSuggestion!]!
+
+  """
+  Convert selected open suggestions into draft purchases (one per vendor).
+  """
+  convertReorderSuggestions(lines: [ConvertReorderLineInput!]!): [Purchase!]!
+
+  """Drop a suggestion from the review list without ordering it."""
+  dismissReorderSuggestion(id: ID!): ReorderSuggestion!
+
+  """
+  Start a receiving check for a purchase, or resume the one already open.
+  """
+  startReceivingCheck(purchaseId: ID!, targetLocationId: ID!): PurchaseDelivery!
+
+  """Upsert one counted line; qty 0 removes it. Save-as-you-go."""
+  setReceivingCheckLine(deliveryId: ID!, purchaseItemId: ID!, qty: Float!): PurchaseDelivery!
+
+  """
+  Commit the check: draft → delivered, receiving stock via the delivery commit.
+  """
+  commitReceivingCheck(deliveryId: ID!): PurchaseDelivery!
+
+  """
+  Upsert a vendor's code for a variant. isPreferred true demotes other vendors.
+  """
+  setVendorVariantCode(vendorId: ID!, variantId: ID!, code: String!, isPreferred: Boolean): VendorVariantCode!
+  deleteVendorVariantCode(id: ID!): Boolean!
+
+  """Edit one product's catalog visibility / display modes."""
+  setProductCatalogSettings(id: ID!, onlineVisible: Boolean, onlinePriceMode: OnlinePriceMode, onlineStockMode: OnlineStockMode): Product!
+
+  """Bulk show/hide products on the catalog. Returns the number updated."""
+  setProductsOnlineVisible(ids: [ID!]!, visible: Boolean!): Int!
+
+  """Build a fresh snapshot and push it to the live catalog."""
+  publishCatalog: CatalogPublish!
+
+  """
+  Scan sent-but-undelivered POs and raise overdue alerts. Returns the new alerts.
+  """
+  scanDeliveryOverdue(graceDays: Int): [PurchaseAlert!]!
+
+  """
+  Scan draft POs past their send-by date and raise send_due alerts. Returns the new alerts.
+  """
+  scanSendDue: [PurchaseAlert!]!
+
+  """Acknowledge an alert — a person has seen it."""
+  acknowledgePurchaseAlert(id: ID!, resolutionNote: String): PurchaseAlert!
+  deleteProductImage(id: ID!): Boolean!
+
+  """Renumber a product's images to the given id order (0-based)."""
+  reorderProductImages(productId: ID!, orderedIds: [ID!]!): [ProductImage!]!
+
+  """
+  Scan every product's margins and raise new alerts. Returns the new alerts.
+  """
+  scanProductAlerts: [ProductAlert!]!
+
+  """Acknowledge an alert — a person has seen it."""
+  acknowledgeProductAlert(id: ID!, resolutionNote: String): ProductAlert!
+  updateBusinessSettings(name: String, phone: String, email: String, poGreeting: String, poFooter: String): BusinessSettings!
+}
+
+type User {
+  id: ID!
+  username: String!
+  name: String!
+  isRoot: Boolean!
+  twoFactorEnabled: Boolean!
+  archivedAt: String
+  createdAt: String!
+
+  """Ids of the roles assigned to this user."""
+  roleIds: [String!]!
+}
+
+"""
+Tokens plus the authenticated user, returned by refresh / bootstrap / 2FA login.
+"""
+type AuthPayload {
+  accessToken: String!
+  refreshToken: String!
+
+  """ISO-8601 expiry of the refresh token."""
+  refreshExpiresAt: String!
+  user: User!
+}
+
+"""
+Result of a password login: tokens directly, or a 2FA challenge to complete.
+"""
+type LoginResult {
+  requiresTwoFactor: Boolean!
+
+  """Set when requiresTwoFactor — pass to loginTwoFactor with a code."""
+  challengeToken: String
+
+  """Set when 2FA is not enabled — the login is already complete."""
+  auth: AuthPayload
+}
+
+"""Returned by setupTwoFactor — the recovery codes are shown only once."""
+type TwoFactorSetup {
+  otpauthUrl: String!
+  secret: String!
+  recoveryCodes: [String!]!
+}
+
+type Role {
+  id: ID!
+  name: String!
+  description: String
+  isTemplate: Boolean!
+  archivedAt: String
+  permissionKeys: [String!]!
+}
+
+enum ProductKind {
+  physical
+  service
+  bundle
+}
+
+enum PriceMode {
+  tax_inclusive
+  tax_exclusive
+}
+
+enum VariantUnit {
+  piece
+  g
+  ml
+  mm
+}
+
+type Category {
+  id: ID!
+  name: String!
+  parentId: ID
+  minQty: Int
+  minMarginBps: Int
+  archivedAt: String
+  createdAt: String!
+}
+
+type PriceTier {
+  minQty: Float!
+  priceMinor: Float!
+}
+
+type ProductVariant {
+  id: ID!
+  productId: ID!
+  sku: String!
+  barcode: String
+  label: String
+  unit: VariantUnit!
+  qtyDecimals: Int!
+  priceMinor: Float!
+  costMinor: Float!
+  totalQty: Float!
+  sortOrder: Int!
+  priceTiers: [PriceTier!]!
+
+  """Components, if this variant belongs to a kind='bundle' product."""
+  bundleComponents: [BundleComponent!]!
+
+  """
+  Per-location stock rows for this variant (locationId null = unlocated root).
+  """
+  stock: [StockLocation!]!
+}
+
+"""
+One component of a bundle: a variant and how many units the bundle holds.
+"""
+type BundleComponent {
+  id: ID!
+  bundleVariantId: ID!
+  componentVariantId: ID!
+  qty: Float!
+}
+
+input BundleComponentInput {
+  componentVariantId: ID!
+  qty: Int!
+}
+
+type Product {
+  id: ID!
+
+  """Internal, staff-facing name."""
+  name: String!
+
+  """Optional public-facing name; null falls back to name."""
+  publicName: String
+
+  """publicName ?? name — the name to show on receipts and the catalog."""
+  publicDisplayName: String!
+  description: String
+  kind: ProductKind!
+  categoryId: ID
+  taxRateBps: Int!
+  priceMode: PriceMode!
+  minQty: Int
+  minMarginBps: Int
+
+  """
+  Default supplier — the reorder forecast inherits this vendor's lead time.
+  """
+  primaryVendorId: ID
+
+  """When false, the product is excluded from the reorder forecast."""
+  replenishMonitored: Boolean!
+  archivedAt: String
+  createdAt: String!
+  variants: [ProductVariant!]!
+
+  """
+  Master switch — false means the product is absent from the catalog entirely.
+  """
+  onlineVisible: Boolean!
+  onlinePriceMode: OnlinePriceMode!
+  onlineStockMode: OnlineStockMode!
+
+  """Gallery images, ordered; sortOrder 0 first."""
+  images: [ProductImage!]!
+}
+
+input VariantInput {
+  """Omit to auto-generate a SKU."""
+  sku: String
+  barcode: String
+  label: String
+  unit: VariantUnit
+  qtyDecimals: Int
+  priceMinor: Float!
+  costMinor: Float
+  sortOrder: Int
+}
+
+input PriceTierInput {
+  minQty: Float!
+  priceMinor: Float!
+}
+
+type Location {
+  id: ID!
+  name: String!
+  parentId: ID
+  code: String
+  notes: String
+  sortOrder: Int!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+enum StockMovementType {
+  purchase_receive
+  transfer_in
+  transfer_out
+  sale
+  sale_return
+  adjustment_in
+  adjustment_out
+  cost_override
+  initial_import
+}
+
+enum StockRefType {
+  purchase
+  order
+  transfer
+  adjustment
+  override
+  import
+}
+
+type StockLocation {
+  id: ID!
+  variantId: ID!
+  locationId: ID
+  qty: Float!
+}
+
+type StockMovement {
+  id: ID!
+  variantId: ID!
+  locationId: ID
+  type: StockMovementType!
+  qtyDelta: Float!
+  unitCost: Float!
+  previousCost: Float
+  refType: StockRefType!
+  refId: ID
+  reason: String
+  createdAt: String!
+}
+
+enum VendorLedgerType {
+  purchase_on_account
+  payment
+  refund_credit
+  adjustment
+  opening_balance
+}
+
+enum VendorLedgerRefType {
+  purchase
+  purchase_delivery
+  payment
+  adjustment
+  import
+}
+
+"""Channel the send screen pre-selects for a vendor's purchase orders."""
+enum VendorSendChannel {
+  whatsapp
+  email
+}
+
+type Vendor {
+  id: ID!
+  name: String!
+  phone: String
+  email: String
+  address: String
+  taxId: String
+  notes: String
+
+  """Typical delivery lead time in days; feeds the reorder forecast."""
+  leadTimeDays: Int
+
+  """
+  Default send channel pre-selected on the send screen; null = no preference.
+  """
+  preferredSendChannel: VendorSendChannel
+
+  """Cached AP balance, minor units. Positive = we owe the vendor."""
+  balanceMinor: Float!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type VendorLedgerEntry {
+  id: ID!
+  vendorId: ID!
+  type: VendorLedgerType!
+
+  """Signed minor units. Positive = we owe more; negative = we owe less."""
+  amountMinor: Float!
+  refType: VendorLedgerRefType
+  refId: ID
+  note: String
+  posSessionId: ID
+  createdAt: String!
+}
+
+enum PurchaseStatus {
+  open
+  complete
+  cancelled
+}
+
+enum PurchaseSendChannel {
+  whatsapp
+  email
+  manual
+}
+
+enum PurchaseSendStatus {
+  prepared
+  sent
+}
+
+type Purchase {
+  id: ID!
+  vendorId: ID
+  vendor: Vendor
+
+  """
+  Vendor name at create time; free-text for ad-hoc (vendorId null) purchases.
+  """
+  snapshotVendorName: String!
+  date: String!
+  sourceDocument: String
+  memo: String
+
+  """
+  Optional 'send by' deadline; once reached, an unsent draft raises a send_due alert.
+  """
+  sendDueDate: String
+  status: PurchaseStatus!
+
+  """Bumped by every content edit; snapshotted into each send row."""
+  revision: Int!
+  lastSentAt: String
+  cancelledAt: String
+  createdAt: String!
+  updatedAt: String!
+  sections: [PurchaseSection!]!
+  items: [PurchaseItem!]!
+  sends: [PurchaseSend!]!
+
+  """Σ(qtyOrdered × unitCostMinor) across items — the vendor invoice total."""
+  totalInvoiceCost: Float!
+
+  """True when the PO has content edits not covered by the latest send."""
+  hasUnsentChanges: Boolean!
+
+  """
+  Stock lines the vendor has no part-number mapping for — a pre-send warning.
+  """
+  unmappedLines: [PurchaseItem!]!
+}
+
+type PurchaseSection {
+  id: ID!
+  purchaseId: ID!
+  name: String!
+  sortOrder: Int!
+  items: [PurchaseItem!]!
+}
+
+type PurchaseItem {
+  id: ID!
+  purchaseId: ID!
+  sectionId: ID
+  variantId: ID
+
+  """
+  Free-text line label; required (and the line identity) for non-stock lines.
+  """
+  description: String
+  qtyOrdered: Float!
+  qtyDelivered: Float!
+  unitCostMinor: Float!
+  sortOrder: Int!
+}
+
+"""
+A purchase order rendered for one send channel: message + recipient + deep link.
+"""
+type PurchaseSendDraft {
+  channel: PurchaseSendChannel!
+
+  """The recipient on file or overridden; raw, for display."""
+  recipient: String
+
+  """False when the recipient is missing or unusable for this channel."""
+  recipientAvailable: Boolean!
+  subject: String!
+  body: String!
+
+  """
+  wa.me / mailto: URL; null when the recipient is unusable or channel is manual.
+  """
+  deepLink: String
+
+  """API path to the PO PDF, for sharing as an attachment. Always present."""
+  pdfUrl: String!
+}
+
+type PurchaseSend {
+  id: ID!
+  purchaseId: ID!
+  channel: PurchaseSendChannel!
+  recipient: String!
+  revision: Int!
+  status: PurchaseSendStatus!
+  sentAt: String
+
+  """Vendor's expected delivery date, captured at confirmation."""
+  expectedDeliveryDate: String
+  note: String
+  createdAt: String!
+}
+
+enum DeliveryStatus {
+  draft
+  delivered
+  cancelled
+}
+
+type PurchaseDelivery {
+  id: ID!
+  date: String!
+  biller: String
+  targetLocationId: ID!
+  targetLocation: Location
+
+  """Set when this delivery is a receiving check tied to a single purchase."""
+  purchaseId: ID
+  status: DeliveryStatus!
+  deliveredAt: String
+
+  """Denormalized sum of the cost tree's root nodes — for list views."""
+  totalCostMinor: Float!
+  createdAt: String!
+  updatedAt: String!
+  items: [PurchaseDeliveryItem!]!
+}
+
+type PurchaseDeliveryItem {
+  id: ID!
+  deliveryId: ID!
+
+  """Null on a root node; otherwise the cost-tree parent."""
+  parentItemId: ID
+
+  """Set only on a leaf — the purchase line this node receives against."""
+  purchaseItemId: ID
+  description: String!
+
+  """Set only on a leaf; in the variant's smallest unit."""
+  qty: Float
+  costMinor: Float!
+  sortOrder: Int!
+}
+
+enum CustomerLedgerType {
+  sale_on_account
+  payment
+  refund_credit
+  adjustment
+  opening_balance
+}
+
+enum CustomerLedgerRefType {
+  order
+  order_item
+  payment
+  refund
+  adjustment
+  import
+}
+
+type Customer {
+  id: ID!
+  name: String!
+  phone: String
+  email: String
+  address: String
+  notes: String
+
+  """Cached AR balance, minor units. Positive = the customer owes us."""
+  balanceMinor: Float!
+
+  """Credit limit in minor units. Null = no limit."""
+  creditLimitMinor: Float
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type CustomerLedgerEntry {
+  id: ID!
+  customerId: ID!
+  type: CustomerLedgerType!
+
+  """
+  Signed minor units. Positive = they owe more; negative = they owe less.
+  """
+  amountMinor: Float!
+  refType: CustomerLedgerRefType
+  refId: ID
+  note: String
+  posSessionId: ID
+  createdAt: String!
+}
+
+type CustomerPrice {
+  id: ID!
+  customerId: ID!
+  variantId: ID!
+  priceMinor: Float!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PointOfSale {
+  id: ID!
+  locationId: ID!
+  code: String!
+  name: String!
+  notes: String
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PosSession {
+  id: ID!
+  posId: ID!
+  openedByUserId: ID!
+  openedAt: String!
+  openingCashMinor: Float!
+  closedByUserId: ID
+  closedAt: String
+
+  """Null when the session was force-closed."""
+  closingCashMinor: Float
+
+  """closing − expected drawer cash. Null when force-closed."""
+  varianceMinor: Float
+  forceClosed: Boolean!
+
+  """Denormalized close-time snapshot, as a JSON string. Null until closed."""
+  zReportJson: String
+  notes: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+enum OrderStatus {
+  open
+  closed
+  cancelled
+}
+
+enum OrderPaymentMethod {
+  cash
+}
+
+type Order {
+  id: ID!
+  displayNumber: String
+  status: OrderStatus!
+  customerId: ID
+  snapshotCustomerName: String
+  posSessionId: ID
+
+  """Cached order total, minor units."""
+  totalMinor: Float!
+  closedAt: String
+  cancelledAt: String
+  cancellationReason: String
+  returnOfOrderId: ID
+  createdAt: String!
+  items: [OrderItem!]!
+  payments: [OrderPayment!]!
+}
+
+type OrderItem {
+  id: ID!
+  orderId: ID!
+  variantId: ID
+  productId: ID
+  qty: Float!
+  discountMinor: Float!
+  snapshotProductName: String!
+
+  """Public name at sale time, if any."""
+  snapshotPublicName: String
+
+  """If this line came from a bundle, the bundle's name at sale time."""
+  snapshotBundleName: String
+
+  """snapshotPublicName ?? snapshotProductName — the name for a receipt."""
+  displayName: String!
+  snapshotProductSku: String!
+  snapshotProductBarcode: String
+  snapshotVariantLabel: String
+  snapshotUnit: String!
+  snapshotCategoryName: String
+  snapshotPriceMinor: Float!
+  snapshotCostMinor: Float!
+  snapshotTaxRateBps: Int!
+  snapshotPriceMode: String!
+
+  """qty * price - discount."""
+  lineTotalMinor: Float!
+
+  """Tracking account this line attributes revenue to, if any."""
+  attributionAccountId: ID
+
+  """Attributed amount, minor units (pre-tax revenue share)."""
+  attributionAmountMinor: Float!
+  voidedAt: String
+  voidReason: String
+}
+
+type OrderPayment {
+  id: ID!
+  orderId: ID!
+  method: OrderPaymentMethod!
+  amountMinor: Float!
+  posSessionId: ID
+  createdAt: String!
+}
+
+input PosOrderItemInput {
+  variantId: ID!
+  qty: Int!
+  discountMinor: Float
+
+  """Allowed only on service products."""
+  priceOverrideMinor: Float
+
+  """Overrides the computed tracking attribution; requires order.attribute."""
+  attributionAmountOverrideMinor: Float
+}
+
+input PosOrderPaymentInput {
+  method: OrderPaymentMethod
+  amountMinor: Float!
+}
+
+enum RefundMethod {
+  cash
+  store_credit
+}
+
+input ReturnItemInput {
+  """The original order_item being returned."""
+  orderItemId: ID!
+
+  """Units to return — positive."""
+  qty: Int!
+}
+
+enum TrackingLedgerType {
+  attribution
+  payout
+  deposit
+  adjustment
+  opening_balance
+}
+
+enum TrackingLedgerRefType {
+  order_item
+  order
+  manual
+  import
+  adjustment
+}
+
+type TrackingAccount {
+  id: ID!
+  parentId: ID
+  name: String!
+  code: String
+
+  """Balance side, e.g. 'liability.tracking.staff'."""
+  accountCategory: String!
+
+  """Offsetting side on attribution, e.g. 'expense.commission'."""
+  counterCategory: String!
+  notes: String
+
+  """Cached balance, minor units. Positive = the business owes the account."""
+  balanceMinor: Float!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+}
+
+type TrackingAccountLedgerEntry {
+  id: ID!
+  trackingAccountId: ID!
+  type: TrackingLedgerType!
+
+  """Signed minor units. Positive = balance increases."""
+  amountMinor: Float!
+  refType: TrackingLedgerRefType
+  refId: ID
+  counterCategoryOverride: String
+  note: String
+  posSessionId: ID
+  createdAt: String!
+}
+
+enum TransferStatus {
+  draft
+  in_transit
+  received
+  cancelled
+}
+
+type StockTransfer {
+  id: ID!
+  sourceLocationId: ID!
+  targetLocationId: ID!
+  status: TransferStatus!
+  notes: String
+  dispatchedAt: String
+  receivedAt: String
+  cancelledAt: String
+  cancellationReason: String
+  createdAt: String!
+  items: [StockTransferItem!]!
+}
+
+type StockTransferItem {
+  id: ID!
+  transferId: ID!
+  variantId: ID!
+  qty: Float!
+}
+
+input StockTransferItemInput {
+  variantId: ID!
+  qty: Int!
+}
+
+enum ReorderStatus {
+  """Order date has passed — place the PO now."""
+  order_now
+
+  """Order date is within the soon-horizon."""
+  order_soon
+
+  """Stock is comfortable."""
+  ok
+
+  """Selling, but the primary vendor has no lead time set."""
+  insufficient_data
+}
+
+enum VelocityBasis {
+  """Velocity came from the full baseline window."""
+  baseline
+
+  """Velocity came from the recent window — the product is accelerating."""
+  recent
+
+  """Nothing is selling."""
+  none
+}
+
+type ReorderForecastRow {
+  variantId: ID!
+  productId: ID!
+  productName: String!
+  sku: String!
+  currentQty: Float!
+
+  """Effective velocity — the higher of the baseline and recent rates."""
+  velocityPerDay: Float!
+
+  """Net units/day over the full baseline window."""
+  baselineVelocityPerDay: Float!
+
+  """Net units/day over the recent window."""
+  recentVelocityPerDay: Float!
+  velocityBasis: VelocityBasis!
+
+  """currentQty / velocity; null when nothing is depleting."""
+  daysOfCover: Float
+  leadTimeDays: Int
+
+  """
+  ISO date (YYYY-MM-DD) the PO must be placed by; null when uncomputable.
+  """
+  orderByDate: String
+  status: ReorderStatus!
+}
+
+enum ReorderSuggestionStatus {
+  open
+  converted
+  dismissed
+}
+
+type ReorderSuggestion {
+  id: ID!
+  variantId: ID!
+
+  """Product name of the suggested variant."""
+  productName: String!
+
+  """SKU of the suggested variant."""
+  sku: String!
+
+  """Chosen vendor; null means the suggestion is unassigned."""
+  vendorId: ID
+
+  """Chosen vendor's name; null when unassigned."""
+  vendorName: String
+
+  """On-hand stock snapshot at scan time."""
+  currentStock: Float!
+  reorderPoint: Float!
+  suggestedQty: Float!
+  status: ReorderSuggestionStatus!
+  generatedAt: String!
+}
+
+"""One selected suggestion to convert, with optional staff overrides."""
+input ConvertReorderLineInput {
+  suggestionId: ID!
+
+  """Override the suggested quantity."""
+  qty: Int
+
+  """Override / assign the vendor."""
+  vendorId: ID
+}
+
+"""
+Completeness of a purchase line: counted nothing / some / all that was ordered.
+"""
+enum ReceivingLineStatus {
+  not_started
+  partial
+  complete
+}
+
+"""
+A purchase line as the receiving screen sees it, with the open draft folded in.
+"""
+type ReceivingCheckLine {
+  purchaseItem: PurchaseItem!
+  qtyOrdered: Float!
+
+  """Qty received by already-committed deliveries."""
+  qtyDelivered: Float!
+
+  """qtyOrdered − qtyDelivered: what is still owed before this check."""
+  remaining: Float!
+
+  """Qty staged in the open draft check (this box), 0 if untouched."""
+  qtyInCheck: Float!
+
+  """Completeness from committed deliveries only."""
+  status: ReceivingLineStatus!
+
+  """Completeness once the draft commits — folds in qtyInCheck."""
+  provisionalStatus: ReceivingLineStatus!
+}
+
+"""A vendor's own part number for one of our product variants."""
+type VendorVariantCode {
+  id: ID!
+  vendorId: ID!
+  variantId: ID!
+
+  """The vendor's catalogue / part number for the variant."""
+  code: String!
+
+  """Marks the go-to vendor for this variant — at most one per variant."""
+  isPreferred: Boolean!
+  createdAt: String!
+  updatedAt: String!
+  vendor: Vendor
+  variant: ProductVariant
+}
+
+"""How a product's price renders on the online catalog."""
+enum OnlinePriceMode {
+  exclude
+  peek
+  show
+}
+
+"""How a product's stock renders on the online catalog."""
+enum OnlineStockMode {
+  show_real
+  peek
+  hide
+}
+
+enum CatalogPublishTrigger {
+  manual
+  scheduled
+}
+
+enum CatalogPublishStatus {
+  success
+  error
+}
+
+"""
+One catalog publish attempt — the audit trail of when the live catalog refreshed.
+"""
+type CatalogPublish {
+  id: ID!
+  trigger: CatalogPublishTrigger!
+  status: CatalogPublishStatus!
+  productCount: Int!
+
+  """The published snapshot's version id; null if the build failed."""
+  snapshotVersion: String
+  errorMessage: String
+  publishedByUserId: ID
+  createdAt: String!
+}
+
+enum PurchaseAlertType {
+  delivery_overdue
+  send_due
+}
+
+"""An acknowledgeable signal about a purchase order."""
+type PurchaseAlert {
+  id: ID!
+  purchaseId: ID!
+  purchase: Purchase
+  type: PurchaseAlertType!
+  triggeredAt: String!
+
+  """JSON snapshot of the values that justified the alert at trigger time."""
+  triggerContext: String
+  acknowledgedAt: String
+  acknowledgedByUserId: ID
+  resolutionNote: String
+}
+
+"""A product's catalog gallery image — optimized WebP on Vercel Blob."""
+type ProductImage {
+  id: ID!
+  productId: ID!
+
+  """≤1280px image for the product detail page."""
+  detailUrl: String!
+
+  """≤400px image for catalog grid cards."""
+  thumbnailUrl: String!
+  width: Int!
+  height: Int!
+
+  """0 is the primary image (the card thumbnail)."""
+  sortOrder: Int!
+  createdAt: String!
+}
+
+enum ProductAlertType {
+  low_margin
+  negative_margin
+  negative_price
+  data_anomaly
+}
+
+"""An acknowledgeable signal about a product's pricing health."""
+type ProductAlert {
+  id: ID!
+  productId: ID!
+  product: Product
+  type: ProductAlertType!
+  triggeredAt: String!
+
+  """JSON snapshot of the breaching variants + threshold at trigger time."""
+  triggerContext: String
+  acknowledgedAt: String
+  acknowledgedByUserId: ID
+  resolutionNote: String
+}
+
+"""Business-level configuration: identity and the PO message template."""
+type BusinessSettings {
+  name: String!
+  phone: String
+  email: String
+
+  """Greeting prepended to a rendered purchase-order message."""
+  poGreeting: String
+
+  """Footer appended to a rendered purchase-order message."""
+  poFooter: String
+  updatedAt: String
+}
+
+type SalesReportDay {
+  date: String!
+  orderCount: Int!
+  revenueMinor: Float!
+}
+
+type SalesReport {
+  periodStart: String!
+  periodEnd: String!
+  orderCount: Int!
+
+  """Units sold, in each variant's smallest unit; nets returns."""
+  itemsSoldQty: Float!
+  revenueMinor: Float!
+  byDay: [SalesReportDay!]!
+}
+
+type ProfitReport {
+  periodStart: String!
+  periodEnd: String!
+  revenueMinor: Float!
+
+  """Cost of goods sold — snapshot WAC × qty."""
+  cogsMinor: Float!
+  grossMarginMinor: Float!
+
+  """Gross margin as basis points of revenue; 0 when revenue is 0."""
+  marginBps: Int!
+}
+
+"""One party's aged outstanding balance."""
+type AgingRow {
+  partyId: ID!
+  partyName: String!
+  balanceMinor: Float!
+  bucket0_30: Float!
+  bucket31_60: Float!
+  bucket61_90: Float!
+  bucket90plus: Float!
+}
+
+type AgingReport {
+  asOf: String!
+  rows: [AgingRow!]!
+  totalBalanceMinor: Float!
+}
+
+type SessionVarianceRow {
+  sessionId: ID!
+  posCode: String!
+  openedAt: String!
+  closedAt: String
+  openingCashMinor: Float!
+  closingCashMinor: Float
+
+  """Null for a force-closed (unreconciled) session."""
+  varianceMinor: Float
+  forceClosed: Boolean!
+}
+
+type SessionVarianceReport {
+  periodStart: String!
+  periodEnd: String!
+  sessions: [SessionVarianceRow!]!
+  totalVarianceMinor: Float!
+  unreconciledCount: Int!
+}
+
+"""One side of a journal entry — exactly one of debit/credit is nonzero."""
+type JournalLine {
+  """
+  Account-category key from the fixed catalog (lib/account-categories.ts).
+  """
+  accountCategory: String!
+  debitMinor: Float!
+  creditMinor: Float!
+}
+
+"""A balanced journal entry: the sum of debits equals the sum of credits."""
+type JournalEntry {
+  """ISO timestamp of the underlying event."""
+  date: String!
+  refType: String!
+  refId: ID!
+  description: String!
+
+  """'customer', 'vendor', or null for a walk-in / internal event."""
+  partyType: String
+  partyId: ID
+
+  """Snapshot name — survives a hard-deleted party."""
+  partyName: String
+  lines: [JournalLine!]!
+}
+
+"""Monthly debit/credit totals for one account category."""
+type JournalSummaryRow {
+  """YYYY-MM."""
+  month: String!
+  accountCategory: String!
+  debitTotalMinor: Float!
+  creditTotalMinor: Float!
+}
+
+"""
+A non-fatal export issue — an untagged event, an imbalance, an unknown category.
+"""
+type JournalWarning {
+  kind: String!
+  refType: String
+  refId: ID
+  message: String!
+}
+
+type JournalExport {
+  periodStart: String!
+  periodEnd: String!
+  entries: [JournalEntry!]!
+
+  """Monthly aggregates by account category."""
+  summary: [JournalSummaryRow!]!
+
+  """Events that could not be classified, plus any balance-check failures."""
+  warnings: [JournalWarning!]!
+}

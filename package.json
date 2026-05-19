@@ -5,11 +5,13 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun run --filter @retale/api dev",
+    "dev:console": "bun run --filter @retale/console dev",
     "test": "bun test",
     "typecheck": "bun run --filter @retale/api typecheck",
     "db:generate": "bun run --filter @retale/api db:generate",
     "db:migrate": "bun run --filter @retale/api db:migrate",
     "db:seed": "bun run --filter @retale/api db:seed",
-    "jobs:run": "bun run --filter @retale/api jobs:run"
+    "jobs:run": "bun run --filter @retale/api jobs:run",
+    "schema:dump": "bun run --filter @retale/api schema:dump"
   }
 }

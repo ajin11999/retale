@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate.ts",
     "db:seed": "bun run scripts/seed-templates.ts",
+    "schema:dump": "bun run scripts/dump-schema.ts",
     "jobs:run": "bun run scripts/run-scheduled-jobs.ts"
   },
   "dependencies": {

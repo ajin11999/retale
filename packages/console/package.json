@@ -1,0 +1,31 @@
+{
+  "name": "@retale/console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && houdini generate && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.2.12",
+    "@sveltejs/kit": "^2.60.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/node": "^25.8.0",
+    "svelte": "^5.55.7",
+    "svelte-check": "^4.4.8",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
+  },
+  "dependencies": {
+    "@tanstack/table-core": "^8.21.3",
+    "clsx": "^2.1.1",
+    "houdini": "^1.5.10",
+    "houdini-svelte": "^2.1.16",
+    "tailwind-merge": "^3.3.1"
+  }
+}
