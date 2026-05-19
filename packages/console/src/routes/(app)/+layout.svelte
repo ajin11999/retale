@@ -8,11 +8,14 @@
     children,
   }: { data: LayoutServerData; children: Snippet } = $props();
 
-  // Most links are placeholders until their screens land — the products
-  // list is the only one wired up in this slice.
+  // Purchases / reorder / reports are placeholders until their screens land.
   const nav = [
     { href: "/products", label: "Products" },
     { href: "/categories", label: "Categories" },
+    { href: "/customers", label: "Customers" },
+    { href: "/vendors", label: "Vendors" },
+    { href: "/locations", label: "Locations" },
+    { href: "/transfers", label: "Stock transfers" },
     { href: "/purchases", label: "Purchases" },
     { href: "/reorder", label: "Reorder suggestions" },
     { href: "/reports", label: "Reports" },

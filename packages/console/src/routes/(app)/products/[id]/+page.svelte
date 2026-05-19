@@ -40,11 +40,37 @@
           costMinor
           totalQty
           sortOrder
+          stock {
+            locationId
+            qty
+          }
         }
       }
       categories {
         id
         name
+      }
+      locations {
+        id
+        name
+      }
+    }
+  `);
+
+  const AdjustStock = graphql(`
+    mutation ConsoleAdjustStock(
+      $variantId: ID!
+      $locationId: ID
+      $qtyDelta: Float!
+      $reason: String!
+    ) {
+      adjustStock(
+        variantId: $variantId
+        locationId: $locationId
+        qtyDelta: $qtyDelta
+        reason: $reason
+      ) {
+        id
       }
     }
   `);
@@ -161,6 +187,9 @@
 
   const product = $derived($ProductDetail.data?.product);
   const categories = $derived($ProductDetail.data?.categories ?? []);
+  const locations = $derived($ProductDetail.data?.locations ?? []);
+  const locationName = (id: string | null) =>
+    id ? (locations.find((l) => l.id === id)?.name ?? "Unknown") : "Unlocated";
 
   // ---- Viewer permissions --------------------------------------------------
   // The API gates product writes, with extra keys for tax / price / cost.
@@ -173,6 +202,7 @@
   const canEditPrice = $derived(has("product.edit_price"));
   const canEditCost = $derived(has("product.edit_cost"));
   const canArchive = $derived(has("product.archive"));
+  const canAdjustStock = $derived(has("stock.adjust"));
 
   // ---- Product-detail form -------------------------------------------------
   interface ProductForm {
@@ -371,6 +401,46 @@
 
   const categoryName = (id: string | null | undefined) =>
     id ? (categories.find((c) => c.id === id)?.name ?? "Unknown") : "—";
+
+  // ---- Stock adjustment ----------------------------------------------------
+  // A manual write-on / write-off against one variant at one location.
+  interface StockDraft {
+    variantId: string;
+    variantLabel: string;
+    locationId: string; // "" → the unlocated root
+    qtyDelta: number;
+    reason: string;
+  }
+  let stockDraft = $state<StockDraft | null>(null);
+
+  function adjustVariantStock(
+    v: NonNullable<typeof product>["variants"][number],
+  ) {
+    stockDraft = {
+      variantId: v.id,
+      variantLabel: v.label ? `${v.sku} · ${v.label}` : v.sku,
+      locationId: "",
+      qtyDelta: 0,
+      reason: "",
+    };
+  }
+
+  async function saveStockAdjustment() {
+    const d = stockDraft;
+    if (!d || !product || !d.qtyDelta || !d.reason.trim()) return;
+    const ok = await run("Stock", () =>
+      AdjustStock.mutate({
+        variantId: d.variantId,
+        locationId: d.locationId || null,
+        qtyDelta: d.qtyDelta,
+        reason: d.reason.trim(),
+      }),
+    );
+    if (ok) {
+      stockDraft = null;
+      await ProductDetail.fetch({ variables: { id: product.id } });
+    }
+  }
 
   // Live markdown preview of the description. The content is authored by
   // staff with product.edit, so it is rendered trusted.
@@ -682,6 +752,95 @@
             <Button size="sm" disabled={busy || !canEdit} onclick={saveVariant}>
               {variantDraft.id ? "Save variant" : "Add variant"}
             </Button>
+          </div>
+        </div>
+      {/if}
+    </section>
+
+    <!-- Stock by location -->
+    <section class="space-y-3 rounded-lg border bg-card p-5">
+      <h2 class="text-sm font-semibold">Stock by location</h2>
+      {#each product.variants as v (v.id)}
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium">
+              {v.label ? `${v.sku} · ${v.label}` : v.sku}
+              <span class="ml-1 text-xs text-muted-foreground"
+                >({v.totalQty} total)</span
+              >
+            </span>
+            <button
+              class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={busy || !canAdjustStock}
+              onclick={() => adjustVariantStock(v)}>Adjust stock</button
+            >
+          </div>
+          <table class="w-full text-sm">
+            <tbody>
+              {#each v.stock as s (s.locationId ?? "root")}
+                <tr class="border-b last:border-0">
+                  <td class="py-1 text-muted-foreground">
+                    {locationName(s.locationId)}
+                  </td>
+                  <td class="py-1 text-right">{s.qty}</td>
+                </tr>
+              {/each}
+              {#if v.stock.length === 0}
+                <tr>
+                  <td class="py-1 text-muted-foreground" colspan="2">
+                    No stock rows.
+                  </td>
+                </tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      {/each}
+      {#if product.variants.length === 0}
+        <p class="text-sm text-muted-foreground">No variants to stock.</p>
+      {/if}
+
+      {#if stockDraft}
+        <div class="space-y-3 rounded-md border bg-background p-4">
+          <h3 class="text-sm font-semibold">
+            Adjust stock — {stockDraft.variantLabel}
+          </h3>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="space-y-1">
+              <span class="text-xs font-medium">Location</span>
+              <Select bind:value={stockDraft.locationId}>
+                <option value="">Unlocated (root)</option>
+                {#each locations as l (l.id)}
+                  <option value={l.id}>{l.name}</option>
+                {/each}
+              </Select>
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium">
+                Quantity delta (± smallest unit)
+              </span>
+              <Input type="number" bind:value={stockDraft.qtyDelta} />
+            </label>
+            <label class="space-y-1 col-span-2">
+              <span class="text-xs font-medium">Reason (required)</span>
+              <Input bind:value={stockDraft.reason} />
+            </label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Positive writes stock on; negative writes it off.
+          </p>
+          <div class="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onclick={() => (stockDraft = null)}>Cancel</Button
+            >
+            <Button
+              size="sm"
+              disabled={busy || !stockDraft.qtyDelta || !stockDraft.reason.trim()}
+              onclick={saveStockAdjustment}>Apply adjustment</Button
+            >
           </div>
         </div>
       {/if}
