@@ -8,8 +8,11 @@
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import type { PageData } from "./$types";
 
-  const ProductDetail = graphql(`
+  // Query document — Houdini scans this for codegen. The live store is
+  // supplied by +page.ts through `data` (route-store wiring is unavailable).
+  graphql(`
     query ProductDetail($id: ID!) {
       product(id: $id) {
         id
@@ -44,6 +47,9 @@
       }
     }
   `);
+
+  let { data }: { data: PageData } = $props();
+  const ProductDetail = $derived(data.ProductDetail);
 
   const UpdateProduct = graphql(`
     mutation ConsoleUpdateProduct(

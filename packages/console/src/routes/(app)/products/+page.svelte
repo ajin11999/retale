@@ -12,8 +12,12 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import type { PageData } from "./$types";
 
-  const ProductList = graphql(`
+  // Query document — Houdini scans this for codegen. The live store is
+  // supplied by +page.ts through `data` (Houdini's route-store wiring does
+  // not run under this toolchain, so the component never gets its own).
+  graphql(`
     query ProductList {
       products(includeArchived: true) {
         id
@@ -34,6 +38,9 @@
     }
   `);
 
+  let { data }: { data: PageData } = $props();
+  const ProductList = $derived(data.ProductList);
+
   interface Row {
     id: string;
     name: string;
@@ -47,10 +54,10 @@
   }
 
   const rows = $derived.by<Row[]>(() => {
-    const data = $ProductList.data;
-    if (!data) return [];
-    const catName = new Map(data.categories.map((c) => [c.id, c.name]));
-    return data.products.map((p) => {
+    const result = $ProductList?.data;
+    if (!result) return [];
+    const catName = new Map(result.categories.map((c) => [c.id, c.name]));
+    return result.products.map((p) => {
       const prices = p.variants.map((v) => v.priceMinor);
       return {
         id: p.id,
