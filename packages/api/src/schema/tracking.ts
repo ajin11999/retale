@@ -33,6 +33,28 @@ export const typeDefs = /* GraphQL */ `
     archivedAt: String
     createdAt: String!
     updatedAt: String!
+    "Variants whose sales attribute revenue to this account."
+    linkedVariants: [TrackingLinkedVariant!]!
+  }
+
+  "A variant whose sales attribute to a tracking account."
+  type TrackingLinkedVariant {
+    variantId: ID!
+    productId: ID!
+    productName: String!
+    sku: String!
+    label: String
+  }
+
+  "A variant that could be linked to a tracking account, with its current link if any."
+  type AssignableTrackingVariant {
+    variantId: ID!
+    productId: ID!
+    productName: String!
+    sku: String!
+    label: String
+    currentTrackingAccountId: ID
+    currentTrackingAccountName: String
   }
 
   type TrackingAccountLedgerEntry {
@@ -53,6 +75,8 @@ export const typeDefs = /* GraphQL */ `
     trackingAccounts(includeArchived: Boolean): [TrackingAccount!]!
     trackingAccount(id: ID!): TrackingAccount
     trackingAccountLedger(accountId: ID!, limit: Int): [TrackingAccountLedgerEntry!]!
+    "All non-archived variants, marked with their current tracking-account link if any."
+    assignableTrackingVariants: [AssignableTrackingVariant!]!
   }
 
   extend type Mutation {
@@ -97,6 +121,11 @@ export const typeDefs = /* GraphQL */ `
       note: String!
       counterCategoryOverride: String
     ): TrackingAccount!
+    "Replace the set of variants whose sales attribute to this account."
+    setTrackingAccountVariants(
+      accountId: ID!
+      variantIds: [ID!]!
+    ): [TrackingLinkedVariant!]!
   }
 `;
 
@@ -116,6 +145,7 @@ export const resolvers = {
     createdAt: (a: { createdAt: Date | string }) => iso(a.createdAt),
     updatedAt: (a: { updatedAt: Date | string }) => iso(a.updatedAt),
     archivedAt: (a: { archivedAt: Date | string | null }) => iso(a.archivedAt),
+    linkedVariants: (a: { id: string }) => tracking.listLinkedVariants(a.id),
   },
   TrackingAccountLedgerEntry: {
     createdAt: (e: { createdAt: Date | string }) => iso(e.createdAt),
@@ -162,6 +192,14 @@ export const resolvers = {
       } catch (e) {
         asGraphQLError(e);
       }
+    },
+    assignableTrackingVariants: async (
+      _: unknown,
+      __: unknown,
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "tracking_account.edit");
+      return tracking.listAssignableVariants();
     },
   },
 
@@ -261,6 +299,21 @@ export const resolvers = {
           note: args.note ?? null,
           createdByUserId: viewer.userId,
         });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    setTrackingAccountVariants: async (
+      _: unknown,
+      args: { accountId: string; variantIds: string[] },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "tracking_account.edit");
+      try {
+        return await tracking.setTrackingAccountVariants(
+          args.accountId,
+          args.variantIds,
+        );
       } catch (e) {
         asGraphQLError(e);
       }

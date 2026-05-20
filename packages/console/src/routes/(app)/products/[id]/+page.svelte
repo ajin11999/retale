@@ -45,6 +45,17 @@
             qty
           }
         }
+        images {
+          id
+          detailUrl
+          thumbnailUrl
+          width
+          height
+          sortOrder
+        }
+        onlineVisible
+        onlinePriceMode
+        onlineStockMode
       }
       categories {
         id
@@ -181,6 +192,45 @@
     }
   `);
 
+  const DeleteProductImage = graphql(`
+    mutation ConsoleDeleteProductImage($id: ID!) {
+      deleteProductImage(id: $id)
+    }
+  `);
+
+  const ReorderProductImages = graphql(`
+    mutation ConsoleReorderProductImages(
+      $productId: ID!
+      $orderedIds: [ID!]!
+    ) {
+      reorderProductImages(productId: $productId, orderedIds: $orderedIds) {
+        id
+        sortOrder
+      }
+    }
+  `);
+
+  const SetProductCatalogSettings = graphql(`
+    mutation ConsoleSetProductCatalogSettings(
+      $id: ID!
+      $onlineVisible: Boolean
+      $onlinePriceMode: OnlinePriceMode
+      $onlineStockMode: OnlineStockMode
+    ) {
+      setProductCatalogSettings(
+        id: $id
+        onlineVisible: $onlineVisible
+        onlinePriceMode: $onlinePriceMode
+        onlineStockMode: $onlineStockMode
+      ) {
+        id
+        onlineVisible
+        onlinePriceMode
+        onlineStockMode
+      }
+    }
+  `);
+
   const KINDS = ["physical", "service", "bundle"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
   const UNITS = ["piece", "g", "ml", "mm"];
@@ -203,6 +253,10 @@
   const canEditCost = $derived(has("product.edit_cost"));
   const canArchive = $derived(has("product.archive"));
   const canAdjustStock = $derived(has("stock.adjust"));
+  const canManageCatalog = $derived(has("catalog.manage"));
+
+  const PRICE_MODES_ONLINE = ["exclude", "peek", "show"];
+  const STOCK_MODES_ONLINE = ["show_real", "peek", "hide"];
 
   // ---- Product-detail form -------------------------------------------------
   interface ProductForm {
@@ -447,6 +501,115 @@
   const descriptionHtml = $derived(
     marked.parse(form.description, { async: false }),
   );
+
+  // ---- Image gallery -------------------------------------------------------
+  // Upload talks to the /images proxy route (same folder) which forwards the
+  // multipart with the httpOnly access-token cookie attached.
+  let uploadInput = $state<HTMLInputElement | null>(null);
+  let uploading = $state(false);
+
+  async function pickImages() {
+    uploadInput?.click();
+  }
+
+  async function handleUpload(e: Event) {
+    if (!product) return;
+    const target = e.currentTarget as HTMLInputElement;
+    const files = target.files ? Array.from(target.files) : [];
+    target.value = ""; // allow re-picking the same file later
+    if (files.length === 0) return;
+    uploading = true;
+    feedback = null;
+    try {
+      for (const file of files) {
+        const body = new FormData();
+        body.append("file", file);
+        const res = await fetch(`/products/${product.id}/images`, {
+          method: "POST",
+          body,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          feedback = { ok: false, text: `Upload failed: ${text}` };
+          return;
+        }
+      }
+      feedback = {
+        ok: true,
+        text: `Uploaded ${files.length} image${files.length === 1 ? "" : "s"}.`,
+      };
+      await ProductDetail.fetch({ variables: { id: product.id } });
+    } catch (err) {
+      feedback = {
+        ok: false,
+        text: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      uploading = false;
+    }
+  }
+
+  async function removeImage(id: string) {
+    if (!product || !confirm("Delete this image?")) return;
+    const ok = await run("Image", () => DeleteProductImage.mutate({ id }));
+    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+  }
+
+  // ---- Per-product catalog settings ---------------------------------------
+  // Each toggle / select fires a single-field mutation against the API; the
+  // server's setProductCatalogSettings ignores omitted fields.
+  async function toggleOnlineVisible() {
+    if (!product) return;
+    const ok = await run("Catalog", () =>
+      SetProductCatalogSettings.mutate({
+        id: product.id,
+        onlineVisible: !product.onlineVisible,
+      }),
+    );
+    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+  }
+
+  async function setOnlinePriceMode(mode: string) {
+    if (!product || mode === product.onlinePriceMode) return;
+    const ok = await run("Catalog", () =>
+      SetProductCatalogSettings.mutate({
+        id: product.id,
+        onlinePriceMode: mode as never,
+      }),
+    );
+    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+  }
+
+  async function setOnlineStockMode(mode: string) {
+    if (!product || mode === product.onlineStockMode) return;
+    const ok = await run("Catalog", () =>
+      SetProductCatalogSettings.mutate({
+        id: product.id,
+        onlineStockMode: mode as never,
+      }),
+    );
+    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+  }
+
+  // Reorder by swapping the picked image with its neighbour, then sending
+  // the full ordered id list to the API (the server renumbers atomically).
+  async function moveImage(id: string, direction: -1 | 1) {
+    if (!product) return;
+    const ordered = [...(product.images ?? [])]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((i) => i.id);
+    const idx = ordered.indexOf(id);
+    const target = idx + direction;
+    if (idx < 0 || target < 0 || target >= ordered.length) return;
+    [ordered[idx], ordered[target]] = [ordered[target], ordered[idx]];
+    const ok = await run("Image order", () =>
+      ReorderProductImages.mutate({
+        productId: product.id,
+        orderedIds: ordered,
+      }),
+    );
+    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+  }
 </script>
 
 <svelte:head>
@@ -608,6 +771,144 @@
           Save details
         </Button>
       </div>
+    </section>
+
+    <!-- Online catalog -->
+    <section class="space-y-3 rounded-lg border bg-card p-5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold">Online catalog</h2>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={product.onlineVisible}
+            disabled={busy || !canManageCatalog}
+            onchange={toggleOnlineVisible}
+          />
+          Visible on the live catalog
+        </label>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="space-y-1">
+          <span class="text-sm font-medium">Price display</span>
+          <Select
+            value={product.onlinePriceMode}
+            disabled={busy || !canManageCatalog}
+            onchange={(e) =>
+              setOnlinePriceMode(
+                (e.currentTarget as HTMLSelectElement).value,
+              )}
+          >
+            {#each PRICE_MODES_ONLINE as m (m)}<option value={m}>{m}</option>{/each}
+          </Select>
+        </label>
+        <label class="space-y-1">
+          <span class="text-sm font-medium">Stock display</span>
+          <Select
+            value={product.onlineStockMode}
+            disabled={busy || !canManageCatalog}
+            onchange={(e) =>
+              setOnlineStockMode(
+                (e.currentTarget as HTMLSelectElement).value,
+              )}
+          >
+            {#each STOCK_MODES_ONLINE as m (m)}<option value={m}>{m}</option>{/each}
+          </Select>
+        </label>
+      </div>
+      {#if !canManageCatalog}
+        <p class="text-xs text-muted-foreground">
+          Requires the catalog.manage permission. Changes take effect on the
+          next publish.
+        </p>
+      {:else}
+        <p class="text-xs text-muted-foreground">
+          Changes take effect on the next publish.
+        </p>
+      {/if}
+    </section>
+
+    <!-- Image gallery -->
+    <section class="space-y-3 rounded-lg border bg-card p-5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold">
+          Images ({product.images.length})
+        </h2>
+        <div>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            class="hidden"
+            bind:this={uploadInput}
+            onchange={handleUpload}
+          />
+          <Button
+            size="sm"
+            disabled={uploading || !canEdit}
+            onclick={pickImages}
+          >
+            {uploading ? "Uploading…" : "Upload images"}
+          </Button>
+        </div>
+      </div>
+
+      {#if product.images.length === 0}
+        <p class="text-sm text-muted-foreground">
+          No images yet. The first image you upload becomes the catalog
+          thumbnail.
+        </p>
+      {:else}
+        <div class="grid grid-cols-4 gap-3">
+          {#each [...product.images].sort((a, b) => a.sortOrder - b.sortOrder) as img, i (img.id)}
+            <div class="group relative overflow-hidden rounded-md border bg-muted/30">
+              <a href={img.detailUrl} target="_blank" rel="noopener">
+                <img
+                  src={img.thumbnailUrl}
+                  alt=""
+                  loading="lazy"
+                  class="aspect-square w-full object-cover"
+                />
+              </a>
+              {#if i === 0}
+                <span
+                  class="absolute left-1 top-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground"
+                >
+                  Primary
+                </span>
+              {/if}
+              {#if canEdit}
+                <div
+                  class="absolute inset-x-1 bottom-1 flex justify-between gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <div class="flex gap-1">
+                    <button
+                      type="button"
+                      class="rounded bg-background/90 px-1.5 py-0.5 text-xs shadow disabled:opacity-30"
+                      disabled={busy || i === 0}
+                      onclick={() => moveImage(img.id, -1)}
+                      aria-label="Move left">←</button
+                    >
+                    <button
+                      type="button"
+                      class="rounded bg-background/90 px-1.5 py-0.5 text-xs shadow disabled:opacity-30"
+                      disabled={busy || i === product.images.length - 1}
+                      onclick={() => moveImage(img.id, 1)}
+                      aria-label="Move right">→</button
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    class="rounded bg-background/90 px-1.5 py-0.5 text-xs text-destructive shadow"
+                    disabled={busy}
+                    onclick={() => removeImage(img.id)}
+                    aria-label="Delete">×</button
+                  >
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
     </section>
 
     <!-- Variants -->

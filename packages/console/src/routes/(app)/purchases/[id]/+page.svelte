@@ -596,6 +596,14 @@
       </div>
       <div class="flex items-center gap-3">
         <Badge class={statusClass(purchase.status)}>{purchase.status}</Badge>
+        {#if has("delivery.draft") && purchase.status !== "cancelled"}
+          <a
+            href="/purchases/{purchase.id}/receive"
+            class="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent"
+          >
+            Receive goods
+          </a>
+        {/if}
         {#if canCreate}
           <Button
             variant="outline"

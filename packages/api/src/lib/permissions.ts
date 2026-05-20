@@ -161,6 +161,12 @@ const INVENTORY_MANAGER: PermissionKey[] = [
   "tracking_account.archive",
   "report.cost.view",
   "report.margin.view",
+  // Console customer-sale workflow — driven from the customer / orders pages,
+  // not the POS, so managers can record sales without an open POS session.
+  "order.create_customer_sale",
+  "order.edit_customer_sale",
+  "order.close_customer_sale",
+  "order.cancel_customer_sale",
 ];
 
 export interface RoleTemplate {

@@ -15,6 +15,7 @@
     "schema:dump": "bun run scripts/dump-schema.ts",
     "dev:seed-user": "bun run scripts/seed-dev-user.ts",
     "dev:seed-products": "bun run scripts/seed-dev-products.ts",
+    "dev:seed-receiving": "bun run scripts/seed-dev-receiving.ts",
     "jobs:run": "bun run scripts/run-scheduled-jobs.ts"
   },
   "dependencies": {

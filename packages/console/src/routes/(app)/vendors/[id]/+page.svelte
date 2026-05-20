@@ -132,6 +132,61 @@
     }
   `);
 
+  // Variant codes are a separate document so it can be fetched lazily — only
+  // for viewers with vendor.variant_code.manage, which is the same key the
+  // mutations require. The variant catalogue is loaded alongside so the add
+  // form can render a picker.
+  const VendorCodes = graphql(`
+    query ConsoleVendorCodes($vendorId: ID!) {
+      codesForVendor(vendorId: $vendorId) {
+        id
+        variantId
+        code
+        isPreferred
+        updatedAt
+        variant {
+          id
+          sku
+          label
+          unit
+        }
+      }
+      products(includeArchived: false) {
+        id
+        name
+        variants {
+          id
+          sku
+          label
+        }
+      }
+    }
+  `);
+
+  const SetVendorVariantCode = graphql(`
+    mutation ConsoleSetVendorVariantCode(
+      $vendorId: ID!
+      $variantId: ID!
+      $code: String!
+      $isPreferred: Boolean
+    ) {
+      setVendorVariantCode(
+        vendorId: $vendorId
+        variantId: $variantId
+        code: $code
+        isPreferred: $isPreferred
+      ) {
+        id
+      }
+    }
+  `);
+
+  const DeleteVendorVariantCode = graphql(`
+    mutation ConsoleDeleteVendorVariantCode($id: ID!) {
+      deleteVendorVariantCode(id: $id)
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const VendorDetail = $derived(data.VendorDetail);
   const vendor = $derived($VendorDetail.data?.vendor);
@@ -145,6 +200,7 @@
   const canAdjust = $derived(has("vendor.adjustment"));
   const canHardDelete = $derived(has("vendor.hard_delete"));
   const canViewLedger = $derived(has("report.ap_aging.view"));
+  const canManageCodes = $derived(has("vendor.variant_code.manage"));
 
   // ---- Header form ---------------------------------------------------------
   const CHANNELS = ["", "whatsapp", "email"];
@@ -198,6 +254,39 @@
     }
   });
   const ledger = $derived($VendorLedger.data?.vendorLedger ?? []);
+
+  // Same lazy pattern for the variant-code panel — fetched once when a
+  // permitted viewer lands on the page.
+  let codesLoaded = $state(false);
+  $effect(() => {
+    if (vendor && canManageCodes && !codesLoaded) {
+      codesLoaded = true;
+      VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+    }
+  });
+  const codes = $derived($VendorCodes.data?.codesForVendor ?? []);
+  const allProducts = $derived($VendorCodes.data?.products ?? []);
+  // Variants the vendor doesn't already have a code for — keeps the add
+  // form from offering rows that would just upsert an existing row.
+  const mappedVariantIds = $derived(new Set(codes.map((c) => c.variantId)));
+  type VariantOption = {
+    id: string;
+    label: string;
+    productName: string;
+  };
+  const availableVariants = $derived.by((): VariantOption[] => {
+    const out: VariantOption[] = [];
+    for (const p of allProducts) {
+      for (const v of p.variants) {
+        if (mappedVariantIds.has(v.id)) continue;
+        const label = v.label ? `${v.sku} · ${v.label}` : v.sku;
+        out.push({ id: v.id, label, productName: p.name });
+      }
+    }
+    return out.sort((a, b) =>
+      a.productName.localeCompare(b.productName) || a.label.localeCompare(b.label),
+    );
+  });
 
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
@@ -297,6 +386,50 @@
 
   let adjAmount = $state<number | null>(null);
   let adjNote = $state("");
+
+  // ---- Variant code form --------------------------------------------------
+  let codeVariantId = $state("");
+  let codeText = $state("");
+  let codePreferred = $state(false);
+
+  async function addCode() {
+    if (!vendor || !codeVariantId || !codeText.trim()) return;
+    const ok = await run("Code", () =>
+      SetVendorVariantCode.mutate({
+        vendorId: vendor.id,
+        variantId: codeVariantId,
+        code: codeText.trim(),
+        isPreferred: codePreferred,
+      }),
+    );
+    if (ok) {
+      codeVariantId = "";
+      codeText = "";
+      codePreferred = false;
+      await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+    }
+  }
+
+  async function togglePreferred(c: (typeof codes)[number]) {
+    if (!vendor) return;
+    const ok = await run("Code", () =>
+      SetVendorVariantCode.mutate({
+        vendorId: vendor.id,
+        variantId: c.variantId,
+        code: c.code,
+        isPreferred: !c.isPreferred,
+      }),
+    );
+    if (ok) await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+  }
+
+  async function removeCode(id: string) {
+    if (!vendor || !confirm("Remove this vendor code mapping?")) return;
+    const ok = await run("Code", () =>
+      DeleteVendorVariantCode.mutate({ id }),
+    );
+    if (ok) await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+  }
 
   async function adjustBalance() {
     if (!vendor || !adjAmount || !adjNote.trim()) return;
@@ -536,6 +669,121 @@
               {/if}
             </tbody>
           </table>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- Vendor variant codes -->
+    {#if canManageCodes}
+      <section class="space-y-3 rounded-lg border bg-card p-5">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold">
+            Vendor variant codes ({codes.length})
+          </h2>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          The vendor's own part numbers for our variants — fed into the
+          receiving scan and the reorder forecast.
+        </p>
+
+        {#if $VendorCodes.fetching && codes.length === 0}
+          <p class="text-sm text-muted-foreground">Loading…</p>
+        {:else}
+          <table class="w-full text-sm">
+            <thead class="border-b text-left text-muted-foreground">
+              <tr>
+                <th class="py-1.5 font-medium">Variant</th>
+                <th class="py-1.5 font-medium">Vendor code</th>
+                <th class="py-1.5 font-medium">Preferred</th>
+                <th class="py-1.5"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each codes as c (c.id)}
+                <tr class="border-b last:border-0">
+                  <td class="py-1.5">
+                    {#if c.variant}
+                      <span class="font-mono text-xs">{c.variant.sku}</span>
+                      {#if c.variant.label}
+                        <span class="ml-1 text-xs text-muted-foreground">
+                          {c.variant.label}
+                        </span>
+                      {/if}
+                    {:else}
+                      <span class="font-mono text-xs text-muted-foreground">
+                        {c.variantId.slice(-8)}
+                      </span>
+                    {/if}
+                  </td>
+                  <td class="py-1.5 font-mono text-xs">{c.code}</td>
+                  <td class="py-1.5">
+                    <label class="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={c.isPreferred}
+                        disabled={busy}
+                        onchange={() => togglePreferred(c)}
+                      />
+                      {#if c.isPreferred}
+                        <Badge class="bg-primary/10 text-primary">preferred</Badge>
+                      {/if}
+                    </label>
+                  </td>
+                  <td class="py-1.5 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive"
+                      disabled={busy}
+                      onclick={() => removeCode(c.id)}>Remove</Button
+                    >
+                  </td>
+                </tr>
+              {/each}
+              {#if codes.length === 0}
+                <tr>
+                  <td colspan="4" class="py-6 text-center text-muted-foreground">
+                    No vendor codes mapped yet.
+                  </td>
+                </tr>
+              {/if}
+            </tbody>
+          </table>
+
+          <div class="rounded-md border bg-muted/40 p-3">
+            <p class="mb-2 text-xs font-medium">Add a mapping</p>
+            <div class="grid grid-cols-[1fr_10rem_auto_auto] items-end gap-2">
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Variant</span>
+                <Select bind:value={codeVariantId}>
+                  <option value="" disabled>— Pick a variant —</option>
+                  {#each availableVariants as v (v.id)}
+                    <option value={v.id}>
+                      {v.productName} — {v.label}
+                    </option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Vendor code</span>
+                <Input bind:value={codeText} placeholder="e.g. ABC-1234" />
+              </label>
+              <label class="flex items-center gap-1 pb-2 text-xs">
+                <input type="checkbox" bind:checked={codePreferred} />
+                Preferred
+              </label>
+              <Button
+                size="sm"
+                disabled={busy || !codeVariantId || !codeText.trim()}
+                onclick={addCode}>Add</Button
+              >
+            </div>
+            {#if availableVariants.length === 0 && allProducts.length > 0}
+              <p class="mt-2 text-xs text-muted-foreground">
+                Every variant already has a code for this vendor.
+              </p>
+            {/if}
+          </div>
         {/if}
       </section>
     {/if}

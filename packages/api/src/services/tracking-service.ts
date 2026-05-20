@@ -5,8 +5,9 @@
 // never drifts. Attribution rows are written by the order service.
 // See docs/design-decisions.md → "Tracking accounts".
 
-import { desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { ulid } from "ulid";
+import { products, productVariants } from "../db/schema/products.ts";
 import {
   trackingAccountLedger,
   trackingAccounts,
@@ -158,6 +159,86 @@ export async function hardDeleteTrackingAccount(id: string): Promise<void> {
   });
   if (child) throw new TrackingError("HAS_CHILDREN");
   await db.delete(trackingAccounts).where(eq(trackingAccounts.id, id));
+}
+
+// ---- Variant linkage ------------------------------------------------------
+// A variant's `trackingAccountId` says: when this variant is sold, attribute
+// the pre-tax revenue to that account. The order pipeline already reads it.
+// These helpers let the console edit the set from the tracking-account side.
+
+export interface LinkedVariant {
+  variantId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  label: string | null;
+}
+
+export function listLinkedVariants(accountId: string): Promise<LinkedVariant[]> {
+  return db
+    .select({
+      variantId: productVariants.id,
+      productId: products.id,
+      productName: products.name,
+      sku: productVariants.sku,
+      label: productVariants.label,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .where(eq(productVariants.trackingAccountId, accountId));
+}
+
+export interface AssignableVariant extends LinkedVariant {
+  currentTrackingAccountId: string | null;
+  currentTrackingAccountName: string | null;
+}
+
+export function listAssignableVariants(): Promise<AssignableVariant[]> {
+  return db
+    .select({
+      variantId: productVariants.id,
+      productId: products.id,
+      productName: products.name,
+      sku: productVariants.sku,
+      label: productVariants.label,
+      currentTrackingAccountId: productVariants.trackingAccountId,
+      currentTrackingAccountName: trackingAccounts.name,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .leftJoin(
+      trackingAccounts,
+      eq(productVariants.trackingAccountId, trackingAccounts.id),
+    )
+    .where(isNull(products.archivedAt));
+}
+
+/**
+ * Replace the set of variants linked to the account. Variants in the list
+ * become linked here (reassigning from any other account); variants previously
+ * linked to this account that are not in the list are detached.
+ */
+export async function setTrackingAccountVariants(
+  accountId: string,
+  variantIds: string[],
+): Promise<LinkedVariant[]> {
+  await loadAccount(accountId);
+  await db.transaction(async (tx) => {
+    const detachWhere = variantIds.length
+      ? and(
+          eq(productVariants.trackingAccountId, accountId),
+          notInArray(productVariants.id, variantIds),
+        )
+      : eq(productVariants.trackingAccountId, accountId);
+    await tx.update(productVariants).set({ trackingAccountId: null }).where(detachWhere);
+    if (variantIds.length) {
+      await tx
+        .update(productVariants)
+        .set({ trackingAccountId: accountId })
+        .where(inArray(productVariants.id, variantIds));
+    }
+  });
+  return listLinkedVariants(accountId);
 }
 
 /** Per-account ledger SUM → write it back to the cached `balanceMinor`. */

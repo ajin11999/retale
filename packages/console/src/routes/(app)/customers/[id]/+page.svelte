@@ -167,6 +167,14 @@
     }
   `);
 
+  const CreateCustomerSale = graphql(`
+    mutation ConsoleCreateCustomerSale($customerId: ID!) {
+      createCustomerSale(customerId: $customerId) {
+        id
+      }
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const CustomerDetail = $derived(data.CustomerDetail);
   const customer = $derived($CustomerDetail.data?.customer);
@@ -201,6 +209,26 @@
   const canAdjust = $derived(has("customer.adjustment"));
   const canHardDelete = $derived(has("customer.hard_delete"));
   const canViewLedger = $derived(has("report.ar_aging.view"));
+  const canCreateSale = $derived(has("order.create_customer_sale"));
+
+  async function startSale() {
+    if (!customer) return;
+    busy = true;
+    feedback = null;
+    try {
+      const res = await CreateCustomerSale.mutate({ customerId: customer.id });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
+      const id = res.data?.createCustomerSale.id;
+      if (id) await goto(`/orders/${id}`);
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+  }
 
   // ---- Header form ---------------------------------------------------------
   interface CustomerForm {
@@ -451,6 +479,15 @@
         >
           {customer.archivedAt ? "Archived" : "Active"}
         </Badge>
+        {#if !customer.archivedAt}
+          <Button
+            size="sm"
+            disabled={busy || !canCreateSale}
+            onclick={startSale}
+          >
+            New sale
+          </Button>
+        {/if}
         <Button
           variant="outline"
           size="sm"

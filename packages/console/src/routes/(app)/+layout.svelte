@@ -8,8 +8,14 @@
     children,
   }: { data: LayoutServerData; children: Snippet } = $props();
 
-  // Purchases / reorder / reports are placeholders until their screens land.
-  const nav = [
+  // `perm` gates a link on a viewer permission; omit it to always show. Root
+  // bypasses the check (permissions resolves to the full catalog for root).
+  interface NavItem {
+    href: string;
+    label: string;
+    perm?: string;
+  }
+  const NAV: NavItem[] = [
     { href: "/products", label: "Products" },
     { href: "/categories", label: "Categories" },
     { href: "/customers", label: "Customers" },
@@ -17,9 +23,24 @@
     { href: "/locations", label: "Locations" },
     { href: "/transfers", label: "Stock transfers" },
     { href: "/purchases", label: "Purchases" },
+    { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },
     { href: "/reorder", label: "Reorder suggestions" },
+    { href: "/orders", label: "Orders", perm: "report.sales.view" },
+    { href: "/sessions", label: "POS sessions", perm: "session.open" },
+    { href: "/tracking", label: "Tracking accounts", perm: "tracking_account.edit" },
+    { href: "/alerts", label: "Alerts", perm: "alert.acknowledge" },
+    { href: "/catalog", label: "Catalog", perm: "catalog.manage" },
     { href: "/reports", label: "Reports" },
+    { href: "/users", label: "Users", perm: "admin.user.manage" },
+    { href: "/roles", label: "Roles", perm: "admin.role.manage" },
+    { href: "/settings", label: "Business settings", perm: "admin.settings.manage" },
+    { href: "/account", label: "Account" },
   ];
+
+  const perms = $derived(new Set(data.user.permissions ?? []));
+  const nav = $derived(
+    NAV.filter((n) => !n.perm || data.user.isRoot || perms.has(n.perm)),
+  );
 
   const isActive = (href: string) =>
     page.url.pathname === href || page.url.pathname.startsWith(href + "/");

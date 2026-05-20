@@ -113,6 +113,18 @@ export const typeDefs = /* GraphQL */ `
     createCustomerSale(customerId: ID!): Order!
     "Add a line to an open Console sale."
     addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
+    """
+    Edit a non-voided line on an open Console sale. Each field is optional;
+    omitted fields are left untouched. displayNameOverride writes the line's
+    receipt name (empty string clears it back to the default).
+    """
+    updateCustomerSaleItem(
+      orderItemId: ID!
+      qty: Int
+      discountMinor: Float
+      priceOverrideMinor: Float
+      displayNameOverride: String
+    ): Order!
     "Void a line on an open Console sale — returns stock, reverses the ledger."
     voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
     "Record a payment against an open Console sale."
@@ -246,6 +258,37 @@ export const resolvers = {
           orderId: args.orderId,
           item: args.item,
           createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    updateCustomerSaleItem: async (
+      _: unknown,
+      args: {
+        orderItemId: string;
+        qty?: number | null;
+        discountMinor?: number | null;
+        priceOverrideMinor?: number | null;
+        displayNameOverride?: string | null;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "order.edit_customer_sale");
+      try {
+        return await orders.updateCustomerSaleItem({
+          orderItemId: args.orderItemId,
+          qty: args.qty ?? null,
+          discountMinor: args.discountMinor ?? null,
+          priceOverrideMinor: args.priceOverrideMinor ?? null,
+          // Distinguish "field omitted" from "explicit empty string". Houdini /
+          // graphql-yoga gives us `undefined` for the former and `""` for the
+          // latter, which the service layer interprets as "clear".
+          displayNameOverride:
+            args.displayNameOverride === undefined
+              ? undefined
+              : args.displayNameOverride,
+          updatedByUserId: viewer.userId,
         });
       } catch (e) {
         asGraphQLError(e);

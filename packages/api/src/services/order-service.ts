@@ -840,6 +840,186 @@ export async function voidCustomerSaleItem(input: {
 }
 
 /**
+ * Edit a non-voided line on an open Console sale. Each provided field is
+ * applied; omitted fields are left untouched. Adjusts stock by the qty delta,
+ * recomputes the attribution snapshot, posts a customer-ledger delta for the
+ * net change, and re-checks the credit limit when the total grows.
+ *
+ * Bundle component lines cannot be edited — re-add the bundle instead.
+ * `displayNameOverride` writes `snapshotPublicName`, which the receipt /
+ * catalog already prefer over `snapshotProductName`. Pass an empty string to
+ * clear it back to the default.
+ */
+export async function updateCustomerSaleItem(input: {
+  orderItemId: string;
+  qty?: number | null;
+  discountMinor?: number | null;
+  priceOverrideMinor?: number | null;
+  displayNameOverride?: string | null;
+  updatedByUserId: string;
+}): Promise<Order> {
+  return db.transaction(async (tx) => {
+    const item = await tx.query.orderItems.findFirst({
+      where: eq(orderItems.id, input.orderItemId),
+    });
+    if (!item) throw new OrderError("ITEM_NOT_FOUND");
+    if (item.voidedAt) throw new OrderError("ITEM_ALREADY_VOIDED");
+    if (item.snapshotBundleName) {
+      throw new OrderError(
+        "INVALID_INPUT",
+        "bundle component lines are not editable; void and re-add the bundle",
+      );
+    }
+    const order = await loadOpenOrder(tx, item.orderId);
+    const customerId = order.customerId;
+    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
+
+    const oldQty = item.qty;
+    const oldPrice = item.snapshotPriceMinor;
+    const oldDiscount = item.discountMinor;
+    const oldTotal = lineTotalOf(item);
+
+    let newQty = oldQty;
+    if (input.qty != null) {
+      if (!Number.isInteger(input.qty) || input.qty <= 0) {
+        throw new OrderError("INVALID_INPUT", "qty must be a positive integer");
+      }
+      newQty = input.qty;
+    }
+
+    let newDiscount = oldDiscount;
+    if (input.discountMinor != null) {
+      if (!Number.isInteger(input.discountMinor) || input.discountMinor < 0) {
+        throw new OrderError(
+          "INVALID_INPUT",
+          "discount must be a non-negative integer",
+        );
+      }
+      newDiscount = input.discountMinor;
+    }
+
+    // Price overrides need the product kind; the schema gates them to services.
+    const product = item.productId
+      ? await tx.query.products.findFirst({
+          where: eq(products.id, item.productId),
+        })
+      : null;
+
+    let newPrice = oldPrice;
+    if (input.priceOverrideMinor != null) {
+      if (!product || product.kind !== "service") {
+        throw new OrderError(
+          "PRICE_OVERRIDE_NOT_ALLOWED",
+          "price overrides are allowed only on service products",
+        );
+      }
+      if (
+        !Number.isInteger(input.priceOverrideMinor) ||
+        input.priceOverrideMinor < 0
+      ) {
+        throw new OrderError(
+          "INVALID_INPUT",
+          "price override must be a non-negative integer",
+        );
+      }
+      newPrice = input.priceOverrideMinor;
+    }
+
+    const newTotal = newQty * newPrice - newDiscount;
+    if (newTotal < 0) {
+      throw new OrderError("INVALID_INPUT", "discount exceeds the line subtotal");
+    }
+
+    const delta = newTotal - oldTotal;
+    if (delta > 0) {
+      const customer = await tx.query.customers.findFirst({
+        where: eq(customers.id, customerId),
+      });
+      if (
+        customer?.creditLimitMinor != null &&
+        customer.balanceMinor + delta > customer.creditLimitMinor
+      ) {
+        throw new OrderError("CREDIT_LIMIT_EXCEEDED");
+      }
+    }
+
+    // Physical stock moves with qty. Positive line-qty delta → stock decreases.
+    const qtyDelta = newQty - oldQty;
+    if (
+      product?.kind === "physical" &&
+      item.variantId &&
+      qtyDelta !== 0
+    ) {
+      await modifyStock(
+        {
+          variantId: item.variantId,
+          type: qtyDelta > 0 ? "sale" : "sale_return",
+          qtyDelta: -qtyDelta,
+          refType: "order",
+          refId: order.id,
+          reason: `edit line ${item.id}`,
+          createdByUserId: input.updatedByUserId,
+        },
+        tx,
+      );
+    }
+
+    // Recompute attribution snapshot if the line carries one.
+    let newAttribution = item.attributionAmountMinor;
+    if (item.attributionAccountId && item.variantId) {
+      const variant = await tx.query.productVariants.findFirst({
+        where: eq(productVariants.id, item.variantId),
+      });
+      if (variant) {
+        newAttribution = computeAttribution({
+          priceMinor: newPrice,
+          qty: newQty,
+          discountMinor: newDiscount,
+          priceMode: item.snapshotPriceMode,
+          taxRateBps: item.snapshotTaxRateBps,
+          mode: variant.trackingAttributionMode,
+          pctBps: variant.trackingAttributionPctBps,
+        });
+      }
+    }
+
+    // Display name override → write snapshotPublicName, which the receipt /
+    // catalog already prefer over snapshotProductName.
+    const patch: Partial<typeof orderItems.$inferInsert> = {
+      qty: newQty,
+      discountMinor: newDiscount,
+      snapshotPriceMinor: newPrice,
+      attributionAmountMinor: newAttribution,
+    };
+    if (input.displayNameOverride !== undefined) {
+      const trimmed = input.displayNameOverride?.trim() ?? "";
+      patch.snapshotPublicName = trimmed === "" ? null : trimmed;
+    }
+    await tx.update(orderItems).set(patch).where(eq(orderItems.id, item.id));
+
+    if (delta !== 0) {
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId,
+        type: "sale_on_account",
+        amountMinor: delta,
+        refType: "order_item",
+        refId: item.id,
+        note: "edit",
+        createdByUserId: input.updatedByUserId,
+      });
+      await syncCustomerBalance(tx, customerId);
+    }
+
+    await recomputeOrderTotal(tx, order.id);
+    const row = await tx.query.orders.findFirst({
+      where: eq(orders.id, order.id),
+    });
+    return row as Order;
+  });
+}
+
+/**
  * Record a payment against an open Console sale. Writes the `order_payments`
  * row and a `payment` customer_ledger row that reduces the balance.
  */

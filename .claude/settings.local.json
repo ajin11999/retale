@@ -22,7 +22,10 @@
       "PowerShell(Get-NetTCPConnection *)",
       "PowerShell(bunx houdini generate 2>&1 | Select-Object -Last 25)",
       "Bash(flutter --version)",
-      "Bash(flutter pub *)"
+      "Bash(flutter pub *)",
+      "PowerShell(cmd /c \"dir /s /b packages\\\\console\\\\src\\\\routes\\\\\\(app\\)\\\\purchases\")",
+      "PowerShell(Test-NetConnection *)",
+      "PowerShell(Get-ChildItem 'packages/console/src/routes' -Recurse -Force | Where-Object { -not $_.PSIsContainer -and $_.FullName -match 'tracking' } | Select-Object FullName)"
     ]
   }
 }

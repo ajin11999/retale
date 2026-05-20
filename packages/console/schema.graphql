@@ -45,6 +45,11 @@ type Query {
   trackingAccounts(includeArchived: Boolean): [TrackingAccount!]!
   trackingAccount(id: ID!): TrackingAccount
   trackingAccountLedger(accountId: ID!, limit: Int): [TrackingAccountLedgerEntry!]!
+
+  """
+  All non-archived variants, marked with their current tracking-account link if any.
+  """
+  assignableTrackingVariants: [AssignableTrackingVariant!]!
   stockTransfers(limit: Int): [StockTransfer!]!
   stockTransfer(id: ID!): StockTransfer
 
@@ -307,6 +312,13 @@ type Mutation {
   addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
 
   """
+  Edit a non-voided line on an open Console sale. Each field is optional;
+  omitted fields are left untouched. displayNameOverride writes the line's
+  receipt name (empty string clears it back to the default).
+  """
+  updateCustomerSaleItem(orderItemId: ID!, qty: Int, discountMinor: Float, priceOverrideMinor: Float, displayNameOverride: String): Order!
+
+  """
   Void a line on an open Console sale — returns stock, reverses the ledger.
   """
   voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
@@ -350,6 +362,9 @@ type Mutation {
   Root-only manual balance correction. Signed amountMinor; note required.
   """
   adjustTrackingBalance(accountId: ID!, amountMinor: Float!, note: String!, counterCategoryOverride: String): TrackingAccount!
+
+  """Replace the set of variants whose sales attribute to this account."""
+  setTrackingAccountVariants(accountId: ID!, variantIds: [ID!]!): [TrackingLinkedVariant!]!
 
   """Draft a transfer between two locations. Moves no stock yet."""
   createStockTransfer(sourceLocationId: ID!, targetLocationId: ID!, items: [StockTransferItemInput!]!, notes: String): StockTransfer!
@@ -1128,6 +1143,31 @@ type TrackingAccount {
   archivedAt: String
   createdAt: String!
   updatedAt: String!
+
+  """Variants whose sales attribute revenue to this account."""
+  linkedVariants: [TrackingLinkedVariant!]!
+}
+
+"""A variant whose sales attribute to a tracking account."""
+type TrackingLinkedVariant {
+  variantId: ID!
+  productId: ID!
+  productName: String!
+  sku: String!
+  label: String
+}
+
+"""
+A variant that could be linked to a tracking account, with its current link if any.
+"""
+type AssignableTrackingVariant {
+  variantId: ID!
+  productId: ID!
+  productName: String!
+  sku: String!
+  label: String
+  currentTrackingAccountId: ID
+  currentTrackingAccountName: String
 }
 
 type TrackingAccountLedgerEntry {

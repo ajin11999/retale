@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
@@ -79,6 +79,9 @@
         return;
       }
       const id = res.data?.createCustomer.id;
+      // Refresh the cached list so it includes the new row when the user
+      // navigates back from the detail page.
+      await CustomerList.fetch({ policy: CachePolicy.NetworkOnly });
       if (id) await goto(`/customers/${id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
