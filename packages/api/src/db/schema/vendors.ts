@@ -15,6 +15,7 @@ import {
   timestamp,
   varchar,
 } from "drizzle-orm/mysql-core";
+import { addresses } from "./addresses.ts";
 import { users } from "./auth.ts";
 import { posSessions } from "./pos.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
@@ -66,6 +67,11 @@ export const vendors = mysqlTable(
     // Default channel the send screen pre-selects for this vendor's POs;
     // null = no preference (the clerk picks each time).
     preferredSendChannel: mysqlEnum(VENDOR_SEND_CHANNELS),
+    // Our ship-to address printed on this vendor's POs; null falls back to the
+    // address-book row flagged isDefault. SET NULL on address delete.
+    defaultShipToAddressId: ulidRef().references(() => addresses.id, {
+      onDelete: "set null",
+    }),
     // Cached sum of vendor_ledger.amount_minor. Positive = we owe them.
     balanceMinor: bigint({ mode: "number" }).notNull().default(0),
     archivedAt: timestamp(),

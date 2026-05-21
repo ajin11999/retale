@@ -1,5 +1,6 @@
 <script lang="ts">
   import { graphql } from "$houdini";
+  import QRCode from "qrcode";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
@@ -60,6 +61,19 @@
   };
   let pending = $state<Pending | null>(null);
   let confirmCode = $state("");
+
+  // QR data-URL for the pending otpauth URL, regenerated whenever it changes.
+  let qrDataUrl = $state<string | null>(null);
+  $effect(() => {
+    const url = pending?.otpauthUrl;
+    if (!url) {
+      qrDataUrl = null;
+      return;
+    }
+    QRCode.toDataURL(url, { width: 220, margin: 1 })
+      .then((d) => (qrDataUrl = d))
+      .catch(() => (qrDataUrl = null));
+  });
 
   // freshCodes: the new recovery codes returned by regenerateRecoveryCodes —
   // shown until the user dismisses the panel.
@@ -217,12 +231,28 @@
       {#if pending}
         <!-- Enrolment in progress -->
         <p class="text-sm text-muted-foreground">
-          Scan the secret in your authenticator app (Google Authenticator, 1Password,
-          Authy, …) — or enter it manually — then enter a current 6-digit code to
-          confirm.
+          Scan this QR code in your authenticator app (Google Authenticator,
+          1Password, Authy, …) — or enter the secret manually — then enter a
+          current 6-digit code to confirm.
         </p>
 
-        <div class="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+        {#if qrDataUrl}
+          <div class="flex justify-center">
+            <img
+              src={qrDataUrl}
+              alt="Two-factor QR code"
+              width="220"
+              height="220"
+              class="rounded-md border bg-white p-2"
+            />
+          </div>
+        {/if}
+
+        <details class="text-sm">
+          <summary class="cursor-pointer text-xs text-muted-foreground">
+            Can't scan? Enter manually
+          </summary>
+          <div class="mt-2 space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
           <div>
             <p class="text-xs text-muted-foreground">otpauth URL</p>
             <div class="flex items-start gap-2">
@@ -249,7 +279,8 @@
               >
             </div>
           </div>
-        </div>
+          </div>
+        </details>
 
         <div>
           <p class="mb-1 text-sm font-medium">Recovery codes</p>

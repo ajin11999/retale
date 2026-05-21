@@ -25,8 +25,23 @@
         notes
         leadTimeDays
         preferredSendChannel
+        defaultShipToAddressId
         balanceMinor
         archivedAt
+      }
+    }
+  `);
+
+  // Our ship-to addresses, for the default-ship-to picker. Uses the
+  // vendor.edit-gated `shipToAddresses` query so a clerk can pick one without
+  // settings access; fetched lazily (bundling it into VendorDetail is
+  // unnecessary and keeps the read off viewers who can't edit).
+  const ShipToAddresses = graphql(`
+    query ConsoleShipToAddresses {
+      shipToAddresses {
+        id
+        label
+        isDefault
       }
     }
   `);
@@ -58,6 +73,7 @@
       $notes: String
       $leadTimeDays: Int
       $preferredSendChannel: VendorSendChannel
+      $defaultShipToAddressId: ID
     ) {
       updateVendor(
         id: $id
@@ -69,6 +85,7 @@
         notes: $notes
         leadTimeDays: $leadTimeDays
         preferredSendChannel: $preferredSendChannel
+        defaultShipToAddressId: $defaultShipToAddressId
       ) {
         id
         name
@@ -79,6 +96,7 @@
         notes
         leadTimeDays
         preferredSendChannel
+        defaultShipToAddressId
       }
     }
   `);
@@ -201,6 +219,8 @@
   const canHardDelete = $derived(has("vendor.hard_delete"));
   const canViewLedger = $derived(has("report.ap_aging.view"));
   const canManageCodes = $derived(has("vendor.variant_code.manage"));
+  const canPickShipTo = $derived(canEdit);
+  const canManageAddresses = $derived(has("admin.settings.manage"));
 
   // ---- Header form ---------------------------------------------------------
   const CHANNELS = ["", "whatsapp", "email"];
@@ -213,6 +233,7 @@
     notes: string;
     leadTimeDays: number | null;
     preferredSendChannel: string;
+    defaultShipToAddressId: string;
   }
   let form = $state<VendorForm>({
     name: "",
@@ -223,6 +244,7 @@
     notes: "",
     leadTimeDays: null,
     preferredSendChannel: "",
+    defaultShipToAddressId: "",
   });
 
   // Reset the form when a different vendor loads — not on a plain refetch, so
@@ -241,9 +263,20 @@
         notes: v.notes ?? "",
         leadTimeDays: v.leadTimeDays ?? null,
         preferredSendChannel: v.preferredSendChannel ?? "",
+        defaultShipToAddressId: v.defaultShipToAddressId ?? "",
       };
     }
   });
+
+  // Load the address book once, for viewers who can pick a ship-to.
+  let addressesLoaded = $state(false);
+  $effect(() => {
+    if (vendor && canPickShipTo && !addressesLoaded) {
+      addressesLoaded = true;
+      ShipToAddresses.fetch();
+    }
+  });
+  const shipToAddresses = $derived($ShipToAddresses.data?.shipToAddresses ?? []);
 
   // Load the ledger once, for viewers allowed to see it.
   let ledgerLoaded = $state(false);
@@ -335,6 +368,7 @@
         notes: form.notes.trim() || null,
         leadTimeDays: form.leadTimeDays,
         preferredSendChannel: (form.preferredSendChannel || null) as never,
+        defaultShipToAddressId: form.defaultShipToAddressId || null,
       }),
     );
   }
@@ -552,6 +586,23 @@
         <span class="text-sm font-medium">Address</span>
         <Input bind:value={form.address} disabled={!canEdit} />
       </label>
+      {#if canPickShipTo}
+        <label class="space-y-1">
+          <span class="text-sm font-medium">Default ship-to (our address)</span>
+          <Select bind:value={form.defaultShipToAddressId} disabled={!canEdit}>
+            <option value="">— Use default address —</option>
+            {#each shipToAddresses as a (a.id)}
+              <option value={a.id}>{a.label}{a.isDefault ? " (default)" : ""}</option>
+            {/each}
+          </Select>
+          <span class="text-xs text-muted-foreground">
+            Printed as “Ship To” on this vendor's purchase orders.
+            {#if canManageAddresses}
+              <a href="/settings/addresses" class="underline">Manage addresses</a>
+            {/if}
+          </span>
+        </label>
+      {/if}
       <label class="space-y-1">
         <span class="text-sm font-medium">Notes</span>
         <Textarea

@@ -58,6 +58,7 @@ export async function createVendor(input: {
   notes?: string | null;
   leadTimeDays?: number | null;
   preferredSendChannel?: SendChannel | null;
+  defaultShipToAddressId?: string | null;
   createdByUserId: string;
 }): Promise<Vendor> {
   if (!input.name.trim()) throw new VendorError("INVALID_INPUT", "name is required");
@@ -79,6 +80,7 @@ export async function createVendor(input: {
     notes: input.notes ?? null,
     leadTimeDays: input.leadTimeDays ?? null,
     preferredSendChannel: input.preferredSendChannel ?? null,
+    defaultShipToAddressId: input.defaultShipToAddressId ?? null,
     createdByUserId: input.createdByUserId,
   });
   return loadVendor(id);
@@ -95,6 +97,7 @@ export async function updateVendor(
     notes?: string | null;
     leadTimeDays?: number | null;
     preferredSendChannel?: SendChannel | null;
+    defaultShipToAddressId?: string | null;
   },
 ): Promise<Vendor> {
   await loadVendor(id);
@@ -120,6 +123,9 @@ export async function updateVendor(
       ...(patch.leadTimeDays !== undefined && { leadTimeDays: patch.leadTimeDays }),
       ...(patch.preferredSendChannel !== undefined && {
         preferredSendChannel: patch.preferredSendChannel,
+      }),
+      ...(patch.defaultShipToAddressId !== undefined && {
+        defaultShipToAddressId: patch.defaultShipToAddressId,
       }),
     })
     .where(eq(vendors.id, id));

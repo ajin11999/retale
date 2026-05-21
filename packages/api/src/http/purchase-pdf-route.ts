@@ -22,8 +22,13 @@ export const purchasePdfRoute = new Elysia().get(
       return { error: e instanceof Error ? e.message : "forbidden" };
     }
 
+    // Prices are hidden by default; `?prices=1` (or true) opts in.
+    const showPrices = /^(1|true)$/i.test(
+      new URL(request.url).searchParams.get("prices") ?? "",
+    );
+
     try {
-      const pdf = await renderPurchaseOrderPdf(params.id);
+      const pdf = await renderPurchaseOrderPdf(params.id, { showPrices });
       // pdf-lib returns a Uint8Array; cast past the generic-Uint8Array vs
       // BodyInit mismatch — Bun's Response accepts it at runtime.
       return new Response(pdf as unknown as BodyInit, {

@@ -330,8 +330,13 @@
     }
   }
 
+  // Force a network round-trip: the line / section / send mutations return only
+  // `{ id }`, so Houdini's normalized cache never learns the new or changed
+  // rows. The default CacheOrNetwork policy would then re-serve the stale
+  // cached list — NetworkOnly guarantees the refetched list reflects the edit.
   const refetch = () =>
-    purchase && PurchaseDetail.fetch({ variables: { id: purchase.id } });
+    purchase &&
+    PurchaseDetail.fetch({ variables: { id: purchase.id }, policy: "NetworkOnly" });
 
   async function saveHeader() {
     if (!purchase) return;
@@ -496,8 +501,14 @@
   // The rendered draft (body + resolved recipient + deep link) for the
   // current composer channel / recipient.
   const draft = $derived($SendDraftQuery.data?.purchaseSendDraft);
+  // Prices on the printed PO are hidden by default; the clerk opts in here.
+  let pdfShowPrices = $state(false);
   // The PDF goes through the console's own cookie-authenticated proxy route.
-  const pdfHref = $derived(purchase ? `/purchases/${purchase.id}/po.pdf` : "#");
+  const pdfHref = $derived(
+    purchase
+      ? `/purchases/${purchase.id}/po.pdf${pdfShowPrices ? "?prices=1" : ""}`
+      : "#",
+  );
 
   async function preview() {
     const c = composer;
@@ -1013,6 +1024,10 @@
               >
                 Download PDF
               </a>
+              <label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input type="checkbox" bind:checked={pdfShowPrices} />
+                Show prices on PDF
+              </label>
             </div>
           {/if}
 

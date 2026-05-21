@@ -6,6 +6,7 @@
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
 import {
+  clearBusinessLogo,
   getBusinessSettings,
   updateBusinessSettings,
 } from "../services/business-service.ts";
@@ -16,6 +17,8 @@ export const typeDefs = /* GraphQL */ `
     name: String!
     phone: String
     email: String
+    "Public URL of the business logo (PNG), shown on the PO letterhead. Uploaded via POST /business-logo."
+    logoUrl: String
     "Greeting prepended to a rendered purchase-order message."
     poGreeting: String
     "Footer appended to a rendered purchase-order message."
@@ -35,6 +38,8 @@ export const typeDefs = /* GraphQL */ `
       poGreeting: String
       poFooter: String
     ): BusinessSettings!
+    "Remove the business logo (clears the URL and deletes the stored file)."
+    clearBusinessLogo: BusinessSettings!
   }
 `;
 
@@ -61,6 +66,10 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "admin.settings.manage");
       return updateBusinessSettings(args);
+    },
+    clearBusinessLogo: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "admin.settings.manage");
+      return clearBusinessLogo();
     },
   },
 };

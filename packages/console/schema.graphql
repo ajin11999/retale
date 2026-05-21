@@ -94,6 +94,13 @@ type Query {
   """
   productAlerts(acknowledged: Boolean): [ProductAlert!]!
   businessSettings: BusinessSettings!
+  addresses(includeArchived: Boolean): [Address!]!
+  address(id: ID!): Address
+
+  """
+  Active addresses for the vendor ship-to picker. Gated on vendor.edit so a clerk can choose one without settings access.
+  """
+  shipToAddresses: [Address!]!
 
   """Sales volume — orders, units, revenue, by day."""
   salesReport(periodStart: String!, periodEnd: String!): SalesReport!
@@ -194,8 +201,8 @@ type Mutation {
 
   """Snap a variant's weighted-average cost to an exact value."""
   overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
-  createVendor(name: String!, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel): Vendor!
-  updateVendor(id: ID!, name: String, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel): Vendor!
+  createVendor(name: String!, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
+  updateVendor(id: ID!, name: String, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
   setVendorArchived(id: ID!, archived: Boolean!): Vendor!
 
   """
@@ -448,6 +455,18 @@ type Mutation {
   """Acknowledge an alert — a person has seen it."""
   acknowledgeProductAlert(id: ID!, resolutionNote: String): ProductAlert!
   updateBusinessSettings(name: String, phone: String, email: String, poGreeting: String, poFooter: String): BusinessSettings!
+
+  """Remove the business logo (clears the URL and deletes the stored file)."""
+  clearBusinessLogo: BusinessSettings!
+  createAddress(label: String!, recipientName: String, phone: String, line: String!, notes: String, isDefault: Boolean): Address!
+  updateAddress(id: ID!, label: String, recipientName: String, phone: String, line: String, notes: String, isDefault: Boolean): Address!
+
+  """Promote one address to the single default ship-to."""
+  setDefaultAddress(id: ID!): Address!
+  setAddressArchived(id: ID!, archived: Boolean!): Address!
+
+  """Hard delete. Vendors pointing here revert to the fallback address."""
+  deleteAddress(id: ID!): Boolean!
 }
 
 type User {
@@ -730,6 +749,14 @@ type Vendor {
   Default send channel pre-selected on the send screen; null = no preference.
   """
   preferredSendChannel: VendorSendChannel
+
+  """
+  Our ship-to address printed on this vendor's POs; null falls back to the default address.
+  """
+  defaultShipToAddressId: ID
+
+  """The resolved ship-to address record, if one is set."""
+  defaultShipToAddress: Address
 
   """Cached AP balance, minor units. Positive = we owe the vendor."""
   balanceMinor: Float!
@@ -1481,12 +1508,35 @@ type BusinessSettings {
   phone: String
   email: String
 
+  """
+  Public URL of the business logo (PNG), shown on the PO letterhead. Uploaded via POST /business-logo.
+  """
+  logoUrl: String
+
   """Greeting prepended to a rendered purchase-order message."""
   poGreeting: String
 
   """Footer appended to a rendered purchase-order message."""
   poFooter: String
   updatedAt: String
+}
+
+"""One of the business's ship-to addresses (store, warehouse, ...)."""
+type Address {
+  id: ID!
+  label: String!
+  recipientName: String
+  phone: String
+
+  """Free-text postal block (multi-line)."""
+  line: String!
+  notes: String
+
+  """The fallback ship-to when a vendor has no explicit default."""
+  isDefault: Boolean!
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
 }
 
 type SalesReportDay {

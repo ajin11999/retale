@@ -1,0 +1,1 @@
+ALTER TABLE `business_settings` ADD `logo_url` varchar(500);

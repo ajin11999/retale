@@ -13,8 +13,18 @@
         name
         phone
         email
+        logoUrl
         poGreeting
         poFooter
+        updatedAt
+      }
+    }
+  `);
+
+  const ClearBusinessLogo = graphql(`
+    mutation ConsoleClearBusinessLogo {
+      clearBusinessLogo {
+        logoUrl
         updatedAt
       }
     }
@@ -107,6 +117,56 @@
     }
   }
 
+  // ---- Logo upload / remove ------------------------------------------------
+  let logoBusy = $state(false);
+  let fileInput = $state<HTMLInputElement | null>(null);
+
+  async function uploadLogo(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    logoBusy = true;
+    error = null;
+    info = null;
+    try {
+      const body = new FormData();
+      body.append("file", file, file.name);
+      const res = await fetch("/settings/logo", { method: "POST", body });
+      if (!res.ok) {
+        const msg = await res.text();
+        error = msg || `Upload failed (${res.status})`;
+        return;
+      }
+      info = "Logo updated.";
+      await View.fetch();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      logoBusy = false;
+      if (fileInput) fileInput.value = "";
+    }
+  }
+
+  async function removeLogo() {
+    if (!confirm("Remove the business logo?")) return;
+    logoBusy = true;
+    error = null;
+    info = null;
+    try {
+      const res = await ClearBusinessLogo.mutate(null);
+      if (res.errors?.length) {
+        error = res.errors[0].message;
+        return;
+      }
+      info = "Logo removed.";
+      await View.fetch();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      logoBusy = false;
+    }
+  }
+
   const fmtDateTime = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
 </script>
@@ -135,6 +195,19 @@
   {:else if !settings}
     <p class="text-sm text-muted-foreground">No settings record.</p>
   {:else}
+    <a
+      href="/settings/addresses"
+      class="flex items-center justify-between rounded-lg border bg-card p-4 hover:bg-accent"
+    >
+      <div>
+        <h2 class="text-sm font-semibold">Ship-to addresses</h2>
+        <p class="text-xs text-muted-foreground">
+          Your locations, printed as “Ship To” on purchase orders.
+        </p>
+      </div>
+      <span class="text-muted-foreground">→</span>
+    </a>
+
     <section class="space-y-3 rounded-lg border bg-card p-4">
       <h2 class="text-sm font-semibold">Identity</h2>
       <label class="block space-y-1">
@@ -150,6 +223,46 @@
           <span class="text-sm font-medium">Email</span>
           <Input bind:value={email} disabled={!canManage} />
         </label>
+      </div>
+
+      <div class="space-y-2">
+        <span class="text-sm font-medium">Logo</span>
+        <p class="text-xs text-muted-foreground">
+          Shown on purchase orders. PNG or JPG; transparent PNG looks best.
+        </p>
+        <div class="flex items-center gap-4">
+          <div
+            class="flex h-20 w-32 items-center justify-center rounded-md border bg-muted/30"
+          >
+            {#if settings.logoUrl}
+              <img
+                src={settings.logoUrl}
+                alt="Business logo"
+                class="max-h-full max-w-full object-contain"
+              />
+            {:else}
+              <span class="text-xs text-muted-foreground">No logo</span>
+            {/if}
+          </div>
+          <div class="flex flex-col gap-2">
+            <input
+              bind:this={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={!canManage || logoBusy}
+              onchange={uploadLogo}
+              class="text-sm"
+            />
+            {#if settings.logoUrl}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canManage || logoBusy}
+                onclick={removeLogo}>Remove logo</Button
+              >
+            {/if}
+          </div>
+        </div>
       </div>
     </section>
 

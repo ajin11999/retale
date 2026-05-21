@@ -6,7 +6,7 @@ import type { RequestHandler } from "./$types";
 // route authenticates with a Bearer token, which a plain browser <a href>
 // cannot carry — so the console fetches it server-side with the session
 // token and streams the PDF back under its own cookie-authenticated origin.
-export const GET: RequestHandler = async ({ params, cookies }) => {
+export const GET: RequestHandler = async ({ params, cookies, url }) => {
   const token = cookies.get("access_token");
   if (!token) throw error(401, "Not signed in");
 
@@ -16,7 +16,10 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
     "",
   );
 
-  const res = await fetch(`${apiBase}/purchases/${params.id}/po.pdf`, {
+  // Forward the price-visibility toggle (default hidden) to the API route.
+  const prices = url.searchParams.get("prices") === "1" ? "?prices=1" : "";
+
+  const res = await fetch(`${apiBase}/purchases/${params.id}/po.pdf${prices}`, {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!res.ok) {

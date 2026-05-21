@@ -5,6 +5,7 @@
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
+import { getAddress } from "../services/address-service.ts";
 import * as vendors from "../services/vendor-service.ts";
 
 export const typeDefs = /* GraphQL */ `
@@ -33,6 +34,10 @@ export const typeDefs = /* GraphQL */ `
     leadTimeDays: Int
     "Default send channel pre-selected on the send screen; null = no preference."
     preferredSendChannel: VendorSendChannel
+    "Our ship-to address printed on this vendor's POs; null falls back to the default address."
+    defaultShipToAddressId: ID
+    "The resolved ship-to address record, if one is set."
+    defaultShipToAddress: Address
     "Cached AP balance, minor units. Positive = we owe the vendor."
     balanceMinor: Float!
     archivedAt: String
@@ -69,6 +74,7 @@ export const typeDefs = /* GraphQL */ `
       notes: String
       leadTimeDays: Int
       preferredSendChannel: VendorSendChannel
+      defaultShipToAddressId: ID
     ): Vendor!
     updateVendor(
       id: ID!
@@ -80,6 +86,7 @@ export const typeDefs = /* GraphQL */ `
       notes: String
       leadTimeDays: Int
       preferredSendChannel: VendorSendChannel
+      defaultShipToAddressId: ID
     ): Vendor!
     setVendorArchived(id: ID!, archived: Boolean!): Vendor!
     "Hard delete — root-only. Refused if the vendor carries a non-zero AP balance."
@@ -112,6 +119,14 @@ export const resolvers = {
     createdAt: (v: { createdAt: Date | string }) => iso(v.createdAt),
     updatedAt: (v: { updatedAt: Date | string }) => iso(v.updatedAt),
     archivedAt: (v: { archivedAt: Date | string | null }) => iso(v.archivedAt),
+    defaultShipToAddress: async (v: { defaultShipToAddressId: string | null }) => {
+      if (!v.defaultShipToAddressId) return null;
+      try {
+        return await getAddress(v.defaultShipToAddressId);
+      } catch {
+        return null; // address since deleted — treat as unset
+      }
+    },
   },
   VendorLedgerEntry: {
     createdAt: (e: { createdAt: Date | string }) => iso(e.createdAt),

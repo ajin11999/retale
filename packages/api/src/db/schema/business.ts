@@ -16,6 +16,8 @@ export const businessSettings = mysqlTable("business_settings", {
   name: varchar({ length: 200 }).notNull().default(""),
   phone: varchar({ length: 50 }),
   email: varchar({ length: 200 }),
+  // Public Blob URL of the business logo (PNG), shown on the PO letterhead.
+  logoUrl: varchar({ length: 500 }),
   poGreeting: text(),
   poFooter: text(),
   ...timestamps,

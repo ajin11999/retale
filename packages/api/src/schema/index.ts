@@ -1,5 +1,6 @@
 import { createSchema } from "graphql-yoga";
 import type { GraphQLContext } from "../lib/context.ts";
+import * as addressesDomain from "./addresses.ts";
 import * as authDomain from "./auth.ts";
 import * as businessDomain from "./business.ts";
 import * as catalogDomain from "./catalog.ts";
@@ -70,6 +71,7 @@ export const schema = createSchema<GraphQLContext>({
     productImagesDomain.typeDefs,
     productAlertsDomain.typeDefs,
     businessDomain.typeDefs,
+    addressesDomain.typeDefs,
     reportsDomain.typeDefs,
     journalDomain.typeDefs,
   ],
@@ -97,6 +99,7 @@ export const schema = createSchema<GraphQLContext>({
     productImagesDomain.resolvers,
     productAlertsDomain.resolvers,
     businessDomain.resolvers,
+    addressesDomain.resolvers,
     reportsDomain.resolvers,
     journalDomain.resolvers,
   ],
