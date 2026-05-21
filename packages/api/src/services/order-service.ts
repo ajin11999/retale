@@ -115,6 +115,14 @@ export function listOrderItems(orderId: string): Promise<OrderItem[]> {
   return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
 }
 
+/** The live variant behind a line, if it still exists (null after a hard-delete). */
+export async function getLineVariant(variantId: string): Promise<Variant | null> {
+  const row = await db.query.productVariants.findFirst({
+    where: eq(productVariants.id, variantId),
+  });
+  return row ?? null;
+}
+
 export function listOrderPayments(orderId: string): Promise<OrderPayment[]> {
   return db.select().from(orderPayments).where(eq(orderPayments.orderId, orderId));
 }
@@ -682,11 +690,24 @@ async function loadOpenOrder(tx: Tx, id: string): Promise<Order> {
   return order;
 }
 
+/** Trim a free-text note; collapse whitespace-only to null; cap at 1000 chars. */
+function normalizeNote(note: string | null): string | null {
+  if (note == null) return null;
+  const trimmed = note.trim();
+  if (trimmed === "") return null;
+  if (trimmed.length > 1000) {
+    throw new OrderError("INVALID_INPUT", "note must be 1000 characters or fewer");
+  }
+  return trimmed;
+}
+
 /** Open an empty Console customer sale for a customer. */
 export async function createCustomerSale(input: {
   customerId: string;
+  note?: string | null;
   createdByUserId: string;
 }): Promise<Order> {
+  const note = normalizeNote(input.note ?? null);
   return db.transaction(async (tx) => {
     const customer = await tx.query.customers.findFirst({
       where: eq(customers.id, input.customerId),
@@ -699,9 +720,27 @@ export async function createCustomerSale(input: {
       customerId: customer.id,
       snapshotCustomerName: customer.name,
       totalMinor: 0,
+      note,
       createdByUserId: input.createdByUserId,
     });
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, orderId) });
+    return row as Order;
+  });
+}
+
+/**
+ * Set or clear the free-text note on an open Console sale. Pass `""` to clear
+ * the note; `null` is also accepted as "clear". The order must still be open.
+ */
+export async function updateCustomerSaleNote(input: {
+  orderId: string;
+  note: string | null;
+}): Promise<Order> {
+  const note = normalizeNote(input.note);
+  return db.transaction(async (tx) => {
+    const order = await loadOpenOrder(tx, input.orderId);
+    await tx.update(orders).set({ note }).where(eq(orders.id, order.id));
+    const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
     return row as Order;
   });
 }

@@ -6,6 +6,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -21,6 +22,7 @@
         closedAt
         cancelledAt
         cancellationReason
+        note
         returnOfOrderId
         createdAt
         items {
@@ -64,6 +66,9 @@
     }
   `);
 
+  // Each mutation re-selects the affected line's live variant totalQty so
+  // Houdini normalizes the ProductVariant in its cache — keeping the products
+  // screen's stock in sync without a manual refresh.
   const AddItem = graphql(`
     mutation ConsoleAddCustomerSaleItem(
       $orderId: ID!
@@ -71,6 +76,13 @@
     ) {
       addCustomerSaleItem(orderId: $orderId, item: $item) {
         id
+        items {
+          id
+          variant {
+            id
+            totalQty
+          }
+        }
       }
     }
   `);
@@ -91,6 +103,13 @@
         displayNameOverride: $displayNameOverride
       ) {
         id
+        items {
+          id
+          variant {
+            id
+            totalQty
+          }
+        }
       }
     }
   `);
@@ -99,6 +118,13 @@
     mutation ConsoleVoidCustomerSaleItem($orderItemId: ID!, $reason: String!) {
       voidCustomerSaleItem(orderItemId: $orderItemId, reason: $reason) {
         id
+        items {
+          id
+          variant {
+            id
+            totalQty
+          }
+        }
       }
     }
   `);
@@ -110,6 +136,15 @@
     ) {
       addCustomerSalePayment(orderId: $orderId, amountMinor: $amountMinor) {
         id
+      }
+    }
+  `);
+
+  const UpdateNote = graphql(`
+    mutation ConsoleUpdateCustomerSaleNote($orderId: ID!, $note: String) {
+      updateCustomerSaleNote(orderId: $orderId, note: $note) {
+        id
+        note
       }
     }
   `);
@@ -129,6 +164,13 @@
       cancelCustomerSale(orderId: $orderId, reason: $reason) {
         id
         status
+        items {
+          id
+          variant {
+            id
+            totalQty
+          }
+        }
       }
     }
   `);
@@ -391,6 +433,27 @@
     }
   }
 
+  // ---- Order note ----------------------------------------------------------
+  // Editable only while open. Synced from the order when a different order
+  // loads, so an in-progress edit survives a plain refetch.
+  let noteDraft = $state("");
+  let noteSyncedId = $state("");
+  $effect(() => {
+    if (order && order.id !== noteSyncedId) {
+      noteSyncedId = order.id;
+      noteDraft = order.note ?? "";
+    }
+  });
+  const noteDirty = $derived(!!order && noteDraft.trim() !== (order.note ?? ""));
+
+  async function saveNote() {
+    if (!order) return;
+    const ok = await run(() =>
+      UpdateNote.mutate({ orderId: order.id, note: noteDraft.trim() }),
+    );
+    if (ok) await refresh();
+  }
+
   // ---- Payment entry -------------------------------------------------------
   let payAmount = $state<string>("");
 
@@ -505,6 +568,33 @@
 
     {#if error}
       <p class="text-sm text-destructive">{error}</p>
+    {/if}
+
+    <!-- Order note -->
+    {#if isOpen}
+      <div class="space-y-2 rounded-lg border bg-card p-4">
+        <h2 class="text-sm font-semibold">Note</h2>
+        <Textarea
+          bind:value={noteDraft}
+          disabled={busy || !canEdit}
+          placeholder="Customer instructions, remarks…"
+          class="h-20 resize-none"
+        />
+        <div class="flex justify-end">
+          <Button
+            size="sm"
+            disabled={busy || !canEdit || !noteDirty}
+            onclick={saveNote}
+          >
+            Save note
+          </Button>
+        </div>
+      </div>
+    {:else if order.note}
+      <div class="space-y-1 rounded-lg border bg-card p-4">
+        <h2 class="text-sm font-semibold">Note</h2>
+        <p class="whitespace-pre-wrap text-sm text-muted-foreground">{order.note}</p>
+      </div>
     {/if}
 
     {#if isOpen}

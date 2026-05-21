@@ -57,15 +57,22 @@
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
   const canCreate = $derived(has("purchase.create"));
 
-  // ---- Status filter -------------------------------------------------------
+  // ---- Status + vendor-name filter -----------------------------------------
   const STATUSES = ["all", "open", "complete", "cancelled"];
   let statusFilter = $state("all");
+  let search = $state("");
 
-  const rows = $derived(
-    statusFilter === "all"
-      ? purchases
-      : purchases.filter((p) => p.status === statusFilter),
-  );
+  const rows = $derived.by(() => {
+    const byStatus =
+      statusFilter === "all"
+        ? purchases
+        : purchases.filter((p) => p.status === statusFilter);
+    const q = search.trim().toLowerCase();
+    if (!q) return byStatus;
+    return byStatus.filter((p) =>
+      (p.snapshotVendorName ?? "").toLowerCase().includes(q),
+    );
+  });
 
   const statusClass = (s: string) =>
     s === "open"
@@ -130,6 +137,13 @@
   <div class="flex items-center justify-between">
     <h1 class="text-xl font-semibold">Purchases</h1>
     <div class="flex items-center gap-3">
+      <div class="w-56">
+        <Input
+          type="search"
+          placeholder="Search vendor…"
+          bind:value={search}
+        />
+      </div>
       <div class="w-40">
         <Select bind:value={statusFilter}>
           {#each STATUSES as s (s)}
@@ -238,7 +252,9 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
-                No purchases{statusFilter === "all" ? "" : ` (${statusFilter})`}.
+                {search.trim()
+                  ? "No purchases match."
+                  : `No purchases${statusFilter === "all" ? "" : ` (${statusFilter})`}.`}
               </td>
             </tr>
           {/if}

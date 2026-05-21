@@ -168,8 +168,8 @@
   `);
 
   const CreateCustomerSale = graphql(`
-    mutation ConsoleCreateCustomerSale($customerId: ID!) {
-      createCustomerSale(customerId: $customerId) {
+    mutation ConsoleCreateCustomerSale($customerId: ID!, $note: String) {
+      createCustomerSale(customerId: $customerId, note: $note) {
         id
       }
     }
@@ -211,12 +211,17 @@
   const canViewLedger = $derived(has("report.ar_aging.view"));
   const canCreateSale = $derived(has("order.create_customer_sale"));
 
+  let saleNote = $state("");
+
   async function startSale() {
     if (!customer) return;
     busy = true;
     feedback = null;
     try {
-      const res = await CreateCustomerSale.mutate({ customerId: customer.id });
+      const res = await CreateCustomerSale.mutate({
+        customerId: customer.id,
+        note: saleNote.trim() || null,
+      });
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
         return;
@@ -479,12 +484,14 @@
         >
           {customer.archivedAt ? "Archived" : "Active"}
         </Badge>
-        {#if !customer.archivedAt}
-          <Button
-            size="sm"
-            disabled={busy || !canCreateSale}
-            onclick={startSale}
-          >
+        {#if !customer.archivedAt && canCreateSale}
+          <Input
+            bind:value={saleNote}
+            placeholder="Sale note (optional)"
+            class="w-52"
+            disabled={busy}
+          />
+          <Button size="sm" disabled={busy} onclick={startSale}>
             New sale
           </Button>
         {/if}

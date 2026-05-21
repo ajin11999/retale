@@ -23,6 +23,8 @@ export const typeDefs = /* GraphQL */ `
     closedAt: String
     cancelledAt: String
     cancellationReason: String
+    "Free-text note on a Console customer sale (editable while open)."
+    note: String
     returnOfOrderId: ID
     createdAt: String!
     items: [OrderItem!]!
@@ -60,6 +62,8 @@ export const typeDefs = /* GraphQL */ `
     attributionAmountMinor: Float!
     voidedAt: String
     voidReason: String
+    "The live variant behind this line (null after a hard-delete). Carries current totalQty."
+    variant: ProductVariant
   }
 
   type OrderPayment {
@@ -110,7 +114,12 @@ export const typeDefs = /* GraphQL */ `
     ): Order!
 
     "Open an empty Console customer sale (stateful, root-only)."
-    createCustomerSale(customerId: ID!): Order!
+    createCustomerSale(customerId: ID!, note: String): Order!
+    """
+    Set or clear the free-text note on an open Console sale. Pass an empty
+    string to clear; null leaves it unchanged.
+    """
+    updateCustomerSaleNote(orderId: ID!, note: String): Order!
     "Add a line to an open Console sale."
     addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
     """
@@ -174,6 +183,8 @@ export const resolvers = {
       i.qty * i.snapshotPriceMinor - i.discountMinor,
     displayName: (i: ItemRow) => i.snapshotPublicName ?? i.snapshotProductName,
     voidedAt: (i: { voidedAt: Date | string | null }) => iso(i.voidedAt),
+    variant: (i: { variantId: string | null }) =>
+      i.variantId ? orders.getLineVariant(i.variantId) : null,
   },
   OrderPayment: {
     createdAt: (p: { createdAt: Date | string }) => iso(p.createdAt),
@@ -231,14 +242,30 @@ export const resolvers = {
 
     createCustomerSale: async (
       _: unknown,
-      args: { customerId: string },
+      args: { customerId: string; note?: string | null },
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "order.create_customer_sale");
       try {
         return await orders.createCustomerSale({
           customerId: args.customerId,
+          note: args.note ?? null,
           createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    updateCustomerSaleNote: async (
+      _: unknown,
+      args: { orderId: string; note?: string | null },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "order.edit_customer_sale");
+      try {
+        return await orders.updateCustomerSaleNote({
+          orderId: args.orderId,
+          note: args.note ?? null,
         });
       } catch (e) {
         asGraphQLError(e);

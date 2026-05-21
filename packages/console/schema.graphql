@@ -306,7 +306,13 @@ type Mutation {
   createPosOrder(posSessionId: ID!, customerId: ID, items: [PosOrderItemInput!]!, payments: [PosOrderPaymentInput!]!): Order!
 
   """Open an empty Console customer sale (stateful, root-only)."""
-  createCustomerSale(customerId: ID!): Order!
+  createCustomerSale(customerId: ID!, note: String): Order!
+
+  """
+  Set or clear the free-text note on an open Console sale. Pass an empty
+  string to clear; null leaves it unchanged.
+  """
+  updateCustomerSaleNote(orderId: ID!, note: String): Order!
 
   """Add a line to an open Console sale."""
   addCustomerSaleItem(orderId: ID!, item: PosOrderItemInput!): Order!
@@ -1025,6 +1031,9 @@ type Order {
   closedAt: String
   cancelledAt: String
   cancellationReason: String
+
+  """Free-text note on a Console customer sale (editable while open)."""
+  note: String
   returnOfOrderId: ID
   createdAt: String!
   items: [OrderItem!]!
@@ -1068,6 +1077,11 @@ type OrderItem {
   attributionAmountMinor: Float!
   voidedAt: String
   voidReason: String
+
+  """
+  The live variant behind this line (null after a hard-delete). Carries current totalQty.
+  """
+  variant: ProductVariant
 }
 
 type OrderPayment {

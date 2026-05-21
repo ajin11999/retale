@@ -52,6 +52,9 @@ export const orders = mysqlTable(
     cancelledAt: timestamp(),
     cancelledByUserId: ulidRef().references(() => users.id),
     cancellationReason: varchar({ length: 255 }),
+    // Free-text note on a Console customer sale (e.g. customer instructions,
+    // mechanic remarks). Editable only while the order is open. Null = no note.
+    note: varchar({ length: 1000 }),
     returnOfOrderId: ulidRef().references((): AnyMySqlColumn => orders.id, {
       onDelete: "set null",
     }),

@@ -151,6 +151,25 @@
     return out;
   });
 
+  // ---- Search --------------------------------------------------------------
+  // Match by name; keep each match's ancestors so the hierarchy still reads.
+  let search = $state("");
+  const visibleTree = $derived.by<Node[]>(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tree;
+    const byId = new Map(tree.map((n) => [n.id, n]));
+    const visible = new Set<string>();
+    for (const n of tree) {
+      if (!n.name.toLowerCase().includes(q)) continue;
+      let cur: Node | undefined = n;
+      while (cur && !visible.has(cur.id)) {
+        visible.add(cur.id);
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+    }
+    return tree.filter((n) => visible.has(n.id));
+  });
+
   // ---- Editor --------------------------------------------------------------
   interface CategoryDraft {
     id: string | null; // null → a new category
@@ -277,11 +296,20 @@
 <svelte:head><title>Categories · Retale Console</title></svelte:head>
 
 <div class="space-y-4">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between gap-3">
     <h1 class="text-xl font-semibold">Categories</h1>
-    <Button size="sm" disabled={busy || !canCreate} onclick={newCategory}>
-      New category
-    </Button>
+    <div class="flex items-center gap-2">
+      <div class="w-64">
+        <Input
+          type="search"
+          placeholder="Search categories…"
+          bind:value={search}
+        />
+      </div>
+      <Button size="sm" disabled={busy || !canCreate} onclick={newCategory}>
+        New category
+      </Button>
+    </div>
   </div>
 
   {#if feedback}
@@ -316,7 +344,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each tree as n (n.id)}
+          {#each visibleTree as n (n.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <span style:padding-left={`${n.depth * 1.25}rem`}>
@@ -359,10 +387,10 @@
               </td>
             </tr>
           {/each}
-          {#if tree.length === 0}
+          {#if visibleTree.length === 0}
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                No categories yet.
+                {search.trim() ? "No categories match." : "No categories yet."}
               </td>
             </tr>
           {/if}

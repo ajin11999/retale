@@ -2,14 +2,6 @@
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import {
-    getCoreRowModel,
-    getFilteredRowModel,
-    getPaginationRowModel,
-    getSortedRowModel,
-    type ColumnDef,
-  } from "@tanstack/table-core";
-  import { createSvelteTable } from "$lib/data-table.svelte";
   import { formatMoney } from "$lib/utils";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -145,49 +137,111 @@
     archived: boolean;
   }
 
-  const rows = $derived.by<Row[]>(() => {
+  // Filtering/sorting/pagination run in plain runes here rather than through a
+  // TanStack table. The adapter wraps its options/state in a Proxy that
+  // TanStack reads thousands of times while rebuilding row models on every
+  // change; with a non-trivial product list that compounds into a visible
+  // freeze per query. Plain derivations keep it to one cheap pass.
+  //
+  // `searchInput` tracks the field; `search` (debounced 0.5s) drives filtering,
+  // so we re-filter/sort at most once per pause, not per keystroke.
+  let searchInput = $state("");
+  let search = $state("");
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onSearchInput(value: string) {
+    searchInput = value;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      search = value.trim();
+      // Filtered set shrinks — jump back so results aren't on a stale page.
+      pageIndex = 0;
+    }, 500);
+  }
+
+  // Map products → rows once per data change (independent of the search term),
+  // with a precomputed lowercase haystack so each query is a cheap substring
+  // scan rather than a full re-map + lowercasing pass.
+  const allRows = $derived.by<(Row & { haystack: string })[]>(() => {
     const result = $ProductList?.data;
     if (!result) return [];
     const catName = new Map(result.categories.map((c) => [c.id, c.name]));
     return result.products.map((p) => {
       const prices = p.variants.map((v) => v.priceMinor);
+      const category = p.categoryId
+        ? (catName.get(p.categoryId) ?? "Unknown")
+        : "Uncategorized";
       return {
         id: p.id,
         name: p.name,
         kind: p.kind,
-        category: p.categoryId
-          ? (catName.get(p.categoryId) ?? "Unknown")
-          : "Uncategorized",
+        category,
         variants: p.variants.length,
         minPrice: prices.length ? Math.min(...prices) : 0,
         maxPrice: prices.length ? Math.max(...prices) : 0,
         stock: p.variants.reduce((sum, v) => sum + v.totalQty, 0),
         archived: p.archivedAt != null,
+        haystack: `${p.name} ${category} ${p.kind}`.toLowerCase(),
       };
     });
   });
 
-  const columns: ColumnDef<Row>[] = [
-    { accessorKey: "name", header: "Product" },
-    { accessorKey: "category", header: "Category" },
-    { accessorKey: "kind", header: "Kind" },
-    { accessorKey: "variants", header: "Variants" },
-    { accessorKey: "minPrice", id: "price", header: "Price" },
-    { accessorKey: "stock", header: "Stock" },
-    { accessorKey: "archived", id: "status", header: "Status" },
+  const rows = $derived.by<Row[]>(() => {
+    const q = search.toLowerCase();
+    if (!q) return allRows;
+    return allRows.filter((r) => r.haystack.includes(q));
+  });
+
+  type SortKey = "name" | "category" | "kind" | "variants" | "minPrice" | "stock" | "archived";
+  const COLUMNS: { key: SortKey; id: string; header: string }[] = [
+    { key: "name", id: "name", header: "Product" },
+    { key: "category", id: "category", header: "Category" },
+    { key: "kind", id: "kind", header: "Kind" },
+    { key: "variants", id: "variants", header: "Variants" },
+    { key: "minPrice", id: "price", header: "Price" },
+    { key: "stock", id: "stock", header: "Stock" },
+    { key: "archived", id: "status", header: "Status" },
   ];
 
-  const table = createSvelteTable<Row>({
-    get data() {
-      return rows;
-    },
-    columns,
-    initialState: { pagination: { pageSize: 15 } },
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+  const PAGE_SIZE = 15;
+  let sortKey = $state<SortKey>("name");
+  let sortDir = $state<"asc" | "desc">("asc");
+  let pageIndex = $state(0);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      sortDir = "asc";
+    }
+  }
+
+  const sorted = $derived.by<Row[]>(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === "number" && typeof bv === "number") {
+        return (av - bv) * dir;
+      }
+      return String(av).localeCompare(String(bv)) * dir;
+    });
   });
+
+  const pageCount = $derived(Math.max(Math.ceil(sorted.length / PAGE_SIZE), 1));
+  // Clamp so a stale pageIndex (after the result set shrinks) still resolves.
+  const currentPage = $derived(Math.min(pageIndex, pageCount - 1));
+  const pageRows = $derived(
+    sorted.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE),
+  );
+
+  function prevPage() {
+    pageIndex = Math.max(currentPage - 1, 0);
+  }
+  function nextPage() {
+    pageIndex = Math.min(currentPage + 1, pageCount - 1);
+  }
 
   function priceLabel(r: Row): string {
     if (r.variants === 0) return "—";
@@ -196,8 +250,8 @@
       : `${formatMoney(r.minPrice)} – ${formatMoney(r.maxPrice)}`;
   }
 
-  const sortGlyph = (dir: false | "asc" | "desc") =>
-    dir === "asc" ? " ↑" : dir === "desc" ? " ↓" : "";
+  const sortGlyph = (key: SortKey) =>
+    sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 </script>
 
 <svelte:head><title>Products · Retale Console</title></svelte:head>
@@ -210,9 +264,8 @@
         <Input
           type="search"
           placeholder="Search products…"
-          value={(table.getState().globalFilter as string) ?? ""}
-          oninput={(e) =>
-            table.setGlobalFilter(e.currentTarget.value)}
+          value={searchInput}
+          oninput={(e) => onSearchInput(e.currentTarget.value)}
         />
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={newProduct}>
@@ -304,56 +357,50 @@
     <div class="overflow-hidden rounded-lg border bg-card">
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-muted-foreground">
-          {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
-            <tr>
-              {#each headerGroup.headers as header (header.id)}
-                <th class="px-4 py-2 text-left font-medium">
-                  <button
-                    class="inline-flex items-center hover:text-foreground"
-                    onclick={header.column.getToggleSortingHandler()}
-                  >
-                    {header.column.columnDef.header}{sortGlyph(
-                      header.column.getIsSorted(),
-                    )}
-                  </button>
-                </th>
-              {/each}
-            </tr>
-          {/each}
+          <tr>
+            {#each COLUMNS as col (col.id)}
+              <th class="px-4 py-2 text-left font-medium">
+                <button
+                  class="inline-flex items-center hover:text-foreground"
+                  onclick={() => toggleSort(col.key)}
+                >
+                  {col.header}{sortGlyph(col.key)}
+                </button>
+              </th>
+            {/each}
+          </tr>
         </thead>
         <tbody>
-          {#each table.getRowModel().rows as row (row.id)}
+          {#each pageRows as row (row.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
-              {#each row.getVisibleCells() as cell (cell.id)}
-                <td class="px-4 py-2">
-                  {#if cell.column.id === "name"}
-                    <a
-                      href={`/products/${row.original.id}`}
-                      class="font-medium text-primary hover:underline"
-                    >
-                      {row.original.name}
-                    </a>
-                  {:else if cell.column.id === "price"}
-                    {priceLabel(row.original)}
-                  {:else if cell.column.id === "status"}
-                    <Badge
-                      class={row.original.archived
-                        ? "bg-muted text-muted-foreground"
-                        : "bg-emerald-100 text-emerald-700"}
-                    >
-                      {row.original.archived ? "Archived" : "Active"}
-                    </Badge>
-                  {:else}
-                    {cell.getValue()}
-                  {/if}
-                </td>
-              {/each}
+              <td class="px-4 py-2">
+                <a
+                  href={`/products/${row.id}`}
+                  class="font-medium text-primary hover:underline"
+                >
+                  {row.name}
+                </a>
+              </td>
+              <td class="px-4 py-2">{row.category}</td>
+              <td class="px-4 py-2">{row.kind}</td>
+              <td class="px-4 py-2">{row.variants}</td>
+              <td class="px-4 py-2">{priceLabel(row)}</td>
+              <td class="px-4 py-2">{row.stock}</td>
+              <td class="px-4 py-2">
+                <Badge
+                  class={row.archived
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-emerald-100 text-emerald-700"}
+                >
+                  {row.archived ? "Archived" : "Active"}
+                </Badge>
+              </td>
             </tr>
           {/each}
-          {#if table.getRowModel().rows.length === 0}
+          {#if pageRows.length === 0}
             <tr>
               <td
-                colspan={columns.length}
+                colspan={COLUMNS.length}
                 class="px-4 py-10 text-center text-muted-foreground"
               >
                 No products match.
@@ -366,29 +413,25 @@
 
     <div class="flex items-center justify-between text-sm text-muted-foreground">
       <span>
-        {table.getFilteredRowModel().rows.length} product{table.getFilteredRowModel()
-          .rows.length === 1
-          ? ""
-          : "s"}
+        {sorted.length} product{sorted.length === 1 ? "" : "s"}
       </span>
       <div class="flex items-center gap-2">
         <Button
           variant="outline"
           size="sm"
-          disabled={!table.getCanPreviousPage()}
-          onclick={() => table.previousPage()}
+          disabled={currentPage <= 0}
+          onclick={prevPage}
         >
           Previous
         </Button>
         <span>
-          Page {table.getState().pagination.pageIndex + 1} of
-          {Math.max(table.getPageCount(), 1)}
+          Page {currentPage + 1} of {pageCount}
         </span>
         <Button
           variant="outline"
           size="sm"
-          disabled={!table.getCanNextPage()}
-          onclick={() => table.nextPage()}
+          disabled={currentPage >= pageCount - 1}
+          onclick={nextPage}
         >
           Next
         </Button>

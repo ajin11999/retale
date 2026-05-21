@@ -57,9 +57,15 @@
   type Account = (typeof accounts)[number];
   type Node = { acc: Account; children: Node[] };
 
+  // Archived accounts are hidden by default; toggled by the header checkbox.
+  let showArchived = $state(false);
+
   const tree = $derived.by(() => {
+    const visible = showArchived
+      ? accounts
+      : accounts.filter((a) => !a.archivedAt);
     const byParent = new Map<string | null, Account[]>();
-    for (const a of accounts) {
+    for (const a of visible) {
       const key = a.parentId ?? null;
       const list = byParent.get(key) ?? [];
       list.push(a);
@@ -78,6 +84,28 @@
         children: build(acc.id),
       }));
     return build(null);
+  });
+
+  // ---- Search --------------------------------------------------------------
+  // Match by name, code, or account category; a parent is kept if any
+  // descendant matches, so the hierarchy still reads.
+  let search = $state("");
+  const filteredTree = $derived.by<Node[]>(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tree;
+    const matches = (a: Account) =>
+      a.name.toLowerCase().includes(q) ||
+      (a.code?.toLowerCase().includes(q) ?? false) ||
+      a.accountCategory.toLowerCase().includes(q);
+    const filter = (nodes: Node[]): Node[] => {
+      const out: Node[] = [];
+      for (const n of nodes) {
+        const kids = filter(n.children);
+        if (matches(n.acc) || kids.length) out.push({ acc: n.acc, children: kids });
+      }
+      return out;
+    };
+    return filter(tree);
   });
 
   // ---- New form ------------------------------------------------------------
@@ -131,15 +159,28 @@
 <svelte:head><title>Tracking accounts · Retale Console</title></svelte:head>
 
 <div class="space-y-4">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between gap-3">
     <h1 class="text-xl font-semibold">Tracking accounts</h1>
-    <Button
-      size="sm"
-      disabled={busy || !canCreate}
-      onclick={() => (showNew = true)}
-    >
-      New account
-    </Button>
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={showArchived} class="size-4" />
+        Show archived
+      </label>
+      <div class="w-64">
+        <Input
+          type="search"
+          placeholder="Search accounts…"
+          bind:value={search}
+        />
+      </div>
+      <Button
+        size="sm"
+        disabled={busy || !canCreate}
+        onclick={() => (showNew = true)}
+      >
+        New account
+      </Button>
+    </div>
   </div>
 
   {#if error}
@@ -206,9 +247,16 @@
           </tr>
         </thead>
         <tbody>
-          {#each tree as node (node.acc.id)}
+          {#each filteredTree as node (node.acc.id)}
             {@render row(node, 0)}
           {/each}
+          {#if filteredTree.length === 0}
+            <tr>
+              <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
+                No accounts match.
+              </td>
+            </tr>
+          {/if}
         </tbody>
       </table>
     </div>
