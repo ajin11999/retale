@@ -1,10 +1,12 @@
 <script lang="ts">
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -590,14 +592,13 @@
                   {v.sku}{v.label ? ` · ${v.label}` : ""}
                 </span>
               </span>
-              <button
-                type="button"
-                class="text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+              <IconButton
+                icon={Trash2}
+                label="Remove link"
+                variant="destructive"
                 disabled={busy || !canEdit}
                 onclick={() => removeVariantLink(v.variantId)}
-              >
-                Remove
-              </button>
+              />
             </li>
           {/each}
         </ul>

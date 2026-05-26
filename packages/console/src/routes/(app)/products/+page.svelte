@@ -129,6 +129,7 @@
     id: string;
     name: string;
     kind: string;
+    categoryId: string | null;
     category: string;
     variants: number;
     minPrice: number;
@@ -175,6 +176,7 @@
         id: p.id,
         name: p.name,
         kind: p.kind,
+        categoryId: p.categoryId ?? null,
         category,
         variants: p.variants.length,
         minPrice: prices.length ? Math.min(...prices) : 0,
@@ -186,10 +188,27 @@
     });
   });
 
+  // Optional category filter, driven by `?category=<id>` (set from the
+  // Categories screen's product-count links). The category's name, looked up
+  // for the active-filter banner.
+  const categoryFilter = $derived(page.url.searchParams.get("category"));
+  const categoryFilterName = $derived(
+    categoryFilter
+      ? ($ProductList?.data?.categories.find((c) => c.id === categoryFilter)
+          ?.name ?? "this category")
+      : null,
+  );
+
+  function clearCategoryFilter() {
+    goto("/products", { keepFocus: true, noScroll: true });
+  }
+
   const rows = $derived.by<Row[]>(() => {
+    let base = allRows;
+    if (categoryFilter) base = base.filter((r) => r.categoryId === categoryFilter);
     const q = search.toLowerCase();
-    if (!q) return allRows;
-    return allRows.filter((r) => r.haystack.includes(q));
+    if (!q) return base;
+    return base.filter((r) => r.haystack.includes(q));
   });
 
   type SortKey = "name" | "category" | "kind" | "variants" | "minPrice" | "stock" | "archived";
@@ -278,6 +297,20 @@
     <p class="text-sm {feedback.ok ? 'text-emerald-700' : 'text-destructive'}">
       {feedback.text}
     </p>
+  {/if}
+
+  {#if categoryFilter}
+    <div
+      class="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm"
+    >
+      <span>
+        Showing products in <span class="font-medium">{categoryFilterName}</span>
+      </span>
+      <button
+        class="text-xs text-primary hover:underline"
+        onclick={clearCategoryFilter}>Clear filter</button
+      >
+    </div>
   {/if}
 
   {#if draft}

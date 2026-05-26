@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { Archive, ArchiveRestore, Pencil, Trash2 } from "@lucide/svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -268,7 +270,7 @@
     );
     if (ok) {
       draft = null;
-      await LocationList.fetch();
+      await LocationList.fetch({ policy: CachePolicy.NetworkOnly });
     }
   }
 
@@ -276,7 +278,7 @@
     const ok = await run("Location", () =>
       SetLocationArchived.mutate({ id: n.id, archived: !n.archived }),
     );
-    if (ok) await LocationList.fetch();
+    if (ok) await LocationList.fetch({ policy: CachePolicy.NetworkOnly });
   }
 
   async function hardDelete(n: Node) {
@@ -292,7 +294,7 @@
     );
     if (ok) {
       if (draft?.id === n.id) draft = null;
-      await LocationList.fetch();
+      await LocationList.fetch({ policy: CachePolicy.NetworkOnly });
     }
   }
 </script>
@@ -328,77 +330,6 @@
     >
       You have read-only access to locations — editing is disabled.
     </p>
-  {/if}
-
-  {#if $LocationList.fetching && locations.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
-  {:else if $LocationList.errors?.length}
-    <p class="text-sm text-destructive">{$LocationList.errors[0].message}</p>
-  {:else}
-    <div class="overflow-hidden rounded-lg border bg-card">
-      <table class="w-full text-sm">
-        <thead class="border-b bg-muted/50 text-left text-muted-foreground">
-          <tr>
-            <th class="px-4 py-2 font-medium">Location</th>
-            <th class="px-4 py-2 font-medium">Code</th>
-            <th class="px-4 py-2 font-medium">Status</th>
-            <th class="px-4 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visibleTree as n (n.id)}
-            <tr class="border-b last:border-0 hover:bg-muted/40">
-              <td class="px-4 py-2">
-                <span style:padding-left={`${n.depth * 1.25}rem`}>
-                  {n.depth > 0 ? "└ " : ""}<span class="font-medium"
-                    >{n.name}</span
-                  >
-                </span>
-              </td>
-              <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
-                {n.code ?? "—"}
-              </td>
-              <td class="px-4 py-2">
-                <Badge
-                  class={n.archived
-                    ? "bg-muted text-muted-foreground"
-                    : "bg-emerald-100 text-emerald-700"}
-                >
-                  {n.archived ? "Archived" : "Active"}
-                </Badge>
-              </td>
-              <td class="px-4 py-2 text-right whitespace-nowrap">
-                <button
-                  class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !canEdit}
-                  onclick={() => editLocation(n)}>Edit</button
-                >
-                <button
-                  class="ml-2 text-xs text-muted-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !canArchive}
-                  onclick={() => toggleArchived(n)}
-                  >{n.archived ? "Restore" : "Archive"}</button
-                >
-                {#if canHardDelete}
-                  <button
-                    class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={busy}
-                    onclick={() => hardDelete(n)}>Delete</button
-                  >
-                {/if}
-              </td>
-            </tr>
-          {/each}
-          {#if visibleTree.length === 0}
-            <tr>
-              <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No locations match." : "No locations yet."}
-              </td>
-            </tr>
-          {/if}
-        </tbody>
-      </table>
-    </div>
   {/if}
 
   {#if draft}
@@ -456,6 +387,83 @@
           {draft.id ? "Save location" : "Create location"}
         </Button>
       </div>
+    </div>
+  {/if}
+
+  {#if $LocationList.fetching && locations.length === 0}
+    <p class="text-sm text-muted-foreground">Loading…</p>
+  {:else if $LocationList.errors?.length}
+    <p class="text-sm text-destructive">{$LocationList.errors[0].message}</p>
+  {:else}
+    <div class="overflow-hidden rounded-lg border bg-card">
+      <table class="w-full text-sm">
+        <thead class="border-b bg-muted/50 text-left text-muted-foreground">
+          <tr>
+            <th class="px-4 py-2 font-medium">Location</th>
+            <th class="px-4 py-2 font-medium">Code</th>
+            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each visibleTree as n (n.id)}
+            <tr class="border-b last:border-0 hover:bg-muted/40">
+              <td class="px-4 py-2">
+                <span style:padding-left={`${n.depth * 1.25}rem`}>
+                  {n.depth > 0 ? "└ " : ""}<span class="font-medium"
+                    >{n.name}</span
+                  >
+                </span>
+              </td>
+              <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
+                {n.code ?? "—"}
+              </td>
+              <td class="px-4 py-2">
+                <Badge
+                  class={n.archived
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-emerald-100 text-emerald-700"}
+                >
+                  {n.archived ? "Archived" : "Active"}
+                </Badge>
+              </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <span class="inline-flex items-center gap-0.5">
+                  <IconButton
+                    icon={Pencil}
+                    label="Edit"
+                    variant="primary"
+                    disabled={busy || !canEdit}
+                    onclick={() => editLocation(n)}
+                  />
+                  <IconButton
+                    icon={n.archived ? ArchiveRestore : Archive}
+                    label={n.archived ? "Restore" : "Archive"}
+                    disabled={busy || !canArchive}
+                    onclick={() => toggleArchived(n)}
+                  />
+                  {#if canHardDelete}
+                    <IconButton
+                      icon={Trash2}
+                      label="Delete"
+                      variant="destructive"
+                      disabled={busy}
+                      onclick={() => hardDelete(n)}
+                    />
+                  {/if}
+                </span>
+              </td>
+            </tr>
+          {/each}
+          {#if visibleTree.length === 0}
+            <tr>
+              <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
+                {search.trim() ? "No locations match." : "No locations yet."}
+              </td>
+            </tr>
+          {/if}
+        </tbody>
+      </table>
     </div>
   {/if}
 </div>

@@ -1,10 +1,12 @@
 <script lang="ts">
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { Ban, Pencil } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -792,24 +794,24 @@
               {#if isOpen}
                 <td class="px-4 py-2 text-right whitespace-nowrap">
                   {#if !i.voidedAt}
+                    <span class="inline-flex items-center gap-0.5">
                     {#if !i.snapshotBundleName}
-                      <button
-                        type="button"
-                        class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                      <IconButton
+                        icon={Pencil}
+                        label="Edit line"
+                        variant="primary"
                         disabled={busy || !canEdit}
                         onclick={() => startLineEdit(i)}
-                      >
-                        Edit
-                      </button>
+                      />
                     {/if}
-                    <button
-                      type="button"
-                      class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                    <IconButton
+                      icon={Ban}
+                      label="Void line"
+                      variant="destructive"
                       disabled={busy || !canVoid}
                       onclick={() => voidLine(i.id)}
-                    >
-                      Void
-                    </button>
+                    />
+                    </span>
                   {/if}
                 </td>
               {/if}

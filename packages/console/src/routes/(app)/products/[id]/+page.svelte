@@ -2,10 +2,12 @@
   import { graphql } from "$houdini";
   import { page } from "$app/state";
   import { marked } from "marked";
+  import { Pencil, SlidersHorizontal, Trash2 } from "@lucide/svelte";
   import { formatMoney } from "$lib/utils";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
@@ -949,16 +951,22 @@
               <td class="py-1.5 text-right">{formatMoney(v.costMinor)}</td>
               <td class="py-1.5 text-right">{v.totalQty}</td>
               <td class="py-1.5 text-right">
-                <button
-                  class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                <span class="inline-flex items-center gap-0.5">
+                <IconButton
+                  icon={Pencil}
+                  label="Edit variant"
+                  variant="primary"
                   disabled={!canEdit}
-                  onclick={() => editVariant(v)}>Edit</button
-                >
-                <button
-                  class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                  onclick={() => editVariant(v)}
+                />
+                <IconButton
+                  icon={Trash2}
+                  label="Delete variant"
+                  variant="destructive"
                   disabled={!canEdit}
-                  onclick={() => deleteVariant(v.id)}>Delete</button
-                >
+                  onclick={() => deleteVariant(v.id)}
+                />
+                </span>
               </td>
             </tr>
           {/each}
@@ -1070,11 +1078,13 @@
                 >({v.totalQty} total)</span
               >
             </span>
-            <button
-              class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+            <IconButton
+              icon={SlidersHorizontal}
+              label="Adjust stock"
+              variant="primary"
               disabled={busy || !canAdjustStock}
-              onclick={() => adjustVariantStock(v)}>Adjust stock</button
-            >
+              onclick={() => adjustVariantStock(v)}
+            />
           </div>
           <table class="w-full text-sm">
             <tbody>

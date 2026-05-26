@@ -2,9 +2,11 @@
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
@@ -222,11 +224,13 @@
               {/each}
             </Select>
             <Input type="number" bind:value={row.qty} class="w-24" />
-            <button
-              class="text-xs text-destructive hover:underline disabled:opacity-40"
+            <IconButton
+              icon={Trash2}
+              label="Remove row"
+              variant="destructive"
               disabled={draft.items.length === 1}
-              onclick={() => removeRow(i)}>Remove</button
-            >
+              onclick={() => removeRow(i)}
+            />
           </div>
         {/each}
         <Button variant="outline" size="sm" onclick={addRow}>Add line</Button>

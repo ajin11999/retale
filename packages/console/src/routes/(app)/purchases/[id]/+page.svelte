@@ -4,8 +4,18 @@
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
+  import {
+    ArrowDown,
+    ArrowUp,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Pencil,
+    Trash2,
+  } from "@lucide/svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
@@ -123,6 +133,15 @@
     }
   `);
 
+  const UpdateSection = graphql(`
+    mutation ConsoleUpdatePurchaseSection($id: ID!, $name: String!) {
+      updatePurchaseSection(id: $id, name: $name) {
+        id
+        name
+      }
+    }
+  `);
+
   const DeleteSection = graphql(`
     mutation ConsoleDeletePurchaseSection($id: ID!) {
       deletePurchaseSection(id: $id)
@@ -176,6 +195,22 @@
   const DeleteItem = graphql(`
     mutation ConsoleDeletePurchaseItem($id: ID!) {
       deletePurchaseItem(id: $id)
+    }
+  `);
+
+  const ReorderSections = graphql(`
+    mutation ConsoleReorderPurchaseSections($purchaseId: ID!, $orderedIds: [ID!]!) {
+      reorderPurchaseSections(purchaseId: $purchaseId, orderedIds: $orderedIds) {
+        id
+      }
+    }
+  `);
+
+  const ReorderItems = graphql(`
+    mutation ConsoleReorderPurchaseItems($purchaseId: ID!, $orderedIds: [ID!]!) {
+      reorderPurchaseItems(purchaseId: $purchaseId, orderedIds: $orderedIds) {
+        id
+      }
     }
   `);
 
@@ -386,18 +421,36 @@
   }
 
   // ---- Sections ------------------------------------------------------------
-  let newSectionName = $state("");
+  // Section management lives on the group headers (rename inline, delete,
+  // reorder) plus a single "Add section" affordance in the Lines toolbar.
+  let newSectionName = $state<string | null>(null); // null = add form closed
+  let editingSectionId = $state<string | null>(null);
+  let editingSectionName = $state("");
 
   async function addSection() {
-    if (!purchase || !newSectionName.trim()) return;
+    const name = (newSectionName ?? "").trim();
+    if (!purchase || !name) return;
     const ok = await run("Section", () =>
-      CreateSection.mutate({
-        purchaseId: purchase.id,
-        name: newSectionName.trim(),
-      }),
+      CreateSection.mutate({ purchaseId: purchase.id, name }),
     );
     if (ok) {
-      newSectionName = "";
+      newSectionName = null;
+      await refetch();
+    }
+  }
+
+  function startRenameSection(id: string, name: string) {
+    editingSectionId = id;
+    editingSectionName = name;
+  }
+
+  async function saveRenameSection() {
+    const id = editingSectionId;
+    const name = editingSectionName.trim();
+    if (!id || !name) return;
+    const ok = await run("Section", () => UpdateSection.mutate({ id, name }));
+    if (ok) {
+      editingSectionId = null;
       await refetch();
     }
   }
@@ -409,8 +462,6 @@
   }
 
   const sections = $derived(purchase?.sections ?? []);
-  const sectionName = (id: string | null | undefined) =>
-    id ? (sections.find((s) => s.id === id)?.name ?? "—") : "—";
 
   // ---- Items ---------------------------------------------------------------
   interface ItemDraft {
@@ -422,6 +473,10 @@
     unitCostMinor: number;
   }
   let itemDraft = $state<ItemDraft | null>(null);
+  // The group the line editor is anchored to (its key), so the form renders
+  // inside that section instead of detached at the bottom. Fixed when the form
+  // opens, so changing the Section dropdown mid-edit doesn't make it jump.
+  let draftGroupKey = $state<string | null>(null);
 
   function newItem() {
     itemDraft = {
@@ -432,6 +487,7 @@
       qtyOrdered: 1,
       unitCostMinor: 0,
     };
+    draftGroupKey = UNGROUPED;
   }
 
   function editItem(i: NonNullable<typeof purchase>["items"][number]) {
@@ -443,6 +499,7 @@
       qtyOrdered: i.qtyOrdered,
       unitCostMinor: i.unitCostMinor,
     };
+    draftGroupKey = i.sectionId ?? UNGROUPED;
   }
 
   async function saveItem() {
@@ -487,6 +544,114 @@
   const items = $derived(purchase?.items ?? []);
   const lineLabel = (i: (typeof items)[number]) =>
     variantLabel(i.variantId) ?? i.description ?? "—";
+
+  // ---- Grouped / searchable / reorderable lines ----------------------------
+  // Lines render grouped under their section (in section order), with an
+  // "Ungrouped" bucket last. `items` arrives globally sorted by sortOrder, so
+  // pushing in order preserves each group's internal order.
+  const UNGROUPED = "__none";
+  type Line = (typeof items)[number];
+  interface Group {
+    key: string; // section id, or UNGROUPED
+    name: string;
+    items: Line[];
+    subtotal: number;
+  }
+
+  const lineTotal = (i: Line) => i.qtyOrdered * i.unitCostMinor;
+
+  const groups = $derived.by<Group[]>(() => {
+    const bySection = new Map<string, Line[]>();
+    for (const i of items) {
+      const k = i.sectionId ?? UNGROUPED;
+      const list = bySection.get(k) ?? [];
+      list.push(i);
+      bySection.set(k, list);
+    }
+    const out: Group[] = sections.map((s) => {
+      const its = bySection.get(s.id) ?? [];
+      return { key: s.id, name: s.name, items: its, subtotal: its.reduce((a, i) => a + lineTotal(i), 0) };
+    });
+    const ung = bySection.get(UNGROUPED) ?? [];
+    if (ung.length)
+      out.push({ key: UNGROUPED, name: "Ungrouped", items: ung, subtotal: ung.reduce((a, i) => a + lineTotal(i), 0) });
+    return out;
+  });
+
+  // Search + section filter. Reordering is disabled while either is active —
+  // moving a row relative to hidden rows would be ambiguous.
+  let lineSearch = $state("");
+  let sectionFilter = $state(""); // "" = all; section id; or UNGROUPED
+  const query = $derived(lineSearch.trim().toLowerCase());
+  const filtering = $derived(!!query || !!sectionFilter);
+  const canReorder = $derived(editable && !filtering);
+
+  const lineMatches = (i: Line) =>
+    !query ||
+    lineLabel(i).toLowerCase().includes(query) ||
+    (i.description ?? "").toLowerCase().includes(query);
+
+  interface VisibleGroup extends Group {
+    visibleItems: Line[];
+  }
+  const visibleGroups = $derived.by<VisibleGroup[]>(() =>
+    groups
+      .filter((g) => !sectionFilter || g.key === sectionFilter)
+      .map((g) => ({ ...g, visibleItems: g.items.filter(lineMatches) }))
+      // While searching, drop groups with no matches; otherwise keep empty
+      // sections so lines can still be added to them.
+      .filter((g) => !query || g.visibleItems.length > 0),
+  );
+
+  // Collapse state by group key; a search forces everything open.
+  let collapsed = $state<Set<string>>(new Set());
+  const isOpen = (key: string) => !!query || !collapsed.has(key);
+  function toggleCollapse(key: string) {
+    const next = new Set(collapsed);
+    next.has(key) ? next.delete(key) : next.add(key);
+    collapsed = next;
+  }
+
+  async function moveSection(index: number, dir: -1 | 1) {
+    if (!purchase) return;
+    const arr = [...sections];
+    const j = index + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[index], arr[j]] = [arr[j], arr[index]];
+    const ok = await run("Sections", () =>
+      ReorderSections.mutate({ purchaseId: purchase.id, orderedIds: arr.map((s) => s.id) }),
+    );
+    if (ok) await refetch();
+  }
+
+  async function moveLine(group: Group, index: number, dir: -1 | 1) {
+    if (!purchase) return;
+    const arr = [...group.items];
+    const j = index + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[index], arr[j]] = [arr[j], arr[index]];
+    // Rebuild the full purchase-wide order (grouped display order) with this
+    // group's items in their new sequence — reorderItems wants every id once.
+    const orderedIds = groups.flatMap((g) =>
+      (g.key === group.key ? arr : g.items).map((i) => i.id),
+    );
+    const ok = await run("Lines", () =>
+      ReorderItems.mutate({ purchaseId: purchase.id, orderedIds }),
+    );
+    if (ok) await refetch();
+  }
+
+  function newItemInSection(sectionId: string) {
+    itemDraft = {
+      id: null,
+      sectionId: sectionId === UNGROUPED ? "" : sectionId,
+      variantId: "",
+      description: "",
+      qtyOrdered: 1,
+      unitCostMinor: 0,
+    };
+    draftGroupKey = sectionId;
+  }
 
   // ---- Sends — deep-link composer -----------------------------------------
   const CHANNELS = ["whatsapp", "email", "manual"];
@@ -718,168 +883,312 @@
       </div>
     </section>
 
-    <!-- Sections -->
+    <!-- Items -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Sections ({sections.length})</h2>
-      {#if sections.length}
-        <ul class="space-y-1 text-sm">
-          {#each sections as s (s.id)}
-            <li class="flex items-center justify-between">
-              <span>{s.name}</span>
-              <button
-                class="text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={busy || !editable}
-                onclick={() => deleteSection(s.id)}>Delete</button
-              >
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="text-sm text-muted-foreground">
-          No sections — items can sit ungrouped.
-        </p>
-      {/if}
-      {#if editable}
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold">Lines ({items.length})</h2>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !editable}
+            onclick={() => (newSectionName = "")}>Add section</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !editable}
+            onclick={newItem}>Add line</Button
+          >
+        </div>
+      </div>
+
+      {#if newSectionName !== null}
         <div class="flex gap-2">
           <Input
             bind:value={newSectionName}
             placeholder="New section name"
+            onkeydown={(e) => e.key === "Enter" && addSection()}
           />
           <Button
-            variant="outline"
             size="sm"
             disabled={busy || !newSectionName.trim()}
             onclick={addSection}>Add</Button
           >
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onclick={() => (newSectionName = null)}>Cancel</Button
+          >
         </div>
       {/if}
-    </section>
 
-    <!-- Items -->
-    <section class="space-y-3 rounded-lg border bg-card p-5">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Lines ({items.length})</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !editable}
-          onclick={newItem}>Add line</Button
-        >
-      </div>
+      {#if items.length > 0 || sections.length > 0}
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="w-56">
+            <Input
+              type="search"
+              placeholder="Search lines…"
+              bind:value={lineSearch}
+            />
+          </div>
+          <div class="w-44">
+            <Select bind:value={sectionFilter}>
+              <option value="">All sections</option>
+              {#each sections as s (s.id)}
+                <option value={s.id}>{s.name}</option>
+              {/each}
+              <option value={UNGROUPED}>Ungrouped</option>
+            </Select>
+          </div>
+          {#if filtering && editable}
+            <span class="text-xs text-muted-foreground">
+              Reordering is paused while filtering — clear the search/filter to
+              reorder.
+            </span>
+          {/if}
+        </div>
+      {/if}
 
-      <table class="w-full text-sm">
-        <thead class="border-b text-left text-muted-foreground">
-          <tr>
-            <th class="py-1.5 font-medium">Line</th>
-            <th class="py-1.5 font-medium">Section</th>
-            <th class="py-1.5 text-right font-medium">Ordered</th>
-            <th class="py-1.5 text-right font-medium">Delivered</th>
-            <th class="py-1.5 text-right font-medium">Unit cost</th>
-            <th class="py-1.5 text-right font-medium">Line total</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each items as i (i.id)}
-            <tr class="border-b last:border-0">
-              <td class="py-1.5">{lineLabel(i)}</td>
-              <td class="py-1.5 text-muted-foreground">
-                {sectionName(i.sectionId)}
-              </td>
-              <td class="py-1.5 text-right">{i.qtyOrdered}</td>
-              <td class="py-1.5 text-right">{i.qtyDelivered}</td>
-              <td class="py-1.5 text-right">{formatMoney(i.unitCostMinor)}</td>
-              <td class="py-1.5 text-right">
-                {formatMoney(i.qtyOrdered * i.unitCostMinor)}
-              </td>
-              <td class="py-1.5 text-right whitespace-nowrap">
+      {#if items.length === 0 && sections.length === 0}
+        <p class="py-6 text-center text-sm text-muted-foreground">No lines yet.</p>
+      {:else if visibleGroups.length === 0}
+        <p class="py-6 text-center text-sm text-muted-foreground">
+          No lines match.
+        </p>
+      {/if}
+
+      {#snippet lineForm()}
+        {#if itemDraft}
+          <div class="space-y-3 rounded-md border bg-background p-4">
+            <h3 class="text-sm font-semibold">
+              {itemDraft.id ? "Edit line" : "New line"}
+            </h3>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Variant (stock line)</span>
+                <Select bind:value={itemDraft.variantId} disabled={!editable}>
+                  <option value="">— Non-stock line —</option>
+                  {#each variantOptions as v (v.id)}
+                    <option value={v.id}>{v.label}</option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Section</span>
+                <Select bind:value={itemDraft.sectionId} disabled={!editable}>
+                  <option value="">— No section —</option>
+                  {#each sections as s (s.id)}
+                    <option value={s.id}>{s.name}</option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="space-y-1 col-span-2">
+                <span class="text-xs font-medium">Description</span>
+                <Input
+                  bind:value={itemDraft.description}
+                  placeholder={itemDraft.variantId
+                    ? "Optional note"
+                    : "Required for a non-stock line"}
+                  disabled={!editable}
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Qty ordered</span>
+                <Input
+                  type="number"
+                  bind:value={itemDraft.qtyOrdered}
+                  disabled={!editable}
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Unit cost (minor units)</span>
+                <Input
+                  type="number"
+                  bind:value={itemDraft.unitCostMinor}
+                  disabled={!editable}
+                />
+              </label>
+            </div>
+            <div class="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onclick={() => (itemDraft = null)}>Cancel</Button
+              >
+              <Button size="sm" disabled={busy || !editable} onclick={saveItem}>
+                {itemDraft.id ? "Save line" : "Add line"}
+              </Button>
+            </div>
+          </div>
+        {/if}
+      {/snippet}
+
+      {#each visibleGroups as g (g.key)}
+        {@const sIdx = sections.findIndex((s) => s.id === g.key)}
+        <div class="rounded-md border">
+          <!-- Group header -->
+          <div class="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
+            <button
+              class="text-muted-foreground hover:text-foreground"
+              onclick={() => toggleCollapse(g.key)}
+              aria-label={isOpen(g.key) ? "Collapse" : "Expand"}
+            >
+              {#if isOpen(g.key)}
+                <ChevronDown class="size-4" />
+              {:else}
+                <ChevronRight class="size-4" />
+              {/if}
+            </button>
+            {#if editingSectionId === g.key}
+              <Input
+                bind:value={editingSectionName}
+                class="h-7 max-w-xs"
+                onkeydown={(e) => {
+                  if (e.key === "Enter") saveRenameSection();
+                  if (e.key === "Escape") editingSectionId = null;
+                }}
+              />
+              <Button
+                size="sm"
+                class="h-7"
+                disabled={busy || !editingSectionName.trim()}
+                onclick={saveRenameSection}>Save</Button
+              >
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-7"
+                disabled={busy}
+                onclick={() => (editingSectionId = null)}>Cancel</Button
+              >
+            {:else}
+              <span class="text-sm font-medium">{g.name}</span>
+              <span class="text-xs text-muted-foreground">
+                {g.items.length} line{g.items.length === 1 ? "" : "s"} ·
+                {formatMoney(g.subtotal)}
+              </span>
+            {/if}
+            {#if sIdx >= 0 && editingSectionId !== g.key}
+              <span class="ml-auto flex items-center gap-0.5">
+                <IconButton
+                  icon={ArrowUp}
+                  label="Move section up"
+                  disabled={busy || !canReorder || sIdx === 0}
+                  onclick={() => moveSection(sIdx, -1)}
+                />
+                <IconButton
+                  icon={ArrowDown}
+                  label="Move section down"
+                  disabled={busy || !canReorder || sIdx === sections.length - 1}
+                  onclick={() => moveSection(sIdx, 1)}
+                />
+                <IconButton
+                  icon={Pencil}
+                  label="Rename section"
+                  variant="primary"
+                  disabled={busy || !editable}
+                  onclick={() => startRenameSection(g.key, g.name)}
+                />
+                <IconButton
+                  icon={Trash2}
+                  label="Delete section"
+                  variant="destructive"
+                  disabled={busy || !editable}
+                  onclick={() => deleteSection(g.key)}
+                />
+              </span>
+            {/if}
+          </div>
+
+          {#if isOpen(g.key)}
+            {#if g.visibleItems.length > 0}
+              <table class="w-full text-sm">
+                <thead class="border-b text-left text-muted-foreground">
+                  <tr>
+                    <th class="px-3 py-1.5 font-medium">Line</th>
+                    <th class="py-1.5 text-right font-medium">Ordered</th>
+                    <th class="py-1.5 text-right font-medium">Delivered</th>
+                    <th class="py-1.5 text-right font-medium">Unit cost</th>
+                    <th class="py-1.5 text-right font-medium">Line total</th>
+                    <th class="px-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each g.visibleItems as i, idx (i.id)}
+                    <tr class="border-b last:border-0">
+                      <td class="px-3 py-1.5">{lineLabel(i)}</td>
+                      <td class="py-1.5 text-right">{i.qtyOrdered}</td>
+                      <td class="py-1.5 text-right">{i.qtyDelivered}</td>
+                      <td class="py-1.5 text-right">
+                        {formatMoney(i.unitCostMinor)}
+                      </td>
+                      <td class="py-1.5 text-right">{formatMoney(lineTotal(i))}</td>
+                      <td class="px-3 py-1.5 text-right whitespace-nowrap">
+                        <span class="inline-flex items-center gap-0.5">
+                          <IconButton
+                            icon={ArrowUp}
+                            label="Move line up"
+                            disabled={busy || !canReorder || idx === 0}
+                            onclick={() => moveLine(g, idx, -1)}
+                          />
+                          <IconButton
+                            icon={ArrowDown}
+                            label="Move line down"
+                            disabled={busy ||
+                              !canReorder ||
+                              idx === g.visibleItems.length - 1}
+                            onclick={() => moveLine(g, idx, 1)}
+                          />
+                          <IconButton
+                            icon={Pencil}
+                            label="Edit line"
+                            variant="primary"
+                            disabled={busy || !editable}
+                            onclick={() => editItem(i)}
+                          />
+                          <IconButton
+                            icon={Trash2}
+                            label="Delete line"
+                            variant="destructive"
+                            disabled={busy || !editable}
+                            onclick={() => deleteItem(i.id)}
+                          />
+                        </span>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {:else}
+              <p class="px-3 py-3 text-xs text-muted-foreground">
+                No lines in this section.
+              </p>
+            {/if}
+            {#if itemDraft && draftGroupKey === g.key}
+              <div class="border-t p-3">{@render lineForm()}</div>
+            {:else if editable && !query}
+              <div class="border-t px-3 py-2">
                 <button
                   class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !editable}
-                  onclick={() => editItem(i)}>Edit</button
+                  disabled={busy}
+                  onclick={() => newItemInSection(g.key)}
+                  >+ Add line to {g.name}</button
                 >
-                <button
-                  class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !editable}
-                  onclick={() => deleteItem(i.id)}>Delete</button
-                >
-              </td>
-            </tr>
-          {/each}
-          {#if items.length === 0}
-            <tr>
-              <td colspan="7" class="py-6 text-center text-muted-foreground">
-                No lines yet.
-              </td>
-            </tr>
+              </div>
+            {/if}
           {/if}
-        </tbody>
-      </table>
-
-      {#if itemDraft}
-        <div class="space-y-3 rounded-md border bg-background p-4">
-          <h3 class="text-sm font-semibold">
-            {itemDraft.id ? "Edit line" : "New line"}
-          </h3>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="space-y-1">
-              <span class="text-xs font-medium">Variant (stock line)</span>
-              <Select bind:value={itemDraft.variantId} disabled={!editable}>
-                <option value="">— Non-stock line —</option>
-                {#each variantOptions as v (v.id)}
-                  <option value={v.id}>{v.label}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium">Section</span>
-              <Select bind:value={itemDraft.sectionId} disabled={!editable}>
-                <option value="">— No section —</option>
-                {#each sections as s (s.id)}
-                  <option value={s.id}>{s.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="space-y-1 col-span-2">
-              <span class="text-xs font-medium">Description</span>
-              <Input
-                bind:value={itemDraft.description}
-                placeholder={itemDraft.variantId
-                  ? "Optional note"
-                  : "Required for a non-stock line"}
-                disabled={!editable}
-              />
-            </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium">Qty ordered</span>
-              <Input
-                type="number"
-                bind:value={itemDraft.qtyOrdered}
-                disabled={!editable}
-              />
-            </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium">Unit cost (minor units)</span>
-              <Input
-                type="number"
-                bind:value={itemDraft.unitCostMinor}
-                disabled={!editable}
-              />
-            </label>
-          </div>
-          <div class="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onclick={() => (itemDraft = null)}>Cancel</Button
-            >
-            <Button size="sm" disabled={busy || !editable} onclick={saveItem}>
-              {itemDraft.id ? "Save line" : "Add line"}
-            </Button>
-          </div>
         </div>
+      {/each}
+
+      <!-- Fallback: the editor's target group isn't currently rendered (e.g. a
+           filtered-out section, or an empty Ungrouped bucket). -->
+      {#if itemDraft && !visibleGroups.some((g) => g.key === draftGroupKey)}
+        {@render lineForm()}
       {/if}
+
     </section>
 
     <!-- Sends -->
@@ -924,11 +1233,13 @@
                 <td class="py-1.5">{fmtDate(s.expectedDeliveryDate)}</td>
                 <td class="py-1.5 text-right">
                   {#if s.status === "prepared" && canSend}
-                    <button
-                      class="text-xs text-primary hover:underline disabled:opacity-40"
+                    <IconButton
+                      icon={Check}
+                      label="Confirm sent"
+                      variant="primary"
                       disabled={busy}
-                      onclick={() => confirmSend(s.id)}>Confirm sent</button
-                    >
+                      onclick={() => confirmSend(s.id)}
+                    />
                   {/if}
                 </td>
               </tr>

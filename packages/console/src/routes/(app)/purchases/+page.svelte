@@ -6,6 +6,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
@@ -51,6 +52,12 @@
 
   const purchases = $derived($PurchaseList.data?.purchases ?? []);
   const vendors = $derived($PurchaseList.data?.vendors ?? []);
+
+  // Searchable vendor picker options; empty value = ad-hoc vendor.
+  const vendorOptions = $derived([
+    { value: "", label: "— Ad-hoc vendor —" },
+    ...vendors.map((v) => ({ value: v.id, label: v.name })),
+  ]);
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -167,12 +174,11 @@
       <div class="grid grid-cols-3 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Vendor</span>
-          <Select bind:value={draft.vendorId}>
-            <option value="">— Ad-hoc vendor —</option>
-            {#each vendors as v (v.id)}
-              <option value={v.id}>{v.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={vendorOptions}
+            bind:value={draft.vendorId}
+            placeholder="Search vendor…"
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Ad-hoc vendor name</span>

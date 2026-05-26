@@ -1,9 +1,11 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import { page } from "$app/state";
+  import { X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
@@ -303,11 +305,13 @@
               {/if}
               <td class="px-4 py-2 text-right">
                 {#if statusFilter === "open"}
-                  <button
-                    class="text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                  <IconButton
+                    icon={X}
+                    label="Dismiss"
+                    variant="destructive"
                     disabled={busy || !canAct}
-                    onclick={() => dismiss(s.id)}>Dismiss</button
-                  >
+                    onclick={() => dismiss(s.id)}
+                  />
                 {:else}
                   <span class="text-xs text-muted-foreground"
                     >{fmtDate(s.generatedAt)}</span

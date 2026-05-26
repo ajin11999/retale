@@ -2,10 +2,12 @@
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
@@ -672,11 +674,13 @@
               <td class="py-1.5">{variantLabel(p.variantId)}</td>
               <td class="py-1.5 text-right">{formatMoney(p.priceMinor)}</td>
               <td class="py-1.5 text-right">
-                <button
-                  class="text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                <IconButton
+                  icon={Trash2}
+                  label="Remove price"
+                  variant="destructive"
                   disabled={busy || !canEdit}
-                  onclick={() => removePrice(p.variantId)}>Remove</button
-                >
+                  onclick={() => removePrice(p.variantId)}
+                />
               </td>
             </tr>
           {/each}

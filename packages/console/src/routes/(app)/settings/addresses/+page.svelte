@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
+  import { untrack } from "svelte";
   import { page } from "$app/state";
+  import { Archive, ArchiveRestore, Star, Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -114,7 +117,7 @@
         return false;
       }
       feedback = { ok: true, text: `${label} saved.` };
-      await View.fetch();
+      await View.fetch({ policy: CachePolicy.NetworkOnly });
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -151,12 +154,15 @@
   }
 
   // ---- Per-row editing -----------------------------------------------------
-  // Working copies keyed by id; seeded lazily on first edit so a refetch
-  // doesn't clobber an in-progress edit.
+  // Working copies keyed by id. Seeded in an effect (NOT during render): a
+  // newly created row must get its draft without mutating `drafts` while the
+  // template reads it, which loops and freezes the page in Svelte 5. Only
+  // missing keys are seeded, so an in-progress edit is never clobbered.
   type Draft = { label: string; recipientName: string; phone: string; line: string; notes: string };
   let drafts = $state<Record<string, Draft>>({});
-  const draftFor = (a: (typeof addresses)[number]): Draft => {
-    if (!drafts[a.id]) {
+  $effect(() => {
+    for (const a of addresses) {
+      if (untrack(() => drafts[a.id])) continue;
       drafts[a.id] = {
         label: a.label,
         recipientName: a.recipientName ?? "",
@@ -165,8 +171,7 @@
         notes: a.notes ?? "",
       };
     }
-    return drafts[a.id];
-  };
+  });
 
   async function saveRow(id: string) {
     const d = drafts[id];
@@ -229,7 +234,8 @@
   {:else}
     <!-- Existing addresses -->
     {#each addresses as a (a.id)}
-      {@const d = draftFor(a)}
+      {#if drafts[a.id]}
+      {@const d = drafts[a.id]}
       <section
         class="space-y-3 rounded-lg border bg-card p-4 {a.archivedAt ? 'opacity-60' : ''}"
       >
@@ -243,16 +249,22 @@
               <Badge class="bg-muted text-muted-foreground">archived</Badge>
             {/if}
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-0.5">
             {#if !a.isDefault && !a.archivedAt}
-              <Button variant="outline" size="sm" disabled={busy || !canManage}
-                onclick={() => makeDefault(a.id)}>Set default</Button
-              >
+              <IconButton
+                icon={Star}
+                label="Set as default"
+                variant="primary"
+                disabled={busy || !canManage}
+                onclick={() => makeDefault(a.id)}
+              />
             {/if}
-            <Button variant="outline" size="sm" disabled={busy || !canManage}
+            <IconButton
+              icon={a.archivedAt ? ArchiveRestore : Archive}
+              label={a.archivedAt ? "Restore" : "Archive"}
+              disabled={busy || !canManage}
               onclick={() => toggleArchived(a.id, a.archivedAt == null)}
-              >{a.archivedAt ? "Restore" : "Archive"}</Button
-            >
+            />
           </div>
         </div>
 
@@ -279,19 +291,20 @@
           <Input bind:value={d.notes} disabled={!canManage} />
         </label>
 
-        <div class="flex justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="text-destructive"
+        <div class="flex items-center justify-between">
+          <IconButton
+            icon={Trash2}
+            label="Delete address"
+            variant="destructive"
             disabled={busy || !canManage}
-            onclick={() => remove(a.id, a.label)}>Delete</Button
-          >
+            onclick={() => remove(a.id, a.label)}
+          />
           <Button size="sm" disabled={busy || !canManage || !d.label.trim() || !d.line.trim()}
             onclick={() => saveRow(a.id)}>Save</Button
           >
         </div>
       </section>
+      {/if}
     {/each}
 
     {#if addresses.length === 0}

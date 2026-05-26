@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { Archive, ArchiveRestore, Pencil, Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
@@ -266,7 +268,7 @@
     );
     if (ok) {
       draft = null;
-      await CategoryList.fetch();
+      await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
     }
   }
 
@@ -274,7 +276,7 @@
     const ok = await run("Category", () =>
       SetCategoryArchived.mutate({ id: n.id, archived: !n.archived }),
     );
-    if (ok) await CategoryList.fetch();
+    if (ok) await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
   }
 
   async function deleteCategory(n: Node) {
@@ -288,7 +290,7 @@
     const ok = await run("Category", () => DeleteCategory.mutate({ id: n.id }));
     if (ok) {
       if (draft?.id === n.id) draft = null;
-      await CategoryList.fetch();
+      await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
     }
   }
 </script>
@@ -324,79 +326,6 @@
     >
       You have read-only access to products — editing is disabled.
     </p>
-  {/if}
-
-  {#if $CategoryList.fetching && categories.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
-  {:else if $CategoryList.errors?.length}
-    <p class="text-sm text-destructive">{$CategoryList.errors[0].message}</p>
-  {:else}
-    <div class="overflow-hidden rounded-lg border bg-card">
-      <table class="w-full text-sm">
-        <thead class="border-b bg-muted/50 text-left text-muted-foreground">
-          <tr>
-            <th class="px-4 py-2 font-medium">Category</th>
-            <th class="px-4 py-2 text-right font-medium">Products</th>
-            <th class="px-4 py-2 text-right font-medium">Min qty</th>
-            <th class="px-4 py-2 text-right font-medium">Min margin (bps)</th>
-            <th class="px-4 py-2 font-medium">Status</th>
-            <th class="px-4 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visibleTree as n (n.id)}
-            <tr class="border-b last:border-0 hover:bg-muted/40">
-              <td class="px-4 py-2">
-                <span style:padding-left={`${n.depth * 1.25}rem`}>
-                  {n.depth > 0 ? "└ " : ""}<span class="font-medium"
-                    >{n.name}</span
-                  >
-                </span>
-              </td>
-              <td class="px-4 py-2 text-right">
-                {productCount.get(n.id) ?? 0}
-              </td>
-              <td class="px-4 py-2 text-right">{n.minQty ?? "—"}</td>
-              <td class="px-4 py-2 text-right">{n.minMarginBps ?? "—"}</td>
-              <td class="px-4 py-2">
-                <Badge
-                  class={n.archived
-                    ? "bg-muted text-muted-foreground"
-                    : "bg-emerald-100 text-emerald-700"}
-                >
-                  {n.archived ? "Archived" : "Active"}
-                </Badge>
-              </td>
-              <td class="px-4 py-2 text-right whitespace-nowrap">
-                <button
-                  class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !canEdit}
-                  onclick={() => editCategory(n)}>Edit</button
-                >
-                <button
-                  class="ml-2 text-xs text-muted-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !canArchive}
-                  onclick={() => toggleArchived(n)}
-                  >{n.archived ? "Restore" : "Archive"}</button
-                >
-                <button
-                  class="ml-2 text-xs text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={busy || !canEdit}
-                  onclick={() => deleteCategory(n)}>Delete</button
-                >
-              </td>
-            </tr>
-          {/each}
-          {#if visibleTree.length === 0}
-            <tr>
-              <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No categories match." : "No categories yet."}
-              </td>
-            </tr>
-          {/if}
-        </tbody>
-      </table>
-    </div>
   {/if}
 
   {#if draft}
@@ -454,6 +383,94 @@
           {draft.id ? "Save category" : "Create category"}
         </Button>
       </div>
+    </div>
+  {/if}
+
+  {#if $CategoryList.fetching && categories.length === 0}
+    <p class="text-sm text-muted-foreground">Loading…</p>
+  {:else if $CategoryList.errors?.length}
+    <p class="text-sm text-destructive">{$CategoryList.errors[0].message}</p>
+  {:else}
+    <div class="overflow-hidden rounded-lg border bg-card">
+      <table class="w-full text-sm">
+        <thead class="border-b bg-muted/50 text-left text-muted-foreground">
+          <tr>
+            <th class="px-4 py-2 font-medium">Category</th>
+            <th class="px-4 py-2 text-right font-medium">Products</th>
+            <th class="px-4 py-2 text-right font-medium">Min qty</th>
+            <th class="px-4 py-2 text-right font-medium">Min margin (bps)</th>
+            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each visibleTree as n (n.id)}
+            <tr class="border-b last:border-0 hover:bg-muted/40">
+              <td class="px-4 py-2">
+                <span style:padding-left={`${n.depth * 1.25}rem`}>
+                  {n.depth > 0 ? "└ " : ""}<span class="font-medium"
+                    >{n.name}</span
+                  >
+                </span>
+              </td>
+              <td class="px-4 py-2 text-right">
+                {#if (productCount.get(n.id) ?? 0) > 0}
+                  <a
+                    href={`/products?category=${n.id}`}
+                    class="text-primary hover:underline"
+                    title={`View products in ${n.name}`}
+                    >{productCount.get(n.id)}</a
+                  >
+                {:else}
+                  0
+                {/if}
+              </td>
+              <td class="px-4 py-2 text-right">{n.minQty ?? "—"}</td>
+              <td class="px-4 py-2 text-right">{n.minMarginBps ?? "—"}</td>
+              <td class="px-4 py-2">
+                <Badge
+                  class={n.archived
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-emerald-100 text-emerald-700"}
+                >
+                  {n.archived ? "Archived" : "Active"}
+                </Badge>
+              </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <span class="inline-flex items-center gap-0.5">
+                  <IconButton
+                    icon={Pencil}
+                    label="Edit"
+                    variant="primary"
+                    disabled={busy || !canEdit}
+                    onclick={() => editCategory(n)}
+                  />
+                  <IconButton
+                    icon={n.archived ? ArchiveRestore : Archive}
+                    label={n.archived ? "Restore" : "Archive"}
+                    disabled={busy || !canArchive}
+                    onclick={() => toggleArchived(n)}
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete"
+                    variant="destructive"
+                    disabled={busy || !canEdit}
+                    onclick={() => deleteCategory(n)}
+                  />
+                </span>
+              </td>
+            </tr>
+          {/each}
+          {#if visibleTree.length === 0}
+            <tr>
+              <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
+                {search.trim() ? "No categories match." : "No categories yet."}
+              </td>
+            </tr>
+          {/if}
+        </tbody>
+      </table>
     </div>
   {/if}
 </div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
   import Button from "$lib/components/ui/button.svelte";
@@ -109,7 +109,7 @@
         return;
       }
       info = "Settings saved.";
-      await View.fetch();
+      await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -138,7 +138,7 @@
         return;
       }
       info = "Logo updated.";
-      await View.fetch();
+      await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -159,7 +159,7 @@
         return;
       }
       info = "Logo removed.";
-      await View.fetch();
+      await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {

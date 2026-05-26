@@ -45,6 +45,7 @@
       "name": "@retale/console",
       "version": "0.1.0",
       "dependencies": {
+        "@lucide/svelte": "^1.16.0",
         "@tanstack/table-core": "^8.21.3",
         "clsx": "^2.1.1",
         "houdini": "^1.5.10",
@@ -242,6 +243,8 @@
     "@kamilkisiela/fast-url-parser": ["@kamilkisiela/fast-url-parser@1.1.4", "", {}, "sha512-gbkePEBupNydxCelHCESvFSFM8XPh1Zs/OAVRW/rKpEqPAl5PbOM90Si8mv9bvnR53uPD2s/FiRxdvSejpRJew=="],
 
     "@kitql/helpers": ["@kitql/helpers@0.8.14", "", { "dependencies": { "esm-env": "^1.2.2" } }, "sha512-FP+EleN9Slr3Vr1NSfkcemCN+2cCxwxAidmcnMpSAYljW62jiX+ynoAn1B0PNC0WdCKEiTTnPdrnJJBPmZdKhg=="],
+
+    "@lucide/svelte": ["@lucide/svelte@1.16.0", "", { "peerDependencies": { "svelte": "^5" } }, "sha512-AvvPJnaWxeiNkAljI5MsSEc84yHPLMaWQIAJOcbX7k9au/f9ITS7cxTTQiautDiOFKVOXiYdZ+d6mtl88J+Kbg=="],
 
     "@mapbox/node-pre-gyp": ["@mapbox/node-pre-gyp@2.0.3", "", { "dependencies": { "consola": "^3.2.3", "detect-libc": "^2.0.0", "https-proxy-agent": "^7.0.5", "node-fetch": "^2.6.7", "nopt": "^8.0.0", "semver": "^7.5.3", "tar": "^7.4.0" }, "bin": { "node-pre-gyp": "bin/node-pre-gyp" } }, "sha512-uwPAhccfFJlsfCxMYTwOdVfOz3xqyj8xYL3zJj8f0pb30tLohnnFPhLuqp4/qoEz8sNxe4SESZedcBojRefIzg=="],
 

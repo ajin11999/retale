@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { Pencil } from "@lucide/svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -109,7 +111,7 @@
         error = res.errors[0].message;
         return;
       }
-      await UserAdmin.fetch();
+      await UserAdmin.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -151,7 +153,7 @@
         return;
       }
       resetNewForm();
-      await UserAdmin.fetch();
+      await UserAdmin.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -322,11 +324,13 @@
                       <span class="text-xs text-muted-foreground">—</span>
                     {/if}
                     {#if canManage}
-                      <button
-                        type="button"
-                        class="ml-1 text-xs text-primary hover:underline"
-                        onclick={() => (editingRolesFor = u.id)}>Edit</button
-                      >
+                      <IconButton
+                        icon={Pencil}
+                        label="Edit roles"
+                        variant="primary"
+                        class="ml-1"
+                        onclick={() => (editingRolesFor = u.id)}
+                      />
                     {/if}
                   </div>
                 {/if}

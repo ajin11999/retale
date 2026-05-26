@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -153,7 +153,7 @@
         return;
       }
       dirty = false;
-      await RoleAdmin.fetch();
+      await RoleAdmin.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -174,7 +174,7 @@
         return;
       }
       const newId = res.data?.cloneRole.id ?? null;
-      await RoleAdmin.fetch();
+      await RoleAdmin.fetch({ policy: CachePolicy.NetworkOnly });
       if (newId) selectedId = newId;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -195,7 +195,7 @@
         return;
       }
       selectedId = null;
-      await RoleAdmin.fetch();
+      await RoleAdmin.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -225,7 +225,7 @@
       const id = res.data?.createRole.id ?? null;
       newName = null;
       newDescription = "";
-      await RoleAdmin.fetch();
+      await RoleAdmin.fetch({ policy: CachePolicy.NetworkOnly });
       if (id) selectedId = id;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
