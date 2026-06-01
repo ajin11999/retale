@@ -750,7 +750,7 @@
   </title>
 </svelte:head>
 
-<div class="mx-auto max-w-3xl space-y-6">
+<div class="mx-auto max-w-5xl space-y-6">
   <a
     href="/purchases"
     class="text-sm text-muted-foreground hover:text-foreground"
@@ -1108,25 +1108,25 @@
               <table class="w-full text-sm">
                 <thead class="border-b text-left text-muted-foreground">
                   <tr>
-                    <th class="px-3 py-1.5 font-medium">Line</th>
-                    <th class="py-1.5 text-right font-medium">Ordered</th>
-                    <th class="py-1.5 text-right font-medium">Delivered</th>
-                    <th class="py-1.5 text-right font-medium">Unit cost</th>
-                    <th class="py-1.5 text-right font-medium">Line total</th>
+                    <th class="px-4 py-2 font-medium">Line</th>
+                    <th class="px-4 py-2 text-right font-medium">Ordered</th>
+                    <th class="px-4 py-2 text-right font-medium">Delivered</th>
+                    <th class="px-4 py-2 text-right font-medium">Unit cost</th>
+                    <th class="px-4 py-2 text-right font-medium">Line total</th>
                     <th class="px-3"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each g.visibleItems as i, idx (i.id)}
-                    <tr class="border-b last:border-0">
-                      <td class="px-3 py-1.5">{lineLabel(i)}</td>
-                      <td class="py-1.5 text-right">{i.qtyOrdered}</td>
-                      <td class="py-1.5 text-right">{i.qtyDelivered}</td>
-                      <td class="py-1.5 text-right">
+                    <tr class="border-b last:border-0 even:bg-muted/40">
+                      <td class="px-4 py-2">{lineLabel(i)}</td>
+                      <td class="px-4 py-2 text-right tabular-nums">{i.qtyOrdered}</td>
+                      <td class="px-4 py-2 text-right tabular-nums">{i.qtyDelivered}</td>
+                      <td class="px-4 py-2 text-right tabular-nums">
                         {formatMoney(i.unitCostMinor)}
                       </td>
-                      <td class="py-1.5 text-right">{formatMoney(lineTotal(i))}</td>
-                      <td class="px-3 py-1.5 text-right whitespace-nowrap">
+                      <td class="px-4 py-2 text-right tabular-nums">{formatMoney(lineTotal(i))}</td>
+                      <td class="px-3 py-2 text-right whitespace-nowrap">
                         <span class="inline-flex items-center gap-0.5">
                           <IconButton
                             icon={ArrowUp}
@@ -1207,21 +1207,21 @@
         <table class="w-full text-sm">
           <thead class="border-b text-left text-muted-foreground">
             <tr>
-              <th class="py-1.5 font-medium">Channel</th>
-              <th class="py-1.5 font-medium">Recipient</th>
-              <th class="py-1.5 text-right font-medium">Rev</th>
-              <th class="py-1.5 font-medium">Status</th>
-              <th class="py-1.5 font-medium">Expected</th>
-              <th></th>
+              <th class="px-4 py-2 font-medium">Channel</th>
+              <th class="px-4 py-2 font-medium">Recipient</th>
+              <th class="px-4 py-2 text-right font-medium">Rev</th>
+              <th class="px-4 py-2 font-medium">Status</th>
+              <th class="px-4 py-2 font-medium">Expected</th>
+              <th class="px-3"></th>
             </tr>
           </thead>
           <tbody>
             {#each sends as s (s.id)}
-              <tr class="border-b last:border-0">
-                <td class="py-1.5">{s.channel}</td>
-                <td class="py-1.5">{s.recipient}</td>
-                <td class="py-1.5 text-right">{s.revision}</td>
-                <td class="py-1.5">
+              <tr class="border-b last:border-0 even:bg-muted/40">
+                <td class="px-4 py-2">{s.channel}</td>
+                <td class="px-4 py-2">{s.recipient}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{s.revision}</td>
+                <td class="px-4 py-2">
                   <Badge
                     class={s.status === "sent"
                       ? "bg-emerald-100 text-emerald-700"
@@ -1230,8 +1230,8 @@
                     {s.status}
                   </Badge>
                 </td>
-                <td class="py-1.5">{fmtDate(s.expectedDeliveryDate)}</td>
-                <td class="py-1.5 text-right">
+                <td class="px-4 py-2">{fmtDate(s.expectedDeliveryDate)}</td>
+                <td class="px-3 py-2 text-right">
                   {#if s.status === "prepared" && canSend}
                     <IconButton
                       icon={Check}

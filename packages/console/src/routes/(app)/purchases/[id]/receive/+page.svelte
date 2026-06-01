@@ -296,7 +296,7 @@
   </title>
 </svelte:head>
 
-<div class="mx-auto max-w-3xl space-y-6">
+<div class="mx-auto max-w-5xl space-y-6">
   <a
     href="/purchases/{page.params.id}"
     class="text-sm text-muted-foreground hover:text-foreground"
@@ -424,30 +424,32 @@
         <table class="w-full text-sm">
           <thead class="border-b text-left text-muted-foreground">
             <tr>
-              <th class="py-1.5 font-medium">Line</th>
-              <th class="py-1.5 text-right font-medium">Ordered</th>
-              <th class="py-1.5 text-right font-medium">Delivered</th>
-              <th class="py-1.5 text-right font-medium">Remaining</th>
-              <th class="py-1.5 text-right font-medium">In check</th>
-              <th class="py-1.5 font-medium">After commit</th>
+              <th class="px-4 py-2 font-medium">Line</th>
+              <th class="px-4 py-2 text-right font-medium">Ordered</th>
+              <th class="px-4 py-2 text-right font-medium">Delivered</th>
+              <th class="px-4 py-2 text-right font-medium">Remaining</th>
+              <th class="px-4 py-2 text-right font-medium">In check</th>
+              <th class="px-4 py-2 font-medium">After commit</th>
             </tr>
           </thead>
           <tbody>
             {#each lines as l (l.purchaseItem.id)}
               <tr
                 class="border-b last:border-0
-                  {lastScanHit === l.purchaseItem.id ? 'bg-emerald-50' : ''}"
+                  {lastScanHit === l.purchaseItem.id
+                  ? 'bg-emerald-50'
+                  : 'even:bg-muted/40'}"
               >
-                <td class="py-1.5">
+                <td class="px-4 py-2">
                   {variantLabel(
                     l.purchaseItem.variantId,
                     l.purchaseItem.description,
                   )}
                 </td>
-                <td class="py-1.5 text-right">{l.qtyOrdered}</td>
-                <td class="py-1.5 text-right">{l.qtyDelivered}</td>
-                <td class="py-1.5 text-right">{l.remaining}</td>
-                <td class="py-1.5 text-right">
+                <td class="px-4 py-2 text-right tabular-nums">{l.qtyOrdered}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{l.qtyDelivered}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{l.remaining}</td>
+                <td class="px-4 py-2 text-right">
                   <Input
                     type="number"
                     min="0"
@@ -465,7 +467,7 @@
                     }}
                   />
                 </td>
-                <td class="py-1.5">
+                <td class="px-4 py-2">
                   <Badge class={statusClass(l.provisionalStatus)}>
                     {l.provisionalStatus}
                   </Badge>
