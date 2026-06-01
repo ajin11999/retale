@@ -560,6 +560,14 @@
 
   const lineTotal = (i: Line) => i.qtyOrdered * i.unitCostMinor;
 
+  // Delivered-column badge: emerald once a line is fully received, amber while
+  // partially received. A line with nothing received stays a plain number, so
+  // a freshly-created PO (all zeros) shows no badges.
+  const deliveryBadgeClass = (i: Line) =>
+    i.qtyDelivered >= i.qtyOrdered
+      ? "bg-emerald-100 text-emerald-700"
+      : "bg-amber-100 text-amber-800";
+
   const groups = $derived.by<Group[]>(() => {
     const bySection = new Map<string, Line[]>();
     for (const i of items) {
@@ -1121,7 +1129,15 @@
                     <tr class="border-b last:border-0 even:bg-muted/40">
                       <td class="px-4 py-2">{lineLabel(i)}</td>
                       <td class="px-4 py-2 text-right tabular-nums">{i.qtyOrdered}</td>
-                      <td class="px-4 py-2 text-right tabular-nums">{i.qtyDelivered}</td>
+                      <td class="px-4 py-2 text-right tabular-nums">
+                        {#if i.qtyDelivered > 0}
+                          <Badge class={deliveryBadgeClass(i)}>
+                            {i.qtyDelivered}
+                          </Badge>
+                        {:else}
+                          {i.qtyDelivered}
+                        {/if}
+                      </td>
                       <td class="px-4 py-2 text-right tabular-nums">
                         {formatMoney(i.unitCostMinor)}
                       </td>

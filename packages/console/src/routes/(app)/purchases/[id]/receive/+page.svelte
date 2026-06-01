@@ -224,6 +224,50 @@
     if (ok) await refetch();
   }
 
+  // True while any line still has stock owed — the Fill button's enable gate.
+  const hasRemaining = $derived(lines.some((l) => l.remaining > 0));
+
+  /**
+   * Stage every line's full remaining qty in one go — the "received the whole
+   * shipment" shortcut, so the clerk commits without typing each line. Lines
+   * already at their remaining (or with nothing owed) are skipped.
+   */
+  async function fillAllRemaining() {
+    if (!draft) return;
+    busy = true;
+    feedback = null;
+    try {
+      let filled = 0;
+      for (const l of lines) {
+        if (l.remaining <= 0 || qtyDrafts[l.purchaseItem.id] === l.remaining) {
+          continue;
+        }
+        qtyDrafts[l.purchaseItem.id] = l.remaining;
+        const r = await SetReceivingCheckLine.mutate({
+          deliveryId: draft.id,
+          purchaseItemId: l.purchaseItem.id,
+          qty: l.remaining,
+        });
+        if (r.errors?.length) {
+          feedback = { ok: false, text: r.errors[0].message };
+          return;
+        }
+        filled++;
+      }
+      feedback = {
+        ok: true,
+        text: filled
+          ? `Filled ${filled} line${filled === 1 ? "" : "s"} to remaining.`
+          : "Every line is already filled.",
+      };
+      await refetch();
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+  }
+
   async function applyScan() {
     if (!purchase || !scanCode.trim()) return;
     const code = scanCode.trim();
@@ -382,11 +426,19 @@
           <h2 class="text-sm font-semibold">
             Open check · {draft.targetLocation?.name ?? "—"}
           </h2>
-          <Button
-            size="sm"
-            disabled={busy || !canCommit}
-            onclick={commitCheck}>Commit check</Button
-          >
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || !hasRemaining}
+              onclick={fillAllRemaining}>Fill all remaining</Button
+            >
+            <Button
+              size="sm"
+              disabled={busy || !canCommit}
+              onclick={commitCheck}>Commit check</Button
+            >
+          </div>
         </div>
         {#if !canCommit}
           <p class="text-xs text-muted-foreground">
