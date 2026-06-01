@@ -249,6 +249,49 @@ describe("commitDelivery", () => {
     expect(variant?.costMinor).toBe(600);
   });
 
+  test("allocates a freight cost node across stock leaves by line value", async () => {
+    const locationId = await seedLocation();
+    const variantA = await seedVariant();
+    const variantB = await seedVariant();
+    // Line A value = 2 × 300 = 600; line B value = 8 × 50 = 400; base = 1000.
+    const a = await seedPurchaseItem({ variantId: variantA, qtyOrdered: 2, unitCostMinor: 300 });
+    const b = await seedPurchaseItem({ variantId: variantB, qtyOrdered: 8, unitCostMinor: 50 });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: a.itemId,
+      description: "Line A",
+      qty: 2,
+      costMinor: 600,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: b.itemId,
+      description: "Line B",
+      qty: 8,
+      costMinor: 400,
+    });
+    // Freight node (no purchaseItemId): 100 to spread by value — 60 to A, 40 to B.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 100,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    // A: (600 + 60) / 2 = 330 per unit; B: (400 + 40) / 8 = 55 per unit.
+    expect((await getVariant(variantA))?.costMinor).toBe(330);
+    expect((await getVariant(variantB))?.costMinor).toBe(55);
+    const movesA = await movementsFor(variantA);
+    expect(movesA[0]?.unitCost).toBe(330);
+  });
+
   test("supports partial delivery across two deliveries", async () => {
     const locationId = await seedLocation();
     const variantId = await seedVariant();

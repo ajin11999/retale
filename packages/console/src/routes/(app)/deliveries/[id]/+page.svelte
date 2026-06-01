@@ -32,6 +32,12 @@
           costMinor
           sortOrder
         }
+        leafLandings {
+          itemId
+          landedUnitCostMinor
+          freightMinor
+          isStock
+        }
       }
       locations(includeArchived: false) {
         id
@@ -136,6 +142,15 @@
   const delivery = $derived($Detail.data?.delivery ?? null);
   const locations = $derived($Detail.data?.locations ?? []);
   const items = $derived(delivery?.items ?? []);
+
+  // Server-computed landed cost per leaf, keyed by item id — the same
+  // apportionment commit will apply, so the preview can't drift from it.
+  const landingByItem = $derived.by(() => {
+    type Landing = NonNullable<typeof delivery>["leafLandings"][number];
+    const m = new Map<string, Landing>();
+    for (const l of delivery?.leafLandings ?? []) m.set(l.itemId, l);
+    return m;
+  });
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -498,7 +513,7 @@
 
     <!-- Cost tree -->
     <div class="rounded-lg border bg-card p-4">
-      <div class="mb-3 flex items-center justify-between">
+      <div class="mb-1 flex items-center justify-between">
         <h2 class="text-sm font-semibold">Cost tree</h2>
         {#if editable}
           <Button size="sm" variant="outline" onclick={() => startAdd("")}>
@@ -506,6 +521,10 @@
           </Button>
         {/if}
       </div>
+      <p class="mb-3 text-xs text-muted-foreground">
+        Freight / customs cost lines are spread across product lines by value;
+        each product shows its landed unit cost (→ /unit).
+      </p>
 
       {#if addingUnder === ""}
         <div class="mb-3 flex items-end gap-2 rounded-md border bg-muted/40 p-3">
@@ -580,6 +599,23 @@
         <span class="w-32 text-right text-sm">
           {formatMoney(node.item.costMinor)}
         </span>
+        {#if node.item.purchaseItemId}
+          {@const ld = landingByItem.get(node.item.id)}
+          {#if ld?.isStock}
+            <span
+              class="w-40 text-right text-xs {ld.freightMinor > 0
+                ? 'text-emerald-700'
+                : 'text-muted-foreground'}"
+              title="Landed unit cost = line value + freight share"
+            >
+              → {formatMoney(ld.landedUnitCostMinor)}/unit
+            </span>
+          {:else}
+            <span class="w-40"></span>
+          {/if}
+        {:else}
+          <span class="w-40"></span>
+        {/if}
         {#if editable && !node.item.purchaseItemId}
           <Button size="sm" variant="ghost" onclick={() => startAdd(node.item.id)}>
             +

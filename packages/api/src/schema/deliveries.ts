@@ -27,6 +27,19 @@ export const typeDefs = /* GraphQL */ `
     createdAt: String!
     updatedAt: String!
     items: [PurchaseDeliveryItem!]!
+    "Per-leaf landed cost preview — line value + value-weighted freight share, exactly as commit will receive it."
+    leafLandings: [DeliveryLeafLanding!]!
+  }
+
+  "What a single product leaf will be received at once freight is apportioned."
+  type DeliveryLeafLanding {
+    itemId: ID!
+    qty: Float!
+    baseCostMinor: Float!
+    freightMinor: Float!
+    landedCostMinor: Float!
+    landedUnitCostMinor: Float!
+    isStock: Boolean!
   }
 
   type PurchaseDeliveryItem {
@@ -104,6 +117,7 @@ export const resolvers = {
     deliveredAt: (d: DeliveryRow) => iso(d.deliveredAt),
     targetLocation: (d: DeliveryRow) => locations.getLocation(d.targetLocationId),
     items: (d: DeliveryRow) => deliveries.listDeliveryItems(d.id),
+    leafLandings: (d: DeliveryRow) => deliveries.deliveryLeafLandings(d.id),
   },
 
   Query: {

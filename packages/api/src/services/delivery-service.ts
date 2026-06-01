@@ -284,6 +284,60 @@ export function listDeliveryItems(deliveryId: string): Promise<DeliveryItem[]> {
     .orderBy(asc(purchaseDeliveryItems.sortOrder));
 }
 
+/** Per-leaf landed cost preview — what `commitDelivery` will receive stock at. */
+export interface LeafLanding {
+  itemId: string;
+  qty: number;
+  /** The leaf's own line value (vendor cost × qty). */
+  baseCostMinor: number;
+  /** This leaf's value-weighted share of the freight / customs nodes. */
+  freightMinor: number;
+  /** baseCostMinor + freightMinor — the total cost capitalized into stock. */
+  landedCostMinor: number;
+  /** landedCostMinor / qty — the unit cost that feeds WAC on commit. */
+  landedUnitCostMinor: number;
+  /** False for a non-stock leaf (no variant) — excluded from freight. */
+  isStock: boolean;
+}
+
+/**
+ * Compute each leaf's landed cost for the editor preview, using the exact same
+ * apportionment `commitDelivery` applies — so what the clerk sees is what the
+ * commit will write. Non-leaf cost nodes (freight/customs) produce no row.
+ */
+export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLanding[]> {
+  const items = await db
+    .select()
+    .from(purchaseDeliveryItems)
+    .where(eq(purchaseDeliveryItems.deliveryId, deliveryId))
+    .orderBy(asc(purchaseDeliveryItems.sortOrder));
+  const leaves = items.filter((i) => i.purchaseItemId != null);
+
+  const lines = new Map<string, typeof purchaseItems.$inferSelect>();
+  for (const pid of new Set(leaves.map((l) => l.purchaseItemId as string))) {
+    const pi = await db.query.purchaseItems.findFirst({
+      where: eq(purchaseItems.id, pid),
+    });
+    if (pi) lines.set(pid, pi);
+  }
+
+  const freightByLeaf = allocateFreightByValue(items, leaves, lines);
+  return leaves.map((l) => {
+    const qty = l.qty ?? 0;
+    const freight = freightByLeaf.get(l.id) ?? 0;
+    const landed = l.costMinor + freight;
+    return {
+      itemId: l.id,
+      qty,
+      baseCostMinor: l.costMinor,
+      freightMinor: freight,
+      landedCostMinor: landed,
+      landedUnitCostMinor: qty > 0 ? Math.round(landed / qty) : 0,
+      isStock: lines.get(l.purchaseItemId as string)?.variantId != null,
+    };
+  });
+}
+
 // --- Commit & cancel ---
 
 /** Sum the leaf quantities of a delivery, keyed by purchase_item_id. */
@@ -294,6 +348,52 @@ function leafQtyByPurchaseItem(leaves: DeliveryItem[]): Map<string, number> {
     byItem.set(pid, (byItem.get(pid) ?? 0) + (leaf.qty as number));
   }
   return byItem;
+}
+
+/**
+ * Apportion the delivery's cost nodes — every item with no `purchaseItemId`,
+ * i.e. the freight / customs / grouping rows — across the stock leaves in
+ * proportion to each leaf's line value (its own `costMinor`). This is the
+ * landed-cost step: a product's received unit cost carries its share of the
+ * delivery cost. Non-stock leaves (`variantId` null) are excluded — freight
+ * capitalizes into goods of resale only (design-decisions.md → landed cost).
+ * Largest-remainder rounding spreads the pool to the cent. Returns the freight
+ * minor units to add on top of each leaf's base cost, keyed by leaf id.
+ */
+function allocateFreightByValue(
+  items: DeliveryItem[],
+  leaves: DeliveryItem[],
+  lines: Map<string, typeof purchaseItems.$inferSelect>,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const stockLeaves = leaves.filter(
+    (l) => lines.get(l.purchaseItemId as string)?.variantId != null,
+  );
+  for (const l of stockLeaves) out.set(l.id, 0);
+
+  const pool = items
+    .filter((i) => i.purchaseItemId == null)
+    .reduce((sum, i) => sum + i.costMinor, 0);
+  const base = stockLeaves.reduce((sum, l) => sum + l.costMinor, 0);
+  if (pool <= 0 || base <= 0) return out;
+
+  const remainders: { id: string; rem: number }[] = [];
+  let handed = 0;
+  for (const l of stockLeaves) {
+    const exact = (pool * l.costMinor) / base;
+    const floor = Math.floor(exact);
+    out.set(l.id, floor);
+    remainders.push({ id: l.id, rem: exact - floor });
+    handed += floor;
+  }
+  // Hand the leftover cents to the largest fractional shares first. The
+  // leftover is always < the leaf count (each floor drops under one cent), so
+  // a single pass over the top remainders suffices.
+  remainders.sort((a, b) => b.rem - a.rem);
+  for (const { id } of remainders.slice(0, pool - handed)) {
+    out.set(id, (out.get(id) ?? 0) + 1);
+  }
+  return out;
 }
 
 /** Re-evaluate every touched purchase: open ⇄ complete based on item delivery state. */
@@ -368,19 +468,25 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       }
     }
 
+    // Landed cost: spread the delivery's freight / customs nodes over the
+    // stock leaves by line value, so each product's received unit cost carries
+    // its share of the delivery cost.
+    const freightByLeaf = allocateFreightByValue(items, leaves, lines);
+
     // 2 & 3. One purchase_receive movement per stock leaf; WAC recomputes
     // inside recordMovement. Non-stock lines (variantId null) are skipped.
     for (const leaf of leaves) {
       const pi = lines.get(leaf.purchaseItemId as string);
       if (!pi?.variantId) continue;
       const qty = leaf.qty as number;
+      const landed = leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0);
       await recordMovement(
         {
           variantId: pi.variantId,
           locationId: delivery.targetLocationId,
           type: "purchase_receive",
           qtyDelta: qty,
-          unitCost: Math.round(leaf.costMinor / qty),
+          unitCost: Math.round(landed / qty),
           refType: "purchase",
           refId: delivery.id,
           createdByUserId: userId,
