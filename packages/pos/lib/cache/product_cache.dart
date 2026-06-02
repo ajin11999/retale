@@ -23,6 +23,11 @@ class ProductCache {
   DateTime? get refreshedAt => _refreshedAt;
   bool get isEmpty => _products.isEmpty;
 
+  /// Open-price products (loose hardware sold by a guessed lump). Surfaced as a
+  /// quick-tile palette in the register rather than through normal search.
+  List<Product> get openPriceProducts =>
+      _products.where((p) => p.kind == 'open_price').toList();
+
   /// Load the cache into memory on startup.
   Future<void> load() async {
     try {
@@ -54,10 +59,12 @@ class ProductCache {
   }
 
   /// Case-insensitive search over product name, variant SKU and barcode.
+  /// Open-price products are excluded — they live in the quick-tile palette.
   List<Product> search(String query) {
+    final sellable = _products.where((p) => p.kind != 'open_price');
     final q = query.trim().toLowerCase();
-    if (q.isEmpty) return all;
-    return _products.where((p) {
+    if (q.isEmpty) return sellable.toList();
+    return sellable.where((p) {
       if (p.name.toLowerCase().contains(q) ||
           p.publicDisplayName.toLowerCase().contains(q)) {
         return true;

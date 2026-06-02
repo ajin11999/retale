@@ -205,9 +205,66 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
         if (_catalogLoading) const LinearProgressIndicator(),
+        _buildQuickTiles(),
         Expanded(child: _buildResults()),
       ],
     );
+  }
+
+  /// Always-visible palette of open-price products (loose hardware sold by a
+  /// guessed lump). Tapping one prompts for the price, then adds a cart line.
+  Widget _buildQuickTiles() {
+    final items = _cache.openPriceProducts;
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: items
+            .map((p) => ActionChip(
+                  avatar: const Icon(Icons.add, size: 18),
+                  label: Text(p.publicDisplayName),
+                  onPressed: () => _pickOpenPrice(p),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  /// Prompt for a lump price and add an open-price line to the cart.
+  Future<void> _pickOpenPrice(Product product) async {
+    if (product.variants.isEmpty) return;
+    final controller = TextEditingController();
+    int submit() => Money.parse(controller.text);
+    final priceMinor = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(product.publicDisplayName),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onSubmitted: (_) => Navigator.pop(ctx, submit()),
+          decoration: const InputDecoration(
+            labelText: 'Price',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, submit()),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (priceMinor != null && priceMinor > 0) {
+      _cart.addOpenPrice(product, product.variants.first, priceMinor);
+    }
   }
 
   Widget _buildResults() {
@@ -347,7 +404,7 @@ class _CartLineTile extends StatelessWidget {
     return ListTile(
       title: Text(line.displayName),
       subtitle: Text(
-          '${Money.format(line.variant.priceMinor)} each'
+          '${Money.format(line.unitPriceMinor)} each'
           '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

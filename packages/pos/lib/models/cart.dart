@@ -9,6 +9,7 @@ class CartLine {
     required this.variant,
     this.qty = 1,
     this.discountMinor = 0,
+    this.overridePriceMinor,
   });
 
   final Product product;
@@ -16,9 +17,16 @@ class CartLine {
   int qty;
   int discountMinor;
 
+  /// Cashier-entered price for open-price (and service) lines; null means use
+  /// the variant's base price.
+  final int? overridePriceMinor;
+
+  /// The effective unit price: an entered override wins over the base price.
+  int get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
+
   /// qty * price - discount, never below zero.
   int get lineTotalMinor {
-    final gross = variant.priceMinor * qty - discountMinor;
+    final gross = unitPriceMinor * qty - discountMinor;
     return gross < 0 ? 0 : gross;
   }
 
@@ -47,6 +55,17 @@ class Cart extends ChangeNotifier {
     } else {
       _lines.add(CartLine(product: product, variant: variant));
     }
+    notifyListeners();
+  }
+
+  /// Add an open-price line at a cashier-entered lump price. Each entry is a
+  /// distinct guess, so these never merge with an existing line.
+  void addOpenPrice(Product product, Variant variant, int priceMinor) {
+    _lines.add(CartLine(
+      product: product,
+      variant: variant,
+      overridePriceMinor: priceMinor,
+    ));
     notifyListeners();
   }
 
@@ -80,6 +99,8 @@ class Cart extends ChangeNotifier {
             'variantId': l.variant.id,
             'qty': l.qty,
             if (l.discountMinor > 0) 'discountMinor': l.discountMinor,
+            if (l.overridePriceMinor != null)
+              'priceOverrideMinor': l.overridePriceMinor,
           })
       .toList();
 }
