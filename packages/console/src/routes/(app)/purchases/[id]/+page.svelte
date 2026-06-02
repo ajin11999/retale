@@ -369,9 +369,30 @@
   // `{ id }`, so Houdini's normalized cache never learns the new or changed
   // rows. The default CacheOrNetwork policy would then re-serve the stale
   // cached list — NetworkOnly guarantees the refetched list reflects the edit.
-  const refetch = () =>
-    purchase &&
-    PurchaseDetail.fetch({ variables: { id: purchase.id }, policy: "NetworkOnly" });
+  const refetch = () => {
+    // The network result becomes the new truth — drop any optimistic reorder.
+    itemOrder = null;
+    sectionOrder = null;
+    return (
+      purchase &&
+      PurchaseDetail.fetch({ variables: { id: purchase.id }, policy: "NetworkOnly" })
+    );
+  };
+
+  // Re-sort `rows` by an optional desired id sequence; ids missing from the
+  // sequence keep their server position at the end (stable). Null = server
+  // order. This drives optimistic line/section reorder without a refetch —
+  // Houdini's cached list does not reorder when only `sortOrder` changes.
+  function applyOrder<T extends { id: string }>(
+    rows: readonly T[],
+    order: string[] | null,
+  ): T[] {
+    if (!order) return [...rows];
+    const pos = new Map(order.map((id, i) => [id, i]));
+    return [...rows].sort(
+      (a, b) => (pos.get(a.id) ?? Infinity) - (pos.get(b.id) ?? Infinity),
+    );
+  }
 
   async function saveHeader() {
     if (!purchase) return;
@@ -461,7 +482,12 @@
     if (ok) await refetch();
   }
 
-  const sections = $derived(purchase?.sections ?? []);
+  type PurchaseSection = NonNullable<typeof purchase>["sections"][number];
+  // `sectionOrder` holds the desired id sequence after an optimistic move;
+  // `sections` re-sorts the server list by it (see applyOrder). refetch()
+  // clears the override back to server truth.
+  let sectionOrder = $state<string[] | null>(null);
+  const sections = $derived(applyOrder(purchase?.sections ?? [], sectionOrder));
 
   // ---- Items ---------------------------------------------------------------
   interface ItemDraft {
@@ -541,7 +567,10 @@
     if (ok) await refetch();
   }
 
-  const items = $derived(purchase?.items ?? []);
+  type PurchaseLine = NonNullable<typeof purchase>["items"][number];
+  // Same optimistic-reorder scheme as `sectionOrder` above, for lines.
+  let itemOrder = $state<string[] | null>(null);
+  const items = $derived(applyOrder(purchase?.items ?? [], itemOrder));
   const lineLabel = (i: (typeof items)[number]) =>
     variantLabel(i.variantId) ?? i.description ?? "—";
 
@@ -620,16 +649,36 @@
     collapsed = next;
   }
 
+  // Persist a reorder quietly: the list already moved optimistically, so we
+  // skip the busy/feedback churn that `run()` does — toggling `busy` disables
+  // (and de-focuses) the arrow button you just clicked, and the "saved" banner
+  // appearing/disappearing shifts the page height on every move. Only surface
+  // failures, and revert to server truth when one happens.
+  async function persistOrder(
+    fn: () => Promise<{ errors?: readonly { message: string }[] | null }>,
+  ): Promise<void> {
+    try {
+      const res = await fn();
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        await refetch();
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      await refetch();
+    }
+  }
+
   async function moveSection(index: number, dir: -1 | 1) {
     if (!purchase) return;
     const arr = [...sections];
     const j = index + dir;
     if (j < 0 || j >= arr.length) return;
     [arr[index], arr[j]] = [arr[j], arr[index]];
-    const ok = await run("Sections", () =>
+    sectionOrder = arr.map((s) => s.id); // optimistic — no full-page refetch
+    await persistOrder(() =>
       ReorderSections.mutate({ purchaseId: purchase.id, orderedIds: arr.map((s) => s.id) }),
     );
-    if (ok) await refetch();
   }
 
   async function moveLine(group: Group, index: number, dir: -1 | 1) {
@@ -643,10 +692,12 @@
     const orderedIds = groups.flatMap((g) =>
       (g.key === group.key ? arr : g.items).map((i) => i.id),
     );
-    const ok = await run("Lines", () =>
+    // Optimistic — apply the new order via the derived list; the table updates
+    // instantly with no full-page refetch.
+    itemOrder = orderedIds;
+    await persistOrder(() =>
       ReorderItems.mutate({ purchaseId: purchase.id, orderedIds }),
     );
-    if (ok) await refetch();
   }
 
   function newItemInSection(sectionId: string) {
