@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -669,19 +670,29 @@
     }
   }
 
-  async function moveSection(index: number, dir: -1 | 1) {
+  // Keep the keyboard/click focus on the arrow after a move: the keyed {#each}
+  // relocates the row's DOM node, which drops focus, so the same logical arrow
+  // ends up unfocused. Re-focus the clicked button once the list re-renders,
+  // unless the move pushed it to an end (where that arrow is now disabled).
+  async function restoreFocus(btn: HTMLElement) {
+    await tick();
+    if (!(btn as HTMLButtonElement).disabled) btn.focus();
+  }
+
+  async function moveSection(index: number, dir: -1 | 1, btn?: HTMLElement) {
     if (!purchase) return;
     const arr = [...sections];
     const j = index + dir;
     if (j < 0 || j >= arr.length) return;
     [arr[index], arr[j]] = [arr[j], arr[index]];
     sectionOrder = arr.map((s) => s.id); // optimistic — no full-page refetch
+    if (btn) await restoreFocus(btn);
     await persistOrder(() =>
       ReorderSections.mutate({ purchaseId: purchase.id, orderedIds: arr.map((s) => s.id) }),
     );
   }
 
-  async function moveLine(group: Group, index: number, dir: -1 | 1) {
+  async function moveLine(group: Group, index: number, dir: -1 | 1, btn?: HTMLElement) {
     if (!purchase) return;
     const arr = [...group.items];
     const j = index + dir;
@@ -695,6 +706,7 @@
     // Optimistic — apply the new order via the derived list; the table updates
     // instantly with no full-page refetch.
     itemOrder = orderedIds;
+    if (btn) await restoreFocus(btn);
     await persistOrder(() =>
       ReorderItems.mutate({ purchaseId: purchase.id, orderedIds }),
     );
@@ -1136,13 +1148,13 @@
                   icon={ArrowUp}
                   label="Move section up"
                   disabled={busy || !canReorder || sIdx === 0}
-                  onclick={() => moveSection(sIdx, -1)}
+                  onclick={(e) => moveSection(sIdx, -1, e.currentTarget)}
                 />
                 <IconButton
                   icon={ArrowDown}
                   label="Move section down"
                   disabled={busy || !canReorder || sIdx === sections.length - 1}
-                  onclick={() => moveSection(sIdx, 1)}
+                  onclick={(e) => moveSection(sIdx, 1, e.currentTarget)}
                 />
                 <IconButton
                   icon={Pencil}
@@ -1199,7 +1211,7 @@
                             icon={ArrowUp}
                             label="Move line up"
                             disabled={busy || !canReorder || idx === 0}
-                            onclick={() => moveLine(g, idx, -1)}
+                            onclick={(e) => moveLine(g, idx, -1, e.currentTarget)}
                           />
                           <IconButton
                             icon={ArrowDown}
@@ -1207,7 +1219,7 @@
                             disabled={busy ||
                               !canReorder ||
                               idx === g.visibleItems.length - 1}
-                            onclick={() => moveLine(g, idx, 1)}
+                            onclick={(e) => moveLine(g, idx, 1, e.currentTarget)}
                           />
                           <IconButton
                             icon={Pencil}
