@@ -9,6 +9,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -371,8 +372,8 @@
     label: string;
     unit: string;
     qtyDecimals: number;
-    priceMinor: number;
-    costMinor: number;
+    priceMinor: number | null;
+    costMinor: number | null;
     sortOrder: number;
   }
 
@@ -422,8 +423,8 @@
           unit: d.unit as never,
           qtyDecimals: d.qtyDecimals,
           // Price / cost edits each need their own permission key.
-          priceMinor: canEditPrice ? d.priceMinor : undefined,
-          costMinor: canEditCost ? d.costMinor : undefined,
+          priceMinor: canEditPrice ? (d.priceMinor ?? 0) : undefined,
+          costMinor: canEditCost ? (d.costMinor ?? 0) : undefined,
           sortOrder: d.sortOrder,
         });
       }
@@ -435,8 +436,8 @@
           label: d.label.trim() || undefined,
           unit: d.unit as never,
           qtyDecimals: d.qtyDecimals,
-          priceMinor: d.priceMinor,
-          costMinor: d.costMinor,
+          priceMinor: d.priceMinor ?? 0,
+          costMinor: d.costMinor ?? 0,
           sortOrder: d.sortOrder,
         },
       });
@@ -1025,9 +1026,8 @@
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Price (minor units)</span>
-              <Input
-                type="number"
+              <span class="text-xs font-medium">Price (Rp)</span>
+              <MoneyInput
                 bind:value={variantDraft.priceMinor}
                 disabled={!canEdit || (variantDraft.id != null && !canEditPrice)}
               />
@@ -1038,9 +1038,8 @@
               {/if}
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Cost (minor units)</span>
-              <Input
-                type="number"
+              <span class="text-xs font-medium">Cost (Rp)</span>
+              <MoneyInput
                 bind:value={variantDraft.costMinor}
                 disabled={!canEdit || (variantDraft.id != null && !canEditCost)}
               />

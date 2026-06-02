@@ -8,6 +8,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -258,8 +259,8 @@
   let pickerOpen = $state(false);
   let highlight = $state(0);
   let addQty = $state(1);
-  let addDiscount = $state(0);
-  let addPriceOverride = $state<string>(""); // blank → use variant price
+  let addDiscount = $state<number | null>(0);
+  let addPriceOverride = $state<number | null>(null); // null → use variant price
   // Selected draft (after picking from the list, before pressing Add).
   let draft = $state<{ row: PickRow; productKind: string } | null>(null);
 
@@ -285,7 +286,7 @@
     draft = { row, productKind: row.productKind };
     addQty = 1;
     addDiscount = 0;
-    addPriceOverride = "";
+    addPriceOverride = null;
     pickerOpen = false;
     variantSearch = `${row.productName} · ${row.sku}`;
   }
@@ -294,7 +295,7 @@
     draft = null;
     addQty = 1;
     addDiscount = 0;
-    addPriceOverride = "";
+    addPriceOverride = null;
     variantSearch = "";
   }
 
@@ -305,24 +306,15 @@
     const o = order;
     const d = draft;
     const isService = d.productKind === "service";
-    const overrideRaw = addPriceOverride.trim();
     let priceOverrideMinor: number | undefined;
-    if (overrideRaw) {
+    if (addPriceOverride != null) {
       if (!isService) {
         error = "Price overrides are allowed only on service products.";
         return;
       }
-      const n = Math.round(Number(overrideRaw));
-      if (!Number.isFinite(n) || n < 0) {
-        error = "Price override must be a non-negative integer (minor units).";
-        return;
-      }
-      priceOverrideMinor = n;
+      priceOverrideMinor = addPriceOverride;
     }
-    const discount =
-      addDiscount && Number.isFinite(addDiscount)
-        ? Math.round(addDiscount)
-        : 0;
+    const discount = addDiscount ?? 0;
     const ok = await run(() =>
       AddItem.mutate({
         orderId: o.id,
@@ -378,8 +370,8 @@
   interface LineDraft {
     itemId: string;
     qty: number;
-    discountMinor: number;
-    priceMinor: number;
+    discountMinor: number | null;
+    priceMinor: number | null;
     costMinor: number;
     displayName: string;
     productKind: string;
@@ -388,10 +380,11 @@
   let lineDraft = $state<LineDraft | null>(null);
 
   // Margin % off the net line price (price − per-unit discount) vs. snapshot cost.
-  function marginPct(priceMinor: number, costMinor: number, discountMinor: number, qty: number): number | null {
-    if (priceMinor <= 0 || qty <= 0) return null;
-    const perUnitDiscount = qty > 0 ? discountMinor / qty : 0;
-    const net = priceMinor - perUnitDiscount;
+  function marginPct(priceMinor: number | null, costMinor: number, discountMinor: number | null, qty: number): number | null {
+    const price = priceMinor ?? 0;
+    if (price <= 0 || qty <= 0) return null;
+    const perUnitDiscount = qty > 0 ? (discountMinor ?? 0) / qty : 0;
+    const net = price - perUnitDiscount;
     if (net <= 0) return null;
     return ((net - costMinor) / net) * 100;
   }
@@ -426,9 +419,9 @@
       UpdateItem.mutate({
         orderItemId: d.itemId,
         qty: d.qty,
-        discountMinor: d.discountMinor,
+        discountMinor: d.discountMinor ?? 0,
         // Only send price override for service products; ignored otherwise.
-        priceOverrideMinor: isService ? d.priceMinor : undefined,
+        priceOverrideMinor: isService ? (d.priceMinor ?? 0) : undefined,
         // Empty string clears back to default; otherwise overrides.
         displayNameOverride: d.displayName.trim(),
       }),
@@ -461,20 +454,20 @@
   }
 
   // ---- Payment entry -------------------------------------------------------
-  let payAmount = $state<string>("");
+  let payAmount = $state<number | null>(null);
 
   async function recordPayment() {
     if (!order) return;
-    const amt = Math.round(Number(payAmount));
-    if (!Number.isFinite(amt) || amt <= 0) {
-      error = "Payment amount must be a positive integer (minor units).";
+    const amt = payAmount ?? 0;
+    if (amt <= 0) {
+      error = "Payment amount must be a positive amount.";
       return;
     }
     const ok = await run(() =>
       AddPayment.mutate({ orderId: order.id, amountMinor: amt }),
     );
     if (ok) {
-      payAmount = "";
+      payAmount = null;
       await refresh();
     }
   }
@@ -697,21 +690,12 @@
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Discount (minor units)</span>
-                <Input
-                  type="number"
-                  min={0}
-                  bind:value={addDiscount}
-                  disabled={busy || !canEdit}
-                />
+                <span class="text-xs font-medium">Discount (Rp)</span>
+                <MoneyInput bind:value={addDiscount} disabled={busy || !canEdit} />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">
-                  Price override (minor units)
-                </span>
-                <Input
-                  type="number"
-                  min={0}
+                <span class="text-xs font-medium">Price override (Rp)</span>
+                <MoneyInput
                   placeholder={draft.productKind === "service"
                     ? "Leave blank to use base price"
                     : "Service products only"}
@@ -896,19 +880,12 @@
             />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Discount (minor units)</span>
-            <Input
-              type="number"
-              min={0}
-              bind:value={lineDraft.discountMinor}
-              disabled={busy || !canEdit}
-            />
+            <span class="text-xs font-medium">Discount (Rp)</span>
+            <MoneyInput bind:value={lineDraft.discountMinor} disabled={busy || !canEdit} />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Price (minor units)</span>
-            <Input
-              type="number"
-              min={0}
+            <span class="text-xs font-medium">Price (Rp)</span>
+            <MoneyInput
               bind:value={lineDraft.priceMinor}
               disabled={busy || !canEdit || lineDraft.productKind !== "service"}
             />
@@ -1026,10 +1003,8 @@
         <h2 class="text-sm font-semibold">Record payment</h2>
         <div class="flex items-end gap-2">
           <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Amount (minor units)</span>
-            <Input
-              type="number"
-              min={1}
+            <span class="text-xs font-medium">Amount (Rp)</span>
+            <MoneyInput
               bind:value={payAmount}
               placeholder={String(Math.max(computed - paid, 0))}
               disabled={busy || !canEdit}

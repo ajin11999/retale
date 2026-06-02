@@ -7,6 +7,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -629,8 +630,8 @@
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Amount (minor units)</span>
-              <Input type="number" bind:value={payAmount} class="w-40" />
+              <span class="text-xs font-medium">Amount (Rp)</span>
+              <MoneyInput bind:value={payAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">Note (optional)</span>
@@ -652,10 +653,8 @@
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">
-                Signed amount (minor units)
-              </span>
-              <Input type="number" bind:value={adjAmount} class="w-40" />
+              <span class="text-xs font-medium">Signed amount (Rp)</span>
+              <MoneyInput allowNegative bind:value={adjAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">Note (required)</span>

@@ -18,6 +18,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -188,7 +189,15 @@
         qtyOrdered: $qtyOrdered
         unitCostMinor: $unitCostMinor
       ) {
+        # Select the mutated scalars so Houdini normalizes them straight into
+        # the cache — inline cell edits then update instantly, no refetch wait.
         id
+        sectionId
+        variantId
+        description
+        qtyOrdered
+        unitCostMinor
+        sortOrder
       }
     }
   `);
@@ -497,7 +506,7 @@
     variantId: string;
     description: string;
     qtyOrdered: number;
-    unitCostMinor: number;
+    unitCostMinor: number | null;
   }
   let itemDraft = $state<ItemDraft | null>(null);
   // The group the line editor is anchored to (its key), so the form renders
@@ -537,6 +546,7 @@
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
+    const unitCostMinor = d.unitCostMinor ?? 0;
     const ok = await run("Item", () =>
       d.id
         ? UpdateItem.mutate({
@@ -545,7 +555,7 @@
             variantId: d.variantId || null,
             description: d.description.trim() || null,
             qtyOrdered: d.qtyOrdered,
-            unitCostMinor: d.unitCostMinor,
+            unitCostMinor,
           })
         : CreateItem.mutate({
             purchaseId: purchase.id,
@@ -553,7 +563,7 @@
             variantId: d.variantId || null,
             description: d.description.trim() || null,
             qtyOrdered: d.qtyOrdered,
-            unitCostMinor: d.unitCostMinor,
+            unitCostMinor,
           }),
     );
     if (ok) {
@@ -566,6 +576,114 @@
     if (!confirm("Delete this line?")) return;
     const ok = await run("Item", () => DeleteItem.mutate({ id }));
     if (ok) await refetch();
+  }
+
+  // ---- Inline cell edit ----------------------------------------------------
+  // Click a line's qty / unit-cost / (free-text) description cell to edit just
+  // that field in place — the common quick tweak, without the full line form.
+  // Variant + section stay in the form: they're structural, not quick edits.
+  type CellField = "qty" | "cost" | "desc";
+  let cellEdit = $state<{ id: string; field: CellField } | null>(null);
+  // Qty + description edit through a raw <input> (string); unit cost edits
+  // through MoneyInput (integer minor units), so they need separate bindings.
+  let cellStr = $state("");
+  let cellMoney = $state<number | null>(null);
+
+  // Focus + select the inline <input> the moment it mounts, so you can type or
+  // tab straight in. Actions only attach to elements, hence the raw <input>.
+  // (MoneyInput does this itself via its `autofocus` prop.)
+  function selectOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  function startCellEdit(i: Line, field: CellField) {
+    if (!editable) return;
+    if (field === "cost") cellMoney = i.unitCostMinor;
+    else cellStr = field === "qty" ? String(i.qtyOrdered) : (i.description ?? "");
+    cellEdit = { id: i.id, field };
+  }
+
+  // Commit the in-flight cell edit. Quiet like persistOrder — no busy/banner
+  // churn for a one-field tweak; only surface failures. The mutation returns
+  // the changed scalars (Houdini normalizes them, so the cell updates at once);
+  // the trailing refetch refreshes the header's server-computed total.
+  async function commitCell() {
+    const c = cellEdit;
+    if (!c || !purchase) return;
+    const i = items.find((x) => x.id === c.id);
+    if (!i) {
+      cellEdit = null;
+      return;
+    }
+
+    const patch: {
+      id: string;
+      qtyOrdered?: number;
+      unitCostMinor?: number;
+      description?: string | null;
+    } = { id: c.id };
+
+    if (c.field === "qty") {
+      const n = Number(cellStr);
+      if (!Number.isFinite(n) || n < 0) {
+        feedback = { ok: false, text: "Quantity must be a non-negative number." };
+        return;
+      }
+      if (n < i.qtyDelivered) {
+        feedback = {
+          ok: false,
+          text: `Can't order fewer than the ${i.qtyDelivered} already delivered.`,
+        };
+        return;
+      }
+      if (n === i.qtyOrdered) {
+        cellEdit = null;
+        return;
+      }
+      patch.qtyOrdered = n;
+    } else if (c.field === "cost") {
+      const n = cellMoney ?? 0;
+      if (n === i.unitCostMinor) {
+        cellEdit = null;
+        return;
+      }
+      patch.unitCostMinor = n;
+    } else {
+      const d = cellStr.trim();
+      if (!i.variantId && !d) {
+        feedback = { ok: false, text: "A non-stock line needs a description." };
+        return;
+      }
+      if ((d || null) === (i.description ?? null)) {
+        cellEdit = null;
+        return;
+      }
+      patch.description = d || null;
+    }
+
+    cellEdit = null;
+    try {
+      const res = await UpdateItem.mutate(patch);
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    }
+    await refetch();
+  }
+
+  // Enter commits, Escape abandons. Escape nulls the edit first so the input
+  // unmounts and the resulting blur becomes a no-op (commitCell guards null).
+  function cellKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitCell();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cellEdit = null;
+    }
   }
 
   type PurchaseLine = NonNullable<typeof purchase>["items"][number];
@@ -1074,12 +1192,8 @@
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Unit cost (minor units)</span>
-                <Input
-                  type="number"
-                  bind:value={itemDraft.unitCostMinor}
-                  disabled={!editable}
-                />
+                <span class="text-xs font-medium">Unit cost (Rp)</span>
+                <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
               </label>
             </div>
             <div class="flex justify-end gap-2">
@@ -1190,8 +1304,49 @@
                 <tbody>
                   {#each g.visibleItems as i, idx (i.id)}
                     <tr class="border-b last:border-0 even:bg-muted/40">
-                      <td class="px-4 py-2">{lineLabel(i)}</td>
-                      <td class="px-4 py-2 text-right tabular-nums">{i.qtyOrdered}</td>
+                      <td class="px-4 py-2">
+                        {#if cellEdit?.id === i.id && cellEdit.field === "desc"}
+                          <input
+                            bind:value={cellStr}
+                            use:selectOnMount
+                            onkeydown={cellKeydown}
+                            onblur={commitCell}
+                            class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                        {:else if editable && !i.variantId}
+                          <button
+                            type="button"
+                            class="-mx-1 rounded px-1 text-left hover:bg-accent"
+                            title="Edit description"
+                            onclick={() => startCellEdit(i, "desc")}
+                            >{lineLabel(i)}</button
+                          >
+                        {:else}
+                          {lineLabel(i)}
+                        {/if}
+                      </td>
+                      <td class="px-4 py-2 text-right tabular-nums">
+                        {#if cellEdit?.id === i.id && cellEdit.field === "qty"}
+                          <input
+                            type="number"
+                            bind:value={cellStr}
+                            use:selectOnMount
+                            onkeydown={cellKeydown}
+                            onblur={commitCell}
+                            class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                        {:else if editable}
+                          <button
+                            type="button"
+                            class="-mx-1 rounded px-1 hover:bg-accent"
+                            title="Edit quantity"
+                            onclick={() => startCellEdit(i, "qty")}
+                            >{i.qtyOrdered}</button
+                          >
+                        {:else}
+                          {i.qtyOrdered}
+                        {/if}
+                      </td>
                       <td class="px-4 py-2 text-right tabular-nums">
                         {#if i.qtyDelivered > 0}
                           <Badge class={deliveryBadgeClass(i)}>
@@ -1202,7 +1357,25 @@
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">
-                        {formatMoney(i.unitCostMinor)}
+                        {#if cellEdit?.id === i.id && cellEdit.field === "cost"}
+                          <MoneyInput
+                            autofocus
+                            bind:value={cellMoney}
+                            onkeydown={cellKeydown}
+                            onblur={commitCell}
+                            class="ml-auto h-7 w-28 px-2 text-right tabular-nums"
+                          />
+                        {:else if editable}
+                          <button
+                            type="button"
+                            class="-mx-1 rounded px-1 hover:bg-accent"
+                            title="Edit unit cost (minor units)"
+                            onclick={() => startCellEdit(i, "cost")}
+                            >{formatMoney(i.unitCostMinor)}</button
+                          >
+                        {:else}
+                          {formatMoney(i.unitCostMinor)}
+                        {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">{formatMoney(lineTotal(i))}</td>
                       <td class="px-3 py-2 text-right whitespace-nowrap">

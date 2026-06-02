@@ -7,6 +7,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
@@ -71,8 +72,8 @@
     kind: string;
     priceMode: string;
     sku: string;
-    priceMinor: number;
-    costMinor: number;
+    priceMinor: number | null;
+    costMinor: number | null;
   }
 
   let draft = $state<ProductDraft | null>(null);
@@ -106,8 +107,8 @@
         variants: [
           {
             sku: d.sku.trim() || undefined,
-            priceMinor: d.priceMinor,
-            costMinor: d.costMinor,
+            priceMinor: d.priceMinor ?? 0,
+            costMinor: d.costMinor ?? 0,
           },
         ],
       });
@@ -348,12 +349,12 @@
         </label>
         <div></div>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Price (minor units)</span>
-          <Input type="number" bind:value={draft.priceMinor} />
+          <span class="text-xs font-medium">Price (Rp)</span>
+          <MoneyInput bind:value={draft.priceMinor} />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Cost (minor units)</span>
-          <Input type="number" bind:value={draft.costMinor} />
+          <span class="text-xs font-medium">Cost (Rp)</span>
+          <MoneyInput bind:value={draft.costMinor} />
         </label>
       </div>
       <p class="text-xs text-muted-foreground">

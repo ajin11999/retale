@@ -6,6 +6,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
@@ -231,20 +232,19 @@
   // addingUnder: id of the parent (or "" for a root). null means no form open.
   let addingUnder = $state<string | null | "">(null);
   let nDesc = $state("");
-  let nCost = $state<string>("");
+  let nCost = $state<number | null>(null);
   let nQty = $state<string>("");
 
   function startAdd(parentId: string | "") {
     addingUnder = parentId;
     nDesc = "";
-    nCost = "";
+    nCost = null;
     nQty = "";
   }
 
   async function addItem() {
     if (!delivery || addingUnder === null) return;
-    const cost = Number(nCost);
-    if (!nDesc.trim() || !Number.isFinite(cost)) return;
+    if (!nDesc.trim() || nCost == null) return;
     const qty = nQty.trim() ? Number(nQty) : null;
     busy = true;
     error = null;
@@ -254,7 +254,7 @@
         parentItemId: addingUnder === "" ? null : addingUnder,
         description: nDesc.trim(),
         qty,
-        costMinor: Math.round(cost),
+        costMinor: nCost,
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -271,20 +271,19 @@
 
   let editingId = $state<string | null>(null);
   let eDesc = $state("");
-  let eCost = $state<string>("");
+  let eCost = $state<number | null>(null);
   let eQty = $state<string>("");
 
   function startEdit(it: Item) {
     editingId = it.id;
     eDesc = it.description;
-    eCost = String(it.costMinor);
+    eCost = it.costMinor;
     eQty = it.qty == null ? "" : String(it.qty);
   }
 
   async function saveEdit() {
     if (!editingId) return;
-    const cost = Number(eCost);
-    if (!eDesc.trim() || !Number.isFinite(cost)) return;
+    if (!eDesc.trim() || eCost == null) return;
     const qty = eQty.trim() ? Number(eQty) : null;
     busy = true;
     error = null;
@@ -293,7 +292,7 @@
         id: editingId,
         description: eDesc.trim(),
         qty,
-        costMinor: Math.round(cost),
+        costMinor: eCost,
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -537,10 +536,10 @@
             <Input bind:value={nQty} inputmode="decimal" />
           </label>
           <label class="w-40 space-y-1">
-            <span class="text-xs font-medium">Cost (minor)</span>
-            <Input bind:value={nCost} inputmode="numeric" />
+            <span class="text-xs font-medium">Cost (Rp)</span>
+            <MoneyInput bind:value={nCost} />
           </label>
-          <Button size="sm" disabled={busy || !nDesc.trim() || !nCost} onclick={addItem}>
+          <Button size="sm" disabled={busy || !nDesc.trim() || nCost == null} onclick={addItem}>
             Add
           </Button>
           <Button
@@ -576,7 +575,7 @@
       {#if editingId === node.item.id}
         <Input bind:value={eDesc} class="flex-1" />
         <Input bind:value={eQty} class="w-24" inputmode="decimal" placeholder="qty" />
-        <Input bind:value={eCost} class="w-32" inputmode="numeric" />
+        <MoneyInput bind:value={eCost} class="w-32" />
         <Button size="sm" disabled={busy} onclick={saveEdit}>Save</Button>
         <Button
           size="sm"

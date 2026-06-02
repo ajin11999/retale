@@ -9,6 +9,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -407,7 +408,7 @@
   }
 
   // ---- Price overrides -----------------------------------------------------
-  let priceDraft = $state<{ variantId: string; priceMinor: number } | null>(
+  let priceDraft = $state<{ variantId: string; priceMinor: number | null } | null>(
     null,
   );
 
@@ -418,7 +419,7 @@
       SetCustomerPrice.mutate({
         customerId: customer.id,
         variantId: d.variantId,
-        priceMinor: d.priceMinor,
+        priceMinor: d.priceMinor ?? 0,
       }),
     );
     if (ok) {
@@ -564,9 +565,8 @@
         <h2 class="text-sm font-semibold">Credit limit</h2>
         <div class="flex items-end gap-2">
           <label class="space-y-1">
-            <span class="text-xs font-medium">Limit (minor units)</span>
-            <Input
-              type="number"
+            <span class="text-xs font-medium">Limit (Rp)</span>
+            <MoneyInput
               bind:value={creditLimit}
               placeholder="Empty = no limit"
               class="w-48"
@@ -593,8 +593,8 @@
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Amount (minor units)</span>
-              <Input type="number" bind:value={payAmount} class="w-40" />
+              <span class="text-xs font-medium">Amount (Rp)</span>
+              <MoneyInput bind:value={payAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">Note (optional)</span>
@@ -616,10 +616,8 @@
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">
-                Signed amount (minor units)
-              </span>
-              <Input type="number" bind:value={adjAmount} class="w-40" />
+              <span class="text-xs font-medium">Signed amount (Rp)</span>
+              <MoneyInput allowNegative bind:value={adjAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">Note (required)</span>
@@ -708,12 +706,8 @@
               </Select>
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Price (minor units)</span>
-              <Input
-                type="number"
-                bind:value={priceDraft.priceMinor}
-                disabled={!canEdit}
-              />
+              <span class="text-xs font-medium">Price (Rp)</span>
+              <MoneyInput bind:value={priceDraft.priceMinor} disabled={!canEdit} />
             </label>
           </div>
           <div class="flex justify-end gap-2">

@@ -8,6 +8,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -242,19 +243,19 @@
 
   // ---- Ledger entry form ---------------------------------------------------
   let action = $state<"payout" | "deposit" | "adjust" | null>(null);
-  let aAmount = $state<string>("");
+  let aAmount = $state<number | null>(null);
   let aNote = $state<string>("");
 
   function startAction(kind: "payout" | "deposit" | "adjust") {
     action = kind;
-    aAmount = "";
+    aAmount = null;
     aNote = "";
   }
 
   async function submitAction() {
     if (!account || !action) return;
-    const amt = Number(aAmount);
-    if (!Number.isFinite(amt)) return;
+    const amt = aAmount;
+    if (amt == null) return;
     busy = true;
     error = null;
     info = null;
@@ -541,8 +542,10 @@
           {/if}
           <div class="flex items-end gap-2">
             <label class="flex-1 space-y-1">
-              <span class="text-xs font-medium">Amount (minor units)</span>
-              <Input bind:value={aAmount} inputmode={action === "adjust" ? "decimal" : "numeric"} />
+              <span class="text-xs font-medium">
+                {action === "adjust" ? "Signed amount (Rp)" : "Amount (Rp)"}
+              </span>
+              <MoneyInput bind:value={aAmount} allowNegative={action === "adjust"} />
             </label>
             <label class="flex-[2] space-y-1">
               <span class="text-xs font-medium">
@@ -550,7 +553,7 @@
               </span>
               <Input bind:value={aNote} />
             </label>
-            <Button size="sm" disabled={busy || !aAmount} onclick={submitAction}>
+            <Button size="sm" disabled={busy || aAmount == null} onclick={submitAction}>
               Submit
             </Button>
             <Button
