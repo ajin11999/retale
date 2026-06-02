@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Set-Location *)",
+      "PowerShell(Start-Sleep *)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
