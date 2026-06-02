@@ -33,6 +33,7 @@ export type OrderErrorCode =
   | "INVALID_INPUT"
   | "EMPTY_ORDER"
   | "PRICE_OVERRIDE_NOT_ALLOWED"
+  | "OPEN_PRICE_REQUIRES_PRICE"
   | "WALKIN_NOT_FULLY_PAID"
   | "OVERPAID"
   | "CREDIT_LIMIT_EXCEEDED"
@@ -332,7 +333,12 @@ async function buildSnapshotRow(opts: {
       snapshotUnit: variant.unit,
       snapshotCategoryName: category?.name ?? null,
       snapshotPriceMinor: priceMinor,
-      snapshotCostMinor: product.kind === "service" ? 0 : variant.costMinor,
+      snapshotCostMinor:
+        product.kind === "service"
+          ? 0
+          : product.kind === "open_price"
+            ? Math.round((priceMinor * (product.costRatioBps ?? 0)) / 10000)
+            : variant.costMinor,
       snapshotTaxRateBps: product.taxRateBps,
       snapshotPriceMode: product.priceMode,
       snapshotTrackingAccountName: trackingAccountName,
@@ -463,19 +469,25 @@ async function buildLines(
     });
   }
 
-  const isService = product.kind === "service";
-  if (item.priceOverrideMinor != null && !isService) {
+  // Service and open-price lines both take a cashier-entered price. Open-price
+  // items (loose hardware sold by guess) have no base price, so an entered
+  // price is mandatory rather than optional.
+  const isOpenPrice = product.kind === "open_price";
+  const acceptsPriceEntry = product.kind === "service" || isOpenPrice;
+  if (item.priceOverrideMinor != null && !acceptsPriceEntry) {
     throw new OrderError(
       "PRICE_OVERRIDE_NOT_ALLOWED",
-      "price overrides are allowed only on service products",
+      "price overrides are allowed only on service and open-price products",
     );
   }
   let price: number;
-  if (isService && item.priceOverrideMinor != null) {
+  if (acceptsPriceEntry && item.priceOverrideMinor != null) {
     if (!Number.isInteger(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
       throw new OrderError("INVALID_INPUT", "price override must be a non-negative integer");
     }
     price = item.priceOverrideMinor;
+  } else if (isOpenPrice) {
+    throw new OrderError("OPEN_PRICE_REQUIRES_PRICE", "open-price items require an entered price");
   } else {
     price = await resolvePrice(tx, variant, customerId, item.qty);
   }
@@ -946,10 +958,10 @@ export async function updateCustomerSaleItem(input: {
 
     let newPrice = oldPrice;
     if (input.priceOverrideMinor != null) {
-      if (!product || product.kind !== "service") {
+      if (!product || (product.kind !== "service" && product.kind !== "open_price")) {
         throw new OrderError(
           "PRICE_OVERRIDE_NOT_ALLOWED",
-          "price overrides are allowed only on service products",
+          "price overrides are allowed only on service and open-price products",
         );
       }
       if (
@@ -1030,6 +1042,10 @@ export async function updateCustomerSaleItem(input: {
       snapshotPriceMinor: newPrice,
       attributionAmountMinor: newAttribution,
     };
+    // Open-price cost is derived from the (possibly edited) price.
+    if (product?.kind === "open_price") {
+      patch.snapshotCostMinor = Math.round((newPrice * (product.costRatioBps ?? 0)) / 10000);
+    }
     if (input.displayNameOverride !== undefined) {
       const trimmed = input.displayNameOverride?.trim() ?? "";
       patch.snapshotPublicName = trimmed === "" ? null : trimmed;

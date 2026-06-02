@@ -79,7 +79,7 @@ export const typeDefs = /* GraphQL */ `
     variantId: ID!
     qty: Int!
     discountMinor: Float
-    "Allowed only on service products."
+    "Cashier-entered price. Allowed on service products; required on open-price products."
     priceOverrideMinor: Float
     "Overrides the computed tracking attribution; requires order.attribute."
     attributionAmountOverrideMinor: Float

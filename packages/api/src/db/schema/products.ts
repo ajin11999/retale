@@ -61,7 +61,9 @@ export const ONLINE_STOCK_MODES = ["show_real", "peek", "hide"] as const;
 /**
  * Shared product identity. The sellable SKU lives on `product_variants`;
  * every product has at least one. `kind` distinguishes stock-tracked goods
- * from services (which skip stock movements and allow price overrides).
+ * from services (which skip stock movements and allow price overrides) and
+ * `open_price` items — loose hardware (fasteners) sold by a guessed lump
+ * price, no stock tracking, with cost derived from `costRatioBps`.
  */
 export const products = mysqlTable(
   "products",
@@ -73,12 +75,15 @@ export const products = mysqlTable(
     // Null means public surfaces fall back to `name`.
     publicName: varchar({ length: 300 }),
     description: text(),
-    kind: mysqlEnum(["physical", "service", "bundle"]).notNull().default("physical"),
+    kind: mysqlEnum(["physical", "service", "bundle", "open_price"]).notNull().default("physical"),
     categoryId: ulidRef().references(() => productCategories.id, { onDelete: "set null" }),
     taxRateBps: int().notNull().default(0),
     priceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
     minQty: int(),
     minMarginBps: int(),
+    // open_price only: snapshot cost = entered price × ratio ÷ 10000 (e.g.
+    // 6000 = 60%). Null on every other kind; ignored when not open_price.
+    costRatioBps: int(),
     // Default supplier — the reorder forecast inherits this vendor's lead time.
     primaryVendorId: ulidRef().references(() => vendors.id, {
       onDelete: "set null",

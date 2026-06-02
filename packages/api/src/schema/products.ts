@@ -12,7 +12,7 @@ import { db } from "../lib/db.ts";
 import * as products from "../services/product-service.ts";
 
 export const typeDefs = /* GraphQL */ `
-  enum ProductKind { physical service bundle }
+  enum ProductKind { physical service bundle open_price }
   enum PriceMode { tax_inclusive tax_exclusive }
   enum VariantUnit { piece g ml mm }
 
@@ -76,6 +76,8 @@ export const typeDefs = /* GraphQL */ `
     priceMode: PriceMode!
     minQty: Int
     minMarginBps: Int
+    "open_price only: snapshot cost = entered price × ratio ÷ 10000 (6000 = 60%)."
+    costRatioBps: Int
     "Default supplier — the reorder forecast inherits this vendor's lead time."
     primaryVendorId: ID
     "When false, the product is excluded from the reorder forecast."
@@ -124,6 +126,7 @@ export const typeDefs = /* GraphQL */ `
       priceMode: PriceMode!
       minQty: Int
       minMarginBps: Int
+      costRatioBps: Int
       primaryVendorId: ID
       replenishMonitored: Boolean
       variants: [VariantInput!]!
@@ -139,6 +142,7 @@ export const typeDefs = /* GraphQL */ `
       priceMode: PriceMode
       minQty: Int
       minMarginBps: Int
+      costRatioBps: Int
       primaryVendorId: ID
       replenishMonitored: Boolean
     ): Product!

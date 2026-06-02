@@ -20,6 +20,7 @@ Retale is a **fresh-design** POS/inventory backend. ProDuck is **not** a schema 
 10. **Audit columns — `created_at`, `updated_at` on every master table.** `created_by_user_id` where meaningful. `deleted_at` only on tables where audit-trail soft-delete is genuinely needed (TBD per table; default: no soft-delete).
 11. **Product variants are first-class.** `products` holds shared identity (name, category, tax, description, images). `product_variants` holds the actual SKU (sku, barcode, price, cost, stock, unit, qty_decimals). Every product has ≥1 variant; products with no real variation auto-get a single default variant the UI hides.
 12. **Two-track product lifecycle: archive (default) + hard delete (escape hatch).** `products.archived_at TIMESTAMP NULL` hides from POS but keeps admin-visible and reversible. Hard delete is root-only, requires confirmation, removes the row; `order_items.product_id` and `order_items.variant_id` go NULL via `ON DELETE SET NULL`; snapshot fields preserve the sale record forever.
+13. **Open-price products — for loose hardware (fasteners) sold by guess.** (Decided 2026-06-02.) A small set of category-level products (e.g. Bolts, Nuts, Washers, Screws, split by material such as zinc vs stainless) with `kind='open_price'`. The clerk counts by hand, eyeballs a fair price, and types a **lump total** — no per-size SKU, no bin lookup, no barcode, no stock tracking, no replenishment. `snapshot_cost_minor` is **derived** as `entered_price × products.cost_ratio_bps` (a per-product/per-category ratio) so margin and profit reports keep working without anyone ever entering a real cost. See Product structure → Open-price products.
 
 ---
 
@@ -56,12 +57,13 @@ products:
   id                 ULID PK
   name               VARCHAR NOT NULL
   description        TEXT NULL
-  kind               ENUM('physical','service') NOT NULL DEFAULT 'physical'
+  kind               ENUM('physical','service','open_price') NOT NULL DEFAULT 'physical'
   category_id        ULID FK → product_categories NULL
   tax_rate_bps       INT NOT NULL DEFAULT 0       -- e.g. 1100 = 11%
   price_mode         ENUM('tax_inclusive','tax_exclusive') NOT NULL
   min_qty            INT NULL                     -- replenishment override (else category)
   min_margin_bps     INT NULL                     -- alert override (else category)
+  cost_ratio_bps     INT NULL                     -- open_price only: snapshot_cost = entered price × ratio (e.g. 6000 = 60%)
   archived_at        TIMESTAMP NULL               -- archive (reversible)
   created_at         TIMESTAMP
   updated_at         TIMESTAMP
@@ -158,6 +160,19 @@ snapshot_tracking_account_name    VARCHAR NULL          -- survives hard-delete 
 Everything else (variants, discounts, tax, tracking-account attribution, snapshots) works identically across kinds. Service products may have multiple variants for service tiers ("Standard", "Premium") if useful.
 
 API-level enforcement: a price override on a `kind='physical'` line is rejected. On a `kind='service'` line, the override flows into `snapshot_price_minor` directly.
+
+### Open-price products (loose hardware / fasteners)
+
+The fastener problem: small parts, no barcodes, bought in mixed bulk across many sizes/types. Per-size SKUs + scanning + a variant grid would make the clerk walk back and forth reading bin labels while the customer waits. Decision: **don't catalog fasteners by size at all.** Sell them through a few open-price products and let the clerk guess.
+
+- **`kind = 'open_price'`**: sale skips `stock_movements` entirely (like a service). At POS the clerk enters a **lump total price**; there is no base price to scan against. `snapshot_price_minor` = the entered total. `snapshot_cost_minor` = `round(entered_total × products.cost_ratio_bps / 10000)`. WAC, stock, replenishment, and low-stock alerts do not apply.
+- **A few category products, not one.** Seed one open-price product per fastener category that has a distinct margin — e.g. Bolts (zinc), Bolts (stainless), Nuts, Washers, Screws. Each carries its own `cost_ratio_bps`, so stainless and zinc can cost out differently. Each is one tap in the register.
+- **Cost ratio is per product** (`products.cost_ratio_bps`, basis points; `6000` = cost is 60% of the entered price). NULL/non-`open_price` products ignore it. Margin alerts (`low_margin` / `negative_margin`) still work off `(price − cost) / price` using the derived cost.
+- **Quantity is not counted into the system.** The line is a single lump (`qty = 1`, `unit = 'piece'`); the receipt reads e.g. "Bolts (zinc) — Rp 15.000". If a per-line count is ever wanted, it can move to qty × unit-price later without a schema change.
+- **Every product still needs ≥1 variant** (locked decision #11). The open-price product gets a single hidden default variant with `price_minor = 0`, `cost_minor = 0`; both are placeholders — the entered price and derived cost live only in the order-item snapshot.
+- **Tax** resolves through the product's `price_mode` / `tax_rate_bps` like everything else; a guessed lump is most naturally `tax_inclusive`.
+
+API-level enforcement: an `open_price` line **requires** an entered price (rejected without one); the price flows into `snapshot_price_minor` and the derived cost into `snapshot_cost_minor` in the same write. No `stock_movement` is emitted.
 
 ### Images
 

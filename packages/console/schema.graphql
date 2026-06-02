@@ -170,8 +170,8 @@ type Mutation {
   updateCategory(id: ID!, name: String, parentId: ID, minQty: Int, minMarginBps: Int): Category!
   setCategoryArchived(id: ID!, archived: Boolean!): Category!
   deleteCategory(id: ID!): Boolean!
-  createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
-  updateProduct(id: ID!, name: String, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode, minQty: Int, minMarginBps: Int, primaryVendorId: ID, replenishMonitored: Boolean): Product!
+  createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
+  updateProduct(id: ID!, name: String, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean): Product!
   setProductArchived(id: ID!, archived: Boolean!): Product!
 
   """Hard delete — root-only. Prefer archiving."""
@@ -532,6 +532,7 @@ enum ProductKind {
   physical
   service
   bundle
+  open_price
 }
 
 enum PriceMode {
@@ -617,6 +618,11 @@ type Product {
   priceMode: PriceMode!
   minQty: Int
   minMarginBps: Int
+
+  """
+  open_price only: snapshot cost = entered price × ratio ÷ 10000 (6000 = 60%).
+  """
+  costRatioBps: Int
 
   """
   Default supplier — the reorder forecast inherits this vendor's lead time.
@@ -1143,7 +1149,9 @@ input PosOrderItemInput {
   qty: Int!
   discountMinor: Float
 
-  """Allowed only on service products."""
+  """
+  Cashier-entered price. Allowed on service products; required on open-price products.
+  """
   priceOverrideMinor: Float
 
   """Overrides the computed tracking attribution; requires order.attribute."""

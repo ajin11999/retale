@@ -215,24 +215,34 @@ export async function createProduct(input: {
   name: string;
   publicName?: string | null;
   description?: string | null;
-  kind?: "physical" | "service";
+  kind?: "physical" | "service" | "bundle" | "open_price";
   categoryId?: string | null;
   taxRateBps?: number;
   priceMode: "tax_inclusive" | "tax_exclusive";
   minQty?: number | null;
   minMarginBps?: number | null;
+  costRatioBps?: number | null;
   primaryVendorId?: string | null;
   replenishMonitored?: boolean;
   variants: VariantInput[];
   createdByUserId: string;
 }): Promise<ProductWithVariants> {
-  if (!input.variants?.length) throw new ProductError("NO_VARIANTS");
+  const kind = input.kind ?? "physical";
+  // Open-price products are sold by a guessed lump at the register, so their
+  // single variant is just a placeholder — auto-create one if the caller
+  // didn't bother supplying any.
+  const variantInputs =
+    kind === "open_price" && !input.variants?.length
+      ? [{ priceMinor: 0 } satisfies VariantInput]
+      : input.variants;
+  if (!variantInputs?.length) throw new ProductError("NO_VARIANTS");
   if (input.categoryId) await loadCategory(input.categoryId);
   await assertVendorExists(input.primaryVendorId);
   assertNonNegative("taxRateBps", input.taxRateBps);
+  assertNonNegative("costRatioBps", input.costRatioBps ?? undefined);
 
   const productId = ulid();
-  const variantRows = input.variants.map((v) => buildVariantRow(productId, v));
+  const variantRows = variantInputs.map((v) => buildVariantRow(productId, v));
 
   try {
     await db.transaction(async (tx) => {
@@ -241,12 +251,13 @@ export async function createProduct(input: {
         name: input.name,
         publicName: input.publicName ?? null,
         description: input.description ?? null,
-        kind: input.kind ?? "physical",
+        kind,
         categoryId: input.categoryId ?? null,
         taxRateBps: input.taxRateBps ?? 0,
         priceMode: input.priceMode,
         minQty: input.minQty ?? null,
         minMarginBps: input.minMarginBps ?? null,
+        costRatioBps: input.costRatioBps ?? null,
         primaryVendorId: input.primaryVendorId ?? null,
         ...(input.replenishMonitored !== undefined && {
           replenishMonitored: input.replenishMonitored,
@@ -267,12 +278,13 @@ export async function updateProduct(
     name?: string;
     publicName?: string | null;
     description?: string | null;
-    kind?: "physical" | "service";
+    kind?: "physical" | "service" | "bundle" | "open_price";
     categoryId?: string | null;
     taxRateBps?: number;
     priceMode?: "tax_inclusive" | "tax_exclusive";
     minQty?: number | null;
     minMarginBps?: number | null;
+    costRatioBps?: number | null;
     primaryVendorId?: string | null;
     replenishMonitored?: boolean;
   },
@@ -281,6 +293,7 @@ export async function updateProduct(
   if (patch.categoryId) await loadCategory(patch.categoryId);
   if (patch.primaryVendorId) await assertVendorExists(patch.primaryVendorId);
   assertNonNegative("taxRateBps", patch.taxRateBps);
+  assertNonNegative("costRatioBps", patch.costRatioBps ?? undefined);
 
   await db
     .update(products)
@@ -294,6 +307,7 @@ export async function updateProduct(
       ...(patch.priceMode !== undefined && { priceMode: patch.priceMode }),
       ...(patch.minQty !== undefined && { minQty: patch.minQty }),
       ...(patch.minMarginBps !== undefined && { minMarginBps: patch.minMarginBps }),
+      ...(patch.costRatioBps !== undefined && { costRatioBps: patch.costRatioBps }),
       ...(patch.primaryVendorId !== undefined && {
         primaryVendorId: patch.primaryVendorId,
       }),

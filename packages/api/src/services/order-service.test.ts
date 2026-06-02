@@ -112,9 +112,10 @@ async function seedSession(code: string): Promise<string> {
  * `stockQty` (default 100). Returns the variant id.
  */
 async function seedVariant(opts?: {
-  kind?: "physical" | "service" | "bundle";
+  kind?: "physical" | "service" | "bundle" | "open_price";
   priceMinor?: number;
   costMinor?: number;
+  costRatioBps?: number;
   stockQty?: number;
   priceMode?: "tax_inclusive" | "tax_exclusive";
   taxRateBps?: number;
@@ -131,6 +132,7 @@ async function seedVariant(opts?: {
     name: "Widget",
     publicName: opts?.publicName ?? null,
     kind,
+    costRatioBps: opts?.costRatioBps ?? null,
     priceMode: opts?.priceMode ?? "tax_exclusive",
     taxRateBps: opts?.taxRateBps ?? 1100,
   });
@@ -355,6 +357,45 @@ describe("service products", () => {
         posSessionId: sessionId,
         items: [{ variantId, qty: 1, priceOverrideMinor: 800 }],
         payments: [{ amountMinor: 800 }],
+        createdByUserId: userId,
+      }),
+    );
+  });
+});
+
+describe("open-price products", () => {
+  test("derives cost from the ratio, charges the entered price, skips stock", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      kind: "open_price",
+      priceMinor: 0,
+      costMinor: 0,
+      costRatioBps: 6000, // 60%
+    });
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1, priceOverrideMinor: 15000 }],
+      payments: [{ amountMinor: 15000 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(15000);
+
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.snapshotPriceMinor).toBe(15000);
+    expect(items[0]!.snapshotCostMinor).toBe(9000); // 60% of the entered price
+    // An open-price variant has no stock_locations row — nothing moved.
+    expect(await stockOf(variantId)).toBe(0);
+  });
+
+  test("requires an entered price (no base price to fall back to)", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ kind: "open_price", costRatioBps: 6000 });
+    await expectError("OPEN_PRICE_REQUIRES_PRICE", () =>
+      createPosOrder({
+        posSessionId: sessionId,
+        items: [{ variantId, qty: 1 }],
+        payments: [{ amountMinor: 100 }],
         createdByUserId: userId,
       }),
     );
