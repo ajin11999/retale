@@ -300,7 +300,11 @@
 
   async function commitDraft() {
     if (!order || !draft || addQty < 1) return;
-    const isService = draft.productKind === "service";
+    // Capture the narrowed values — both are reassignable $state, so the async
+    // mutation callback below would otherwise see them widened back to null.
+    const o = order;
+    const d = draft;
+    const isService = d.productKind === "service";
     const overrideRaw = addPriceOverride.trim();
     let priceOverrideMinor: number | undefined;
     if (overrideRaw) {
@@ -321,9 +325,9 @@
         : 0;
     const ok = await run(() =>
       AddItem.mutate({
-        orderId: order.id,
+        orderId: o.id,
         item: {
-          variantId: draft.row.variantId,
+          variantId: d.row.variantId,
           qty: addQty,
           discountMinor: discount || undefined,
           priceOverrideMinor,
