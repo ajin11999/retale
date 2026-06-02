@@ -3,9 +3,25 @@
 //
 //   bun run dev:seed-products
 
-import { products as productsTable } from "../src/db/schema/products.ts";
+import { eq } from "drizzle-orm";
+import {
+  productCategories,
+  products as productsTable,
+} from "../src/db/schema/products.ts";
 import { db, pool } from "../src/lib/db.ts";
 import * as svc from "../src/services/product-service.ts";
+
+/** Find a category by name, or create it — never duplicates on re-run. */
+async function ensureCategory(name: string): Promise<string> {
+  const existing = await db
+    .select()
+    .from(productCategories)
+    .where(eq(productCategories.name, name))
+    .limit(1);
+  if (existing[0]) return existing[0].id;
+  const created = await svc.createCategory({ name });
+  return created.id;
+}
 
 interface SeedProduct {
   name: string;
@@ -74,12 +90,12 @@ try {
 
   let count = 0;
   for (const [categoryName, items] of Object.entries(CATALOG)) {
-    const category = await svc.createCategory({ name: categoryName });
+    const categoryId = await ensureCategory(categoryName);
     for (const item of items) {
       await svc.createProduct({
         name: item.name,
         kind: "physical",
-        categoryId: category.id,
+        categoryId,
         priceMode: item.priceMode,
         taxRateBps: item.taxRateBps ?? 0,
         createdByUserId: creator.id,
