@@ -12,7 +12,7 @@ Retale is a Bun + TypeScript rewrite of **ProDuck** (`C:\Users\frans\ProDuck\`),
 
 ```
 retale/
-├── package.json            ← Bun workspace root
+├── package.json            ← Bun workspace root (scripts: dev, dev:console, test, db:*, …)
 ├── packages/
 │   ├── api/                ← Main GraphQL API (Elysia + graphql-yoga)
 │   │   └── src/
@@ -20,7 +20,10 @@ retale/
 │   │       ├── services/   ← Business logic (StockService, LandedCostService, etc.)
 │   │       ├── lib/        ← auth, jwt, argon2, db client, pagination helpers
 │   │       └── index.ts    ← Elysia app entry point
-│   └── shared/             ← Shared TypeScript types (consumed by api + future packages)
+│   ├── console/            ← Back-office admin web app (SvelteKit + Houdini GraphQL client)
+│   ├── catalog/            ← Product catalog web app (SvelteKit)
+│   ├── pos/                ← POS register app (Flutter — Windows/Linux native + web/PWA)
+│   └── shared/             ← Shared TypeScript types (consumed by api + web packages)
 │       └── src/
 ```
 
@@ -38,14 +41,15 @@ retale/
 | Auth            | **JWT HS512** via `jose`  | Same algorithm as ProDuck; existing tokens compatible |
 | Password        | **Argon2id** via `@node-rs/argon2` | OWASP gold standard; same algorithm as ProDuck (compatible hashes) |
 | Validation      | **Zod** (via Elysia's built-in TypeBox or standalone) | Schema-first validation |
-| Web admin panel | **SvelteKit** (if needed) | Clean DX, less boilerplate, works well with Claude Code |
+| Web apps (console + catalog) | **SvelteKit** | Clean DX, less boilerplate, works well with Claude Code |
 
 ---
 
 ## Clients
 
-- **Flutter app** (`produck_workshop`) — web + Android. Uses Apollo Flutter or Artemis for GraphQL.
-- **Web admin** — SvelteKit with a GraphQL client (urql or Apollo).
+- **POS app** (`packages/pos`, Flutter `retale_pos`) — Windows/Linux native + web/PWA. GraphQL register for the API.
+- **Console** (`packages/console`) — SvelteKit back-office admin (purchases, inventory, etc.); Houdini GraphQL client.
+- **Catalog** (`packages/catalog`) — SvelteKit product catalog web app.
 - Network: **local network only** (no public internet). HTTP/1.1 or HTTP/2 both fine.
 
 ---

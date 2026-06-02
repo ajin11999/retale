@@ -41,3 +41,4 @@ coverage/
 
 # Local Claude / agent state (don't commit machine-specific memory)
 .claude/projects/
+.claude/settings.local.json
