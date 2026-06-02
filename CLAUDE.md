@@ -176,7 +176,18 @@ PORT=3000
 
 ## Development Notes
 
-- Use `bun run dev` at workspace root (to be configured)
+- `bun run dev` (API, port 3000) and `bun run dev:console` (admin, port 5173) at workspace root
 - Drizzle migrations in `packages/api/drizzle/`
-- Run `bunx drizzle-kit generate` and `bunx drizzle-kit migrate` for schema changes
+- Schema changes: `bun run db:generate` then `bun run db:migrate`. **Do not** run
+  `drizzle-kit migrate` — its CLI hangs on this Windows + Bun + MariaDB setup; `db:migrate`
+  applies via drizzle-orm's programmatic migrator (`scripts/migrate.ts`). See the
+  `db-migrate` skill.
+- After an API GraphQL schema change, resync the console: see the `houdini-sync` skill.
 - GraphQL playground available at `/graphql` in development
+
+## Commit conventions
+
+- Use Conventional Commits: `feat:`, `fix:`, `chore:`, `test:`, `refactor:`, `docs:`,
+  with a concise scope where useful (e.g. `feat: console — …`).
+- **Never** commit with a throwaway message like the model name (`opus`) or a bare symbol.
+  Every commit subject must describe the change.
