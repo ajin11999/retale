@@ -13,6 +13,8 @@
     disabled = false,
     id,
     class: className = "",
+    onCreate,
+    createLabel = (q) => `Create “${q}”`,
   }: {
     options: Option[];
     value?: string;
@@ -20,6 +22,15 @@
     disabled?: boolean;
     id?: string;
     class?: string;
+    /**
+     * When supplied, a "create" row appears at the bottom of the menu whenever
+     * the user has typed a query. Choosing it hands the trimmed query back to
+     * the parent (which creates the record, then sets `value`). Odoo-style
+     * quick-create.
+     */
+    onCreate?: (query: string) => void | Promise<void>;
+    /** Label for the create row; defaults to `Create “<query>”`. */
+    createLabel?: (query: string) => string;
   } = $props();
 
   // `text` is the input's editable contents. While the menu is closed it shows
@@ -53,6 +64,13 @@
     return options.filter((o) => o.label.toLowerCase().includes(q));
   });
 
+  // The "+ Create …" row shows once the user has typed something and the parent
+  // opted in via `onCreate`. It sits at index `filtered.length` for keyboard
+  // navigation, after all matching options.
+  const query = $derived(text.trim());
+  const showCreate = $derived(!!onCreate && query.length > 0);
+  const optionCount = $derived(filtered.length + (showCreate ? 1 : 0));
+
   // Keep the highlighted row visible as the user arrows through it.
   $effect(() => {
     if (open) optionEls[highlight]?.scrollIntoView({ block: "nearest" });
@@ -76,6 +94,17 @@
     dirty = false;
   }
 
+  // Hand the typed query to the parent's quick-create, then close. The parent
+  // creates the record and sets `value`; the new option arriving in `options`
+  // resolves its label into the (now closed) field via the effect above.
+  async function create() {
+    const q = query;
+    if (!onCreate || !q) return;
+    open = false;
+    dirty = false;
+    await onCreate(q);
+  }
+
   function onInput() {
     open = true;
     dirty = true;
@@ -87,14 +116,17 @@
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (!open) return openMenu();
-      highlight = Math.min(highlight + 1, filtered.length - 1);
+      highlight = Math.min(highlight + 1, optionCount - 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       highlight = Math.max(highlight - 1, 0);
     } else if (e.key === "Enter") {
-      if (open && filtered[highlight]) {
+      if (open && highlight < filtered.length) {
         e.preventDefault();
         choose(filtered[highlight]);
+      } else if (open && showCreate && highlight === filtered.length) {
+        e.preventDefault();
+        create();
       }
     } else if (e.key === "Escape") {
       if (open) {
@@ -140,7 +172,7 @@
     )}
   />
 
-  {#if open && filtered.length > 0}
+  {#if open && (filtered.length > 0 || showCreate)}
     <ul
       id={listId}
       role="listbox"
@@ -169,6 +201,29 @@
           </button>
         </li>
       {/each}
+      {#if showCreate}
+        <li>
+          <button
+            bind:this={optionEls[filtered.length]}
+            type="button"
+            role="option"
+            aria-selected={false}
+            onmousedown={(e) => {
+              e.preventDefault();
+              create();
+            }}
+            onmouseenter={() => (highlight = filtered.length)}
+            class={cn(
+              "flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-sm",
+              filtered.length > 0 ? "mt-1 border-t pt-2" : "",
+              filtered.length === highlight ? "bg-accent text-accent-foreground" : "",
+            )}
+          >
+            <span class="text-base leading-none text-muted-foreground">+</span>
+            {createLabel(query)}
+          </button>
+        </li>
+      {/if}
     </ul>
   {:else if open && dirty}
     <div

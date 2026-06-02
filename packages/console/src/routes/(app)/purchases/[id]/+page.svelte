@@ -16,6 +16,7 @@
   } from "@lucide/svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
@@ -172,6 +173,30 @@
     }
   `);
 
+  // Quick-create a product without leaving the PO. Mirrors the products page's
+  // create defaults (physical, tax-inclusive, one auto-SKU variant); we select
+  // the returned variant on the line.
+  const CreateProductInline = graphql(`
+    mutation ConsoleCreateProductInline(
+      $name: String!
+      $kind: ProductKind
+      $priceMode: PriceMode!
+      $variants: [VariantInput!]!
+    ) {
+      createProduct(
+        name: $name
+        kind: $kind
+        priceMode: $priceMode
+        variants: $variants
+      ) {
+        id
+        variants {
+          id
+        }
+      }
+    }
+  `);
+
   const UpdateItem = graphql(`
     mutation ConsoleUpdatePurchaseItem(
       $id: ID!
@@ -282,8 +307,9 @@
   const products = $derived($PurchaseDetail.data?.products ?? []);
 
   // Flat variant options for the item editor — "Product · SKU (label)".
+  // `value`/`label` shape feeds the searchable Combobox directly.
   interface VariantOption {
-    id: string;
+    value: string;
     label: string;
   }
   const variantOptions = $derived.by<VariantOption[]>(() => {
@@ -291,13 +317,13 @@
     for (const p of products) {
       for (const v of p.variants) {
         const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        out.push({ id: v.id, label: `${p.name} · ${suffix}` });
+        out.push({ value: v.id, label: `${p.name} · ${suffix}` });
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
   });
   const variantLabel = (id: string | null | undefined) =>
-    id ? (variantOptions.find((v) => v.id === id)?.label ?? "Unknown") : null;
+    id ? (variantOptions.find((v) => v.value === id)?.label ?? "Unknown") : null;
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -306,6 +332,8 @@
   const canCancel = $derived(has("purchase.cancel"));
   const canCreate = $derived(has("purchase.create"));
   const canSend = $derived(has("purchase.send"));
+  // Gate the combobox's on-the-fly "Create product" row.
+  const canCreateProduct = $derived(has("product.create"));
 
   // A cancelled purchase is a frozen document — editing is closed.
   const editable = $derived(canEdit && purchase?.status !== "cancelled");
@@ -569,6 +597,38 @@
     if (ok) {
       itemDraft = null;
       await refetch();
+    }
+  }
+
+  // Combobox quick-create: spin up a product named after the typed query, then
+  // select its auto-created variant on the open line draft. refetch() pulls the
+  // new product into `products` so variantOptions can resolve its label.
+  async function createProductForLine(name: string) {
+    const d = itemDraft;
+    if (!d) return;
+    busy = true;
+    feedback = null;
+    try {
+      const res = await CreateProductInline.mutate({
+        name,
+        kind: "physical" as never,
+        priceMode: "tax_inclusive" as never,
+        variants: [{ priceMinor: 0, costMinor: 0 }],
+      });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
+      const variantId = res.data?.createProduct.variants[0]?.id;
+      if (variantId) {
+        d.variantId = variantId;
+        await refetch();
+        feedback = { ok: true, text: `Created “${name}”.` };
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
     }
   }
 
@@ -1157,12 +1217,16 @@
             <div class="grid grid-cols-2 gap-3">
               <label class="space-y-1">
                 <span class="text-xs font-medium">Variant (stock line)</span>
-                <Select bind:value={itemDraft.variantId} disabled={!editable}>
-                  <option value="">— Non-stock line —</option>
-                  {#each variantOptions as v (v.id)}
-                    <option value={v.id}>{v.label}</option>
-                  {/each}
-                </Select>
+                <Combobox
+                  options={variantOptions}
+                  bind:value={itemDraft.variantId}
+                  placeholder="Search variant… (leave blank for non-stock line)"
+                  disabled={!editable}
+                  onCreate={canCreateProduct && editable
+                    ? createProductForLine
+                    : undefined}
+                  createLabel={(q) => `Create product “${q}”`}
+                />
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Section</span>
