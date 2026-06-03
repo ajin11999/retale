@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { fly } from "svelte/transition";
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -106,7 +107,15 @@
         memo: $memo
         sendDueDate: $sendDueDate
       ) {
+        # Return the edited fields so Houdini updates its normalised cache —
+        # otherwise the page serves stale header values until a hard refresh.
         id
+        vendorId
+        snapshotVendorName
+        date
+        sourceDocument
+        memo
+        sendDueDate
       }
     }
   `);
@@ -542,6 +551,15 @@
   // opens, so changing the Section dropdown mid-edit doesn't make it jump.
   let draftGroupKey = $state<string | null>(null);
 
+  // Move focus to a line-form field once it has rendered. Lets opening a new
+  // line land the cursor in Variant, and picking a variant jump to Qty.
+  async function focusLineField(id: "line-variant" | "line-qty") {
+    await tick();
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    el?.focus();
+    el?.select?.();
+  }
+
   function newItem() {
     itemDraft = {
       id: null,
@@ -552,6 +570,7 @@
       unitCostMinor: 0,
     };
     draftGroupKey = UNGROUPED;
+    focusLineField("line-variant");
   }
 
   function editItem(i: NonNullable<typeof purchase>["items"][number]) {
@@ -575,6 +594,7 @@
       return;
     }
     const unitCostMinor = d.unitCostMinor ?? 0;
+    const isNew = !d.id;
     const ok = await run("Item", () =>
       d.id
         ? UpdateItem.mutate({
@@ -595,8 +615,22 @@
           }),
     );
     if (ok) {
-      itemDraft = null;
       await refetch();
+      if (isNew) {
+        // Keep adding: reset the draft (same section), leave the form open, and
+        // drop the cursor back in Variant for the next line.
+        itemDraft = {
+          id: null,
+          sectionId: d.sectionId,
+          variantId: "",
+          description: "",
+          qtyOrdered: 1,
+          unitCostMinor: 0,
+        };
+        focusLineField("line-variant");
+      } else {
+        itemDraft = null;
+      }
     }
   }
 
@@ -624,6 +658,7 @@
         d.variantId = variantId;
         await refetch();
         feedback = { ok: true, text: `Created “${name}”.` };
+        focusLineField("line-qty");
       }
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -633,7 +668,6 @@
   }
 
   async function deleteItem(id: string) {
-    if (!confirm("Delete this line?")) return;
     const ok = await run("Item", () => DeleteItem.mutate({ id }));
     if (ok) await refetch();
   }
@@ -993,6 +1027,7 @@
       unitCostMinor: 0,
     };
     draftGroupKey = sectionId;
+    focusLineField("line-variant");
   }
 
   // ---- Sends — deep-link composer -----------------------------------------
@@ -1092,7 +1127,26 @@
   </title>
 </svelte:head>
 
-<div class="mx-auto max-w-5xl space-y-6">
+<!-- Line-form keyboard shortcuts: Ctrl/Cmd+Enter saves (add several lines
+     without the mouse), Esc closes. Esc inside the variant combobox closes its
+     menu first — it only reaches here once the menu is already shut. -->
+<svelte:window
+  onkeydown={(e) => {
+    if (!itemDraft || busy) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && editable) {
+      e.preventDefault();
+      saveItem();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      itemDraft = null;
+    }
+  }}
+/>
+
+<div
+  class="mx-auto max-w-5xl space-y-6"
+  class:pb-24={selectedCount > 0 && editable}
+>
   <a
     href="/purchases"
     class="text-sm text-muted-foreground hover:text-foreground"
@@ -1294,8 +1348,11 @@
       {/if}
 
       {#if selectedCount > 0 && editable}
+        <!-- Floating bulk-actions bar: fixed overlay so ticking a line never
+             shifts the table. Renders only while a selection is active. -->
         <div
-          class="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2"
+          class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-card px-3 py-2 shadow-lg"
+          transition:fly={{ y: 12, duration: 150 }}
         >
           <span class="text-sm font-medium">
             {selectedCount} line{selectedCount === 1 ? "" : "s"} selected
@@ -1351,6 +1408,7 @@
               <label class="space-y-1">
                 <span class="text-xs font-medium">Variant (stock line)</span>
                 <Combobox
+                  id="line-variant"
                   options={variantOptions}
                   bind:value={itemDraft.variantId}
                   placeholder="Search variant… (leave blank for non-stock line)"
@@ -1359,6 +1417,7 @@
                     ? createProductForLine
                     : undefined}
                   createLabel={(q) => `Create product “${q}”`}
+                  onChange={() => focusLineField("line-qty")}
                 />
               </label>
               <label class="space-y-1">
@@ -1383,6 +1442,7 @@
               <label class="space-y-1">
                 <span class="text-xs font-medium">Qty ordered</span>
                 <Input
+                  id="line-qty"
                   type="number"
                   bind:value={itemDraft.qtyOrdered}
                   disabled={!editable}
@@ -1393,7 +1453,14 @@
                 <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
               </label>
             </div>
-            <div class="flex justify-end gap-2">
+            <div class="flex items-center justify-end gap-2">
+              {#if editable}
+                <span class="mr-auto text-xs text-muted-foreground">
+                  <kbd class="rounded border px-1 font-mono">Ctrl</kbd>+<kbd
+                    class="rounded border px-1 font-mono">Enter</kbd
+                  > to {itemDraft.id ? "save" : "add"}
+                </span>
+              {/if}
               <Button
                 variant="ghost"
                 size="sm"

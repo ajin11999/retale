@@ -15,6 +15,7 @@
     class: className = "",
     onCreate,
     createLabel = (q) => `Create “${q}”`,
+    onChange,
   }: {
     options: Option[];
     value?: string;
@@ -22,6 +23,8 @@
     disabled?: boolean;
     id?: string;
     class?: string;
+    /** Fired when the user picks an option (not on external `value` changes). */
+    onChange?: (value: string) => void;
     /**
      * When supplied, a "create" row appears at the bottom of the menu whenever
      * the user has typed a query. Choosing it hands the trimmed query back to
@@ -92,6 +95,7 @@
     text = opt.label;
     open = false;
     dirty = false;
+    onChange?.(opt.value);
   }
 
   // Hand the typed query to the parent's quick-create, then close. The parent
@@ -120,7 +124,8 @@
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       highlight = Math.max(highlight - 1, 0);
-    } else if (e.key === "Enter") {
+    } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+      // Ctrl/Cmd+Enter is left to bubble so a parent form can submit on it.
       if (open && highlight < filtered.length) {
         e.preventDefault();
         choose(filtered[highlight]);
@@ -130,7 +135,10 @@
       }
     } else if (e.key === "Escape") {
       if (open) {
+        // Esc closes the menu first; swallow it so a parent (e.g. a form that
+        // closes on Esc) only reacts once the menu is already shut.
         e.preventDefault();
+        e.stopPropagation();
         open = false;
         dirty = false;
         text = selectedLabel;
