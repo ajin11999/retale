@@ -828,6 +828,99 @@
     collapsed = next;
   }
 
+  // ---- Bulk selection + actions -------------------------------------------
+  // Tick lines to act on several at once. Selection is by line id and survives
+  // collapse/scroll; an effect prunes ids that no longer exist. The actions
+  // reuse the single-line mutations in a loop — a PO carries few enough lines
+  // that no batch endpoint is warranted.
+  let selected = $state<Set<string>>(new Set());
+  const selectedCount = $derived(selected.size);
+
+  // Drop selected ids that have vanished (deleted here or elsewhere) so the
+  // count and toolbar never reference ghosts after a refetch.
+  $effect(() => {
+    const live = new Set(items.map((i) => i.id));
+    if ([...selected].some((id) => !live.has(id)))
+      selected = new Set([...selected].filter((id) => live.has(id)));
+  });
+
+  function toggleSelect(id: string) {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    selected = next;
+  }
+
+  // A group's header checkbox: checked when every visible line is selected,
+  // indeterminate when only some are.
+  const groupChecked = (g: VisibleGroup) =>
+    g.visibleItems.length > 0 && g.visibleItems.every((i) => selected.has(i.id));
+  const groupIndeterminate = (g: VisibleGroup) =>
+    g.visibleItems.some((i) => selected.has(i.id)) && !groupChecked(g);
+
+  function toggleGroupSelect(g: VisibleGroup) {
+    const next = new Set(selected);
+    const all = groupChecked(g);
+    for (const i of g.visibleItems) all ? next.delete(i.id) : next.add(i.id);
+    selected = next;
+  }
+
+  const clearSelection = () => (selected = new Set());
+
+  // Run `fn` for every selected id in turn, stopping at the first error. Like
+  // run() but tallies how many succeeded, then clears the selection + refetches.
+  async function runBulk(
+    verb: string,
+    fn: (id: string) => Promise<{ errors?: readonly { message: string }[] | null }>,
+  ) {
+    const ids = [...selected];
+    if (!purchase || ids.length === 0) return;
+    busy = true;
+    feedback = null;
+    let done = 0;
+    try {
+      for (const id of ids) {
+        const res = await fn(id);
+        if (res.errors?.length) {
+          feedback = { ok: false, text: res.errors[0].message };
+          break;
+        }
+        done++;
+      }
+      if (!feedback)
+        feedback = {
+          ok: true,
+          text: `${verb} ${done} line${done === 1 ? "" : "s"}.`,
+        };
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+    selected = new Set();
+    await refetch();
+  }
+
+  async function deleteSelected() {
+    const n = selected.size;
+    if (
+      !n ||
+      !confirm(
+        `Delete ${n} selected line${n === 1 ? "" : "s"}? This cannot be undone.`,
+      )
+    )
+      return;
+    await runBulk("Deleted", (id) => DeleteItem.mutate({ id }));
+  }
+
+  // sectionId "" → move to no section. UpdateItem returns the changed sectionId,
+  // which Houdini normalizes, so each line jumps to its new group at once.
+  async function moveSelectedToSection(sectionId: string) {
+    if (!selected.size) return;
+    await runBulk("Moved", (id) =>
+      UpdateItem.mutate({ id, sectionId: sectionId || null }),
+    );
+  }
+
   // Persist a reorder quietly: the list already moved optimistically, so we
   // skip the busy/feedback churn that `run()` does — toggling `busy` disables
   // (and de-focuses) the arrow button you just clicked, and the "saved" banner
@@ -1200,6 +1293,46 @@
         </div>
       {/if}
 
+      {#if selectedCount > 0 && editable}
+        <div
+          class="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2"
+        >
+          <span class="text-sm font-medium">
+            {selectedCount} line{selectedCount === 1 ? "" : "s"} selected
+          </span>
+          <div class="w-48">
+            <Select
+              value="__bulk"
+              disabled={busy}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                e.currentTarget.value = "__bulk"; // snap back to the prompt
+                if (v !== "__bulk")
+                  moveSelectedToSection(v === UNGROUPED ? "" : v);
+              }}
+            >
+              <option value="__bulk" disabled>Move to section…</option>
+              {#each sections as s (s.id)}
+                <option value={s.id}>{s.name}</option>
+              {/each}
+              <option value={UNGROUPED}>— No section —</option>
+            </Select>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={busy}
+            onclick={deleteSelected}>Delete selected</Button
+          >
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onclick={clearSelection}>Clear</Button
+          >
+        </div>
+      {/if}
+
       {#if items.length === 0 && sections.length === 0}
         <p class="py-6 text-center text-sm text-muted-foreground">No lines yet.</p>
       {:else if visibleGroups.length === 0}
@@ -1357,6 +1490,18 @@
               <table class="w-full text-sm">
                 <thead class="border-b text-left text-muted-foreground">
                   <tr>
+                    {#if editable}
+                      <th class="w-8 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          class="size-4 cursor-pointer rounded border-input align-middle accent-primary"
+                          checked={groupChecked(g)}
+                          indeterminate={groupIndeterminate(g)}
+                          onchange={() => toggleGroupSelect(g)}
+                          aria-label="Select all lines in {g.name}"
+                        />
+                      </th>
+                    {/if}
                     <th class="px-4 py-2 font-medium">Line</th>
                     <th class="px-4 py-2 text-right font-medium">Ordered</th>
                     <th class="px-4 py-2 text-right font-medium">Delivered</th>
@@ -1367,7 +1512,22 @@
                 </thead>
                 <tbody>
                   {#each g.visibleItems as i, idx (i.id)}
-                    <tr class="border-b last:border-0 even:bg-muted/40">
+                    <tr
+                      class="border-b last:border-0 {selected.has(i.id)
+                        ? 'bg-primary/10'
+                        : 'even:bg-muted/40'}"
+                    >
+                      {#if editable}
+                        <td class="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            class="size-4 cursor-pointer rounded border-input align-middle accent-primary"
+                            checked={selected.has(i.id)}
+                            onchange={() => toggleSelect(i.id)}
+                            aria-label="Select line"
+                          />
+                        </td>
+                      {/if}
                       <td class="px-4 py-2">
                         {#if cellEdit?.id === i.id && cellEdit.field === "desc"}
                           <input
