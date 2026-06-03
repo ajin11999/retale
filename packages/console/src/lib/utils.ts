@@ -12,5 +12,14 @@ export function cn(...inputs: ClassValue[]): string {
  * adjust the scale here if the minor unit is ever sub-rupiah.
  */
 export function formatMoney(minor: number): string {
-  return "Rp " + Math.round(minor).toLocaleString("id-ID");
+  return "Rp " + Math.round(minor).toLocaleString("id-ID");
+}
+
+/**
+ * Collapse a name to a comparison key for duplicate detection: lowercase and
+ * strip everything but letters/digits. Catches the common real-world variants
+ * ("Coca-Cola" / "coca cola" / "cocacola") without a fuzzy-match dependency.
+ */
+export function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }

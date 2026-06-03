@@ -6,6 +6,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import type { PageData } from "./$types";
 
@@ -36,6 +37,16 @@
   let { data }: { data: PageData } = $props();
   const CustomerList = $derived(data.CustomerList);
   const customers = $derived($CustomerList.data?.customers ?? []);
+
+  // Candidates for the new-customer duplicate hint. Customer names repeat
+  // often, so surface the phone (or archived status) to help disambiguate.
+  const customerCandidates = $derived(
+    customers.map((c) => ({
+      id: c.id,
+      name: c.name,
+      note: c.archivedAt ? "Archived" : (c.phone ?? null),
+    })),
+  );
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -124,9 +135,15 @@
 
   {#if newName !== null}
     <div class="flex items-end gap-2 rounded-lg border bg-card p-4">
-      <label class="flex-1 space-y-1">
+      <label class="relative flex-1 space-y-1">
         <span class="text-sm font-medium">Customer name</span>
         <Input bind:value={newName} placeholder="Customer name" />
+        <DuplicateHint
+          query={newName ?? ""}
+          items={customerCandidates}
+          hrefFor={(id) => `/customers/${id}`}
+          noun="customer"
+        />
       </label>
       <Button
         size="sm"

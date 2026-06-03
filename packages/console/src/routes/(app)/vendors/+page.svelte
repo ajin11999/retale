@@ -6,6 +6,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import type { PageData } from "./$types";
 
@@ -37,6 +38,19 @@
   let { data }: { data: PageData } = $props();
   const VendorList = $derived(data.VendorList);
   const vendors = $derived($VendorList.data?.vendors ?? []);
+
+  // Candidates for the new-vendor duplicate hint.
+  const vendorCandidates = $derived(
+    vendors.map((v) => ({
+      id: v.id,
+      name: v.name,
+      note: v.archivedAt
+        ? "Archived"
+        : v.kind === "expedition"
+          ? "Courier"
+          : "Supplier",
+    })),
+  );
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -142,9 +156,15 @@
 
   {#if newName !== null}
     <div class="flex items-end gap-2 rounded-lg border bg-card p-4">
-      <label class="flex-1 space-y-1">
+      <label class="relative flex-1 space-y-1">
         <span class="text-sm font-medium">Vendor name</span>
         <Input bind:value={newName} placeholder="Vendor name" />
+        <DuplicateHint
+          query={newName ?? ""}
+          items={vendorCandidates}
+          hrefFor={(id) => `/vendors/${id}`}
+          noun="vendor"
+        />
       </label>
       <label class="space-y-1">
         <span class="text-sm font-medium">Kind</span>

@@ -5,6 +5,7 @@
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -224,6 +225,21 @@
     };
   }
 
+  // Candidates for the new/edit-category duplicate hint. Selecting a match
+  // switches the editor to that category.
+  const categoryCandidates = $derived(
+    categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      note: c.archivedAt ? "Archived" : null,
+    })),
+  );
+
+  function editCategoryById(id: string) {
+    const n = tree.find((t) => t.id === id);
+    if (n) editCategory(n);
+  }
+
   /** Run a mutation, surfacing the first GraphQL error as feedback. */
   async function run(
     label: string,
@@ -334,9 +350,16 @@
         {draft.id ? "Edit category" : "New category"}
       </h2>
       <div class="grid grid-cols-2 gap-4">
-        <label class="space-y-1">
+        <label class="relative space-y-1">
           <span class="text-sm font-medium">Name</span>
           <Input bind:value={draft.name} disabled={!canEdit} />
+          <DuplicateHint
+            query={draft.name}
+            items={categoryCandidates}
+            excludeId={draft.id}
+            onSelect={editCategoryById}
+            noun="category"
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Parent</span>
