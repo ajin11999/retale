@@ -25,6 +25,8 @@ export const typeDefs = /* GraphQL */ `
     deliveredAt: String
     "Denormalized sum of the cost tree's root nodes — for list views."
     totalCostMinor: Float!
+    "Number of goods leaves (received product lines) — for list summaries."
+    lineCount: Int!
     createdAt: String!
     updatedAt: String!
     items: [PurchaseDeliveryItem!]!
@@ -54,6 +56,8 @@ export const typeDefs = /* GraphQL */ `
     vendorId: ID
     "The resolved expedition vendor for a tagged cost node, if any."
     vendor: Vendor
+    "The purchase line a goods leaf receives against — its ordered/delivered progress."
+    purchaseItem: PurchaseItem
     description: String!
     "Set only on a leaf; in the variant's smallest unit."
     qty: Float
@@ -95,6 +99,8 @@ export const typeDefs = /* GraphQL */ `
       costMinor: Float
       "Expedition owed for this cost node; pass null to clear, omit to leave unchanged."
       vendorId: ID
+      "Reparent: a cost node id to nest under, null for the root, omit to leave unchanged."
+      parentItemId: ID
       sortOrder: Int
     ): PurchaseDeliveryItem!
     deleteDeliveryItem(id: ID!): Boolean!
@@ -127,6 +133,7 @@ export const resolvers = {
     targetLocation: (d: DeliveryRow) => locations.getLocation(d.targetLocationId),
     items: (d: DeliveryRow) => deliveries.listDeliveryItems(d.id),
     leafLandings: (d: DeliveryRow) => deliveries.deliveryLeafLandings(d.id),
+    lineCount: (d: DeliveryRow) => deliveries.deliveryLineCount(d.id),
   },
   PurchaseDeliveryItem: {
     vendor: async (i: { vendorId: string | null }) => {
@@ -137,6 +144,8 @@ export const resolvers = {
         return null; // courier since deleted — treat as untagged
       }
     },
+    purchaseItem: (i: { purchaseItemId: string | null }) =>
+      i.purchaseItemId ? deliveries.getLinkedPurchaseItem(i.purchaseItemId) : null,
   },
 
   Query: {

@@ -276,7 +276,7 @@ describe("commitDelivery", () => {
     expect(variant?.costMinor).toBe(600);
   });
 
-  test("allocates a freight cost node across stock leaves by line value", async () => {
+  test("allocates a freight cost node across the stock leaves nested under it by line value", async () => {
     const locationId = await seedLocation();
     const variantA = await seedVariant();
     const variantB = await seedVariant();
@@ -289,8 +289,16 @@ describe("commitDelivery", () => {
       targetLocationId: locationId,
       createdByUserId: userId,
     });
+    // Freight node (no purchaseItemId): 100 to spread by value over the goods
+    // nested under it — 60 to A, 40 to B. Goods sit inside the charge.
+    const freight = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 100,
+    });
     await createDeliveryItem({
       deliveryId: delivery.id,
+      parentItemId: freight.id,
       purchaseItemId: a.itemId,
       description: "Line A",
       qty: 2,
@@ -298,16 +306,11 @@ describe("commitDelivery", () => {
     });
     await createDeliveryItem({
       deliveryId: delivery.id,
+      parentItemId: freight.id,
       purchaseItemId: b.itemId,
       description: "Line B",
       qty: 8,
       costMinor: 400,
-    });
-    // Freight node (no purchaseItemId): 100 to spread by value — 60 to A, 40 to B.
-    await createDeliveryItem({
-      deliveryId: delivery.id,
-      description: "Freight",
-      costMinor: 100,
     });
 
     await commitDelivery(delivery.id, userId);
@@ -651,18 +654,19 @@ describe("delivery accounts payable", () => {
       targetLocationId: locationId,
       createdByUserId: userId,
     });
-    await createDeliveryItem({
-      deliveryId: delivery.id,
-      purchaseItemId: itemId,
-      description: "Widgets",
-      qty: 10,
-      costMinor: 5000, // base goods cost → supplier AP
-    });
-    await createDeliveryItem({
+    const freight = await createDeliveryItem({
       deliveryId: delivery.id,
       description: "Freight",
       costMinor: 1000, // tagged to the courier → expedition AP
       vendorId: courierId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: freight.id, // goods sit under the freight → it capitalizes
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000, // base goods cost → supplier AP
     });
     await commitDelivery(delivery.id, userId);
 
@@ -701,17 +705,18 @@ describe("delivery accounts payable", () => {
       targetLocationId: locationId,
       createdByUserId: userId,
     });
+    const freight = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight (absorbed)",
+      costMinor: 1000, // no vendorId → no AP
+    });
     await createDeliveryItem({
       deliveryId: delivery.id,
+      parentItemId: freight.id, // goods under the freight → it is absorbed into them
       purchaseItemId: itemId,
       description: "Widgets",
       qty: 10,
       costMinor: 5000,
-    });
-    await createDeliveryItem({
-      deliveryId: delivery.id,
-      description: "Freight (absorbed)",
-      costMinor: 1000, // no vendorId → no AP
     });
     await commitDelivery(delivery.id, userId);
 

@@ -22,6 +22,7 @@
         status
         deliveredAt
         totalCostMinor
+        lineCount
       }
       locations(includeArchived: false) {
         id
@@ -188,6 +189,7 @@
             <th class="px-4 py-2 font-medium">Biller</th>
             <th class="px-4 py-2 font-medium">Target</th>
             <th class="px-4 py-2 font-medium">Tied to PO</th>
+            <th class="px-4 py-2 text-right font-medium">Lines</th>
             <th class="px-4 py-2 text-right font-medium">Total cost</th>
             <th class="px-4 py-2 font-medium">Status</th>
           </tr>
@@ -217,15 +219,27 @@
                   —
                 {/if}
               </td>
-              <td class="px-4 py-2 text-right">{formatMoney(d.totalCostMinor)}</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                {#if d.lineCount === 0}
+                  <span class="text-xs text-muted-foreground">empty</span>
+                {:else}
+                  {d.lineCount}
+                {/if}
+              </td>
+              <td class="px-4 py-2 text-right tabular-nums">{formatMoney(d.totalCostMinor)}</td>
               <td class="px-4 py-2">
                 <Badge class={statusBadge(d.status)}>{d.status}</Badge>
+                {#if d.deliveredAt}
+                  <span class="ml-1 block text-xs text-muted-foreground">
+                    {fmtDate(d.deliveredAt)}
+                  </span>
+                {/if}
               </td>
             </tr>
           {/each}
           {#if rows.length === 0}
             <tr>
-              <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
+              <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
                 No deliveries to show.
               </td>
             </tr>

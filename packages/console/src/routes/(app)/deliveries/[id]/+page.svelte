@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { graphql, CachePolicy } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
@@ -35,6 +35,7 @@
           qty
           costMinor
           sortOrder
+          purchaseItem { id qtyOrdered qtyDelivered }
         }
         leafLandings {
           itemId
@@ -130,6 +131,7 @@
       $qty: Float
       $costMinor: Float
       $vendorId: ID
+      $parentItemId: ID
     ) {
       updateDeliveryItem(
         id: $id
@@ -137,6 +139,7 @@
         qty: $qty
         costMinor: $costMinor
         vendorId: $vendorId
+        parentItemId: $parentItemId
       ) {
         id
       }
@@ -176,6 +179,11 @@
   const openPurchases = $derived($Detail.data?.openPurchases ?? []);
   const productList = $derived($Detail.data?.products ?? []);
   const items = $derived(delivery?.items ?? []);
+
+  // Mutations return only { id }, so Houdini can't merge added/removed/moved
+  // rows into the cached query — refetch from the network or the tree renders
+  // stale until a hard refresh.
+  const refetch = () => Detail.fetch({ policy: CachePolicy.NetworkOnly });
 
   // Flat variant lookup so PO lines label by product name / SKU, not raw id.
   const variantLabel = $derived.by(() => {
@@ -234,6 +242,21 @@
     const m = new Map<string, Landing>();
     for (const l of delivery?.leafLandings ?? []) m.set(l.itemId, l);
     return m;
+  });
+
+  // Itemized totals for the reconciliation summary. Every node is counted once:
+  // goods leaves carry line value, cost nodes carry their freight/customs amount,
+  // so goods + charges is the true grand total landing into stock — unlike the
+  // server's denormalized `totalCostMinor` (roots only), which under-reports when
+  // goods are nested under a cost node.
+  const costSummary = $derived.by(() => {
+    let goods = 0;
+    let charges = 0;
+    for (const it of items) {
+      if (it.purchaseItemId != null) goods += it.costMinor;
+      else charges += it.costMinor;
+    }
+    return { goods, charges, total: goods + charges };
   });
 
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -303,7 +326,7 @@
         return;
       }
       editingHeader = false;
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -376,7 +399,7 @@
         return;
       }
       addingUnder = null;
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -391,6 +414,7 @@
   let eCost = $state<number | null>(null);
   let eQty = $state<string>("");
   let eVendorId = $state("");
+  let eParentId = $state(""); // "" = root; else a cost node to nest under
 
   function startEdit(it: Item) {
     editingId = it.id;
@@ -400,7 +424,27 @@
     eCost = it.costMinor;
     eQty = it.qty == null ? "" : String(it.qty);
     eVendorId = it.vendorId ?? "";
+    eParentId = it.parentItemId ?? "";
   }
+
+  // Valid "Move to" destinations for the edited node: every cost line except
+  // the node itself and its own descendants (which would form a cycle).
+  const moveTargets = $derived.by(() => {
+    if (!editingId) return [] as { value: string; label: string }[];
+    const blocked = new Set<string>([editingId]);
+    const walk = (pid: string) => {
+      for (const it of items) {
+        if (it.parentItemId === pid && !blocked.has(it.id)) {
+          blocked.add(it.id);
+          walk(it.id);
+        }
+      }
+    };
+    walk(editingId);
+    return items
+      .filter((it) => it.purchaseItemId == null && !blocked.has(it.id))
+      .map((it) => ({ value: it.id, label: it.description }));
+  });
 
   // A goods leaf's stored value follows its qty at the PO line's unit cost.
   const eGoodsQty = $derived(eQty.trim() ? Number(eQty) : NaN);
@@ -418,6 +462,7 @@
           id: editingId,
           qty: eGoodsQty,
           costMinor: eUnitCost * eGoodsQty,
+          parentItemId: eParentId || null,
         });
       } else {
         if (!eDesc.trim() || eCost == null) return;
@@ -426,6 +471,7 @@
           description: eDesc.trim(),
           costMinor: eCost,
           vendorId: eVendorId || null,
+          parentItemId: eParentId || null,
         });
       }
       if (res.errors?.length) {
@@ -433,7 +479,7 @@
         return;
       }
       editingId = null;
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -451,7 +497,7 @@
         error = res.errors[0].message;
         return;
       }
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -478,7 +524,7 @@
         error = res.errors[0].message;
         return;
       }
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -497,7 +543,7 @@
         error = res.errors[0].message;
         return;
       }
-      await Detail.fetch();
+      await refetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -609,7 +655,7 @@
         <div class="flex flex-col items-end gap-2">
           <Badge class={statusBadge(delivery.status)}>{delivery.status}</Badge>
           <p class="text-xs text-muted-foreground">
-            Total {formatMoney(delivery.totalCostMinor)}
+            Total {formatMoney(costSummary.total)}
           </p>
         </div>
       </div>
@@ -656,9 +702,9 @@
       </div>
       <p class="mb-3 text-xs text-muted-foreground">
         Add goods lines from any open PO, and freight / customs cost lines. A
-        cost line is spread by value over the goods <em>nested under it</em> —
-        nest a carton's bottles under its freight to confine that charge to them;
-        leave a charge at the top to spread it across the whole delivery. Each
+        cost line spreads by value <em>only over the goods nested under it</em> —
+        edit a goods line and pick a cost line under <em>Move to</em> to apply
+        that charge to it. Goods left at the top level carry no freight. Each
         product shows its landed unit cost (→ /unit).
       </p>
 
@@ -676,6 +722,22 @@
             {@render renderNode(node, 0)}
           {/each}
         </ul>
+
+        <!-- Reconciliation summary: goods + charges = what lands into stock. -->
+        <dl class="mt-4 ml-auto w-full max-w-xs space-y-1 border-t pt-3 text-sm">
+          <div class="flex justify-between text-muted-foreground">
+            <dt>Goods value</dt>
+            <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
+          </div>
+          <div class="flex justify-between text-muted-foreground">
+            <dt>Freight &amp; customs</dt>
+            <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
+          </div>
+          <div class="flex justify-between border-t pt-1 font-semibold">
+            <dt>Total landed cost</dt>
+            <dd class="tabular-nums">{formatMoney(costSummary.total)}</dd>
+          </div>
+        </dl>
       {/if}
     </div>
   {/if}
@@ -704,6 +766,12 @@
             {/each}
           </Select>
         {/if}
+        <Select bind:value={eParentId} class="w-36" title="Nest this line under a cost line">
+          <option value="">↳ Top level</option>
+          {#each moveTargets as t (t.value)}
+            <option value={t.value}>↳ {t.label}</option>
+          {/each}
+        </Select>
         <Button size="sm" disabled={busy} onclick={saveEdit}>Save</Button>
         <Button
           size="sm"
@@ -714,7 +782,18 @@
       {:else}
         <span class="flex-1 truncate text-sm">
           {node.item.description}
-          {#if node.item.purchaseItemId}
+          {#if node.item.purchaseItem}
+            {@const pi = node.item.purchaseItem}
+            {@const over =
+              isDraft && pi.qtyDelivered + (node.item.qty ?? 0) > pi.qtyOrdered}
+            <span
+              class="ml-1 text-xs {over ? 'text-amber-600' : 'text-muted-foreground'}"
+              title="Received of ordered on the linked PO line"
+            >
+              · PO {pi.qtyDelivered}{#if isDraft && node.item.qty}&nbsp;+{node.item
+                  .qty}{/if} / {pi.qtyOrdered}
+            </span>
+          {:else if node.item.purchaseItemId}
             <span class="ml-1 text-xs text-muted-foreground">
               · PO line {node.item.purchaseItemId.slice(-6)}
             </span>

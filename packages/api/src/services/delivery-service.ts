@@ -250,11 +250,45 @@ export async function updateDeliveryItem(
     costMinor?: number;
     vendorId?: string | null;
     sortOrder?: number;
+    /** Reparent this node: a cost node to group under, or null for the root. */
+    parentItemId?: string | null;
   },
 ): Promise<DeliveryItem> {
   const item = await loadItem(id);
   const delivery = await loadDelivery(item.deliveryId);
   assertDraft(delivery);
+
+  // Reparenting: the new parent must be a cost node in this delivery, and the
+  // move must not create a cycle (parent cannot sit inside the moved subtree).
+  if (patch.parentItemId !== undefined && patch.parentItemId !== null) {
+    if (patch.parentItemId === id) {
+      throw new DeliveryError("INVALID_INPUT", "an item cannot be its own parent");
+    }
+    const parent = await loadItem(patch.parentItemId);
+    if (parent.deliveryId !== item.deliveryId) {
+      throw new DeliveryError("INVALID_INPUT", "parent belongs to a different delivery");
+    }
+    if (parent.purchaseItemId != null) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "cannot nest a line under a goods leaf — only cost nodes can group",
+      );
+    }
+    const all = await listDeliveryItems(item.deliveryId);
+    const subtree = new Set<string>([id]);
+    const collect = (pid: string) => {
+      for (const it of all) {
+        if (it.parentItemId === pid && !subtree.has(it.id)) {
+          subtree.add(it.id);
+          collect(it.id);
+        }
+      }
+    };
+    collect(id);
+    if (subtree.has(patch.parentItemId)) {
+      throw new DeliveryError("INVALID_INPUT", "cannot move an item under its own descendant");
+    }
+  }
 
   if (patch.description !== undefined && !patch.description.trim()) {
     throw new DeliveryError("INVALID_INPUT", "description cannot be blank");
@@ -289,6 +323,7 @@ export async function updateDeliveryItem(
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
         ...(patch.vendorId !== undefined && { vendorId: patch.vendorId }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
+        ...(patch.parentItemId !== undefined && { parentItemId: patch.parentItemId }),
       })
       .where(eq(purchaseDeliveryItems.id, id));
     await syncTotal(tx, item.deliveryId);
@@ -318,6 +353,29 @@ export function listDeliveryItems(deliveryId: string): Promise<DeliveryItem[]> {
     .from(purchaseDeliveryItems)
     .where(eq(purchaseDeliveryItems.deliveryId, deliveryId))
     .orderBy(asc(purchaseDeliveryItems.sortOrder));
+}
+
+/** Count of goods leaves (received product lines) — for list-view summaries. */
+export async function deliveryLineCount(deliveryId: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(purchaseDeliveryItems)
+    .where(
+      and(
+        eq(purchaseDeliveryItems.deliveryId, deliveryId),
+        sql`${purchaseDeliveryItems.purchaseItemId} is not null`,
+      ),
+    );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** The purchase line a goods leaf receives against — for PO-progress display. */
+export function getLinkedPurchaseItem(
+  purchaseItemId: string,
+): Promise<typeof purchaseItems.$inferSelect | undefined> {
+  return db.query.purchaseItems.findFirst({
+    where: eq(purchaseItems.id, purchaseItemId),
+  });
 }
 
 /** Per-leaf landed cost preview — what `commitDelivery` will receive stock at. */
@@ -393,14 +451,13 @@ function leafQtyByPurchaseItem(leaves: DeliveryItem[]): Map<string, number> {
  * landed-cost step: a product's received unit cost carries its share of the
  * delivery cost.
  *
- * Scope follows the cost tree. A cost node's cost spreads only over the stock
- * leaves **in its own subtree** — so nesting goods under a "Carton freight"
+ * Scope follows the cost tree strictly. A cost node's cost spreads only over the
+ * stock leaves **in its own subtree** — so nesting goods under a "Carton freight"
  * node confines that charge to those goods (the carton's Rp40k over its 24
- * bottles), while a broad "Customs" node wrapping everything spreads over all
- * of it. A leaf nested under several cost nodes carries each one's share. As a
- * convenience, a cost node with **no** goods in its subtree (a loose charge, or
- * one sitting as a sibling of flat leaves — the receiving-check shape) is
- * treated as delivery-wide and spreads over every stock leaf.
+ * bottles); to spread a charge over the whole delivery, nest all the goods under
+ * it. A leaf nested under several cost nodes carries each one's share. A cost
+ * node with **no** goods in its subtree applies to nothing — its charge is not
+ * capitalized into any stock (goods left outside a cost line carry no freight).
  *
  * Non-stock leaves (`variantId` null) are excluded everywhere — freight
  * capitalizes into goods of resale only (design-decisions.md → landed cost).
@@ -467,8 +524,9 @@ function allocateFreightByValue(
 
   for (const node of items) {
     if (node.purchaseItemId != null || node.costMinor <= 0) continue;
-    const scoped = subtreeStockLeaves(node.id);
-    spread(node.costMinor, scoped.length > 0 ? scoped : stockLeaves);
+    // Strict subtree scope: a charge with no goods nested under it applies to
+    // nothing (spread is a no-op on an empty target set).
+    spread(node.costMinor, subtreeStockLeaves(node.id));
   }
   return out;
 }

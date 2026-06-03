@@ -268,6 +268,11 @@ type Mutation {
     Expedition owed for this cost node; pass null to clear, omit to leave unchanged.
     """
     vendorId: ID
+
+    """
+    Reparent: a cost node id to nest under, null for the root, omit to leave unchanged.
+    """
+    parentItemId: ID
     sortOrder: Int
   ): PurchaseDeliveryItem!
   deleteDeliveryItem(id: ID!): Boolean!
@@ -968,6 +973,9 @@ type PurchaseDelivery {
 
   """Denormalized sum of the cost tree's root nodes — for list views."""
   totalCostMinor: Float!
+
+  """Number of goods leaves (received product lines) — for list summaries."""
+  lineCount: Int!
   createdAt: String!
   updatedAt: String!
   items: [PurchaseDeliveryItem!]!
@@ -1008,6 +1016,11 @@ type PurchaseDeliveryItem {
 
   """The resolved expedition vendor for a tagged cost node, if any."""
   vendor: Vendor
+
+  """
+  The purchase line a goods leaf receives against — its ordered/delivered progress.
+  """
+  purchaseItem: PurchaseItem
   description: String!
 
   """Set only on a leaf; in the variant's smallest unit."""
