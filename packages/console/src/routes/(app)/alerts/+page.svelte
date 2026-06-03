@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
+  import { onMount } from "svelte";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -94,8 +95,11 @@
   }
 
   async function refresh() {
+    // NetworkOnly: a scan/ack just changed the alert set server-side, so the
+    // cached list is stale — go to the network or the screen won't update.
     await Inbox.fetch({
       variables: { acknowledged: showAcked ? null : false },
+      policy: CachePolicy.NetworkOnly,
     });
   }
 
@@ -118,10 +122,12 @@
     }
   }
 
-  async function scanPurchases() {
+  // `silent` is used by the on-load auto-scan: it still raises + refreshes, but
+  // skips the "raised N new alert(s)" banner so a routine visit stays quiet.
+  async function scanPurchases({ silent = false }: { silent?: boolean } = {}) {
     busy = true;
     error = null;
-    info = null;
+    if (!silent) info = null;
     try {
       const [overdue, sendDue] = await Promise.all([
         ScanDeliveryOverdue.mutate(null),
@@ -136,7 +142,7 @@
       const n =
         (overdue.data?.scanDeliveryOverdue.length ?? 0) +
         (sendDue.data?.scanSendDue.length ?? 0);
-      info = `Purchase scan raised ${n} new alert(s).`;
+      if (!silent) info = `Purchase scan raised ${n} new alert(s).`;
       await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -144,6 +150,12 @@
       busy = false;
     }
   }
+
+  // Run the purchase scan whenever the inbox opens, so send-due / overdue
+  // alerts surface without waiting for the nightly job or a manual click.
+  onMount(() => {
+    if (canScanPurchase) scanPurchases({ silent: true });
+  });
 
   // ---- Per-row acknowledge -------------------------------------------------
   // ackingId tracks which row is showing its inline note field — null means
@@ -236,7 +248,7 @@
         size="sm"
         variant="outline"
         disabled={busy || !canScanPurchase}
-        onclick={scanPurchases}>Scan purchases</Button
+        onclick={() => scanPurchases()}>Scan purchases</Button
       >
       <Button size="sm" variant="ghost" onclick={toggleHistory}>
         {showAcked ? "Hide acknowledged" : "Show acknowledged"}
