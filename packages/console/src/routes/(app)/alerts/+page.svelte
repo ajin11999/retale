@@ -103,17 +103,18 @@
     });
   }
 
-  async function scanProduct() {
+  async function scanProduct({ silent = false }: { silent?: boolean } = {}) {
     busy = true;
     error = null;
-    info = null;
+    if (!silent) info = null;
     try {
       const res = await ScanProductAlerts.mutate(null);
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
       }
-      info = `Product scan raised ${res.data?.scanProductAlerts.length ?? 0} new alert(s).`;
+      if (!silent)
+        info = `Product scan raised ${res.data?.scanProductAlerts.length ?? 0} new alert(s).`;
       await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -151,10 +152,11 @@
     }
   }
 
-  // Run the purchase scan whenever the inbox opens, so send-due / overdue
+  // Run both scans whenever the inbox opens, so margin / send-due / overdue
   // alerts surface without waiting for the nightly job or a manual click.
   onMount(() => {
     if (canScanPurchase) scanPurchases({ silent: true });
+    if (canScanProduct) scanProduct({ silent: true });
   });
 
   // ---- Per-row acknowledge -------------------------------------------------
@@ -242,7 +244,7 @@
         size="sm"
         variant="outline"
         disabled={busy || !canScanProduct}
-        onclick={scanProduct}>Scan products</Button
+        onclick={() => scanProduct()}>Scan products</Button
       >
       <Button
         size="sm"

@@ -47,8 +47,11 @@ interface VariantContext {
 
 /**
  * Classify one variant's price/cost against a margin threshold. Returns the
- * alert type it triggers, or null when healthy. `price = 0` (free item) and
- * `cost = 0` (uninitialized) are deliberately skipped.
+ * alert type it triggers, or null when healthy. `cost = 0` (cost not yet
+ * established from a receipt) is skipped — there's nothing to measure against.
+ * A `price = 0` on a variant that *does* have a cost is not a free item: it is
+ * unpriced and would sell at a loss, so it raises `negative_margin` (its margin
+ * can't be expressed as a %, so `marginBps` is null).
  */
 export function classifyVariant(
   priceMinor: number,
@@ -57,7 +60,8 @@ export function classifyVariant(
 ): { type: ProductAlertType; marginBps: number | null } | null {
   if (priceMinor < 0) return { type: "negative_price", marginBps: null };
   if (costMinor < 0) return { type: "data_anomaly", marginBps: null };
-  if (priceMinor === 0 || costMinor === 0) return null;
+  if (costMinor === 0) return null; // no cost basis yet — can't assess margin
+  if (priceMinor === 0) return { type: "negative_margin", marginBps: null };
   const marginBps = Math.round(((priceMinor - costMinor) / priceMinor) * 10000);
   if (priceMinor < costMinor) return { type: "negative_margin", marginBps };
   if (thresholdBps != null && marginBps < thresholdBps) {

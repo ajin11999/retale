@@ -114,9 +114,12 @@ describe("classifyVariant", () => {
     expect(classifyVariant(500, 900, null)?.type).toBe("negative_margin");
     expect(classifyVariant(-100, 500, 2000)?.type).toBe("negative_price");
     expect(classifyVariant(1000, -50, 2000)?.type).toBe("data_anomaly");
-    // free item / uninitialized cost are skipped.
-    expect(classifyVariant(0, 500, 2000)).toBeNull();
+    // unpriced (price 0) but with a real cost → sells at a loss, no % margin.
+    expect(classifyVariant(0, 500, 2000)?.type).toBe("negative_margin");
+    expect(classifyVariant(0, 500, 2000)?.marginBps).toBeNull();
+    // cost not yet established → nothing to measure against, skipped.
     expect(classifyVariant(1000, 0, 2000)).toBeNull();
+    expect(classifyVariant(0, 0, 2000)).toBeNull();
   });
 });
 
