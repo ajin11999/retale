@@ -319,6 +319,133 @@ describe("commitDelivery", () => {
     expect(movesA[0]?.unitCost).toBe(330);
   });
 
+  test("scopes a nested charge to its subtree; a delivery-wide charge spreads over all", async () => {
+    const locationId = await seedLocation();
+    const lube = await seedVariant();
+    const pad = await seedVariant();
+    // Lubricant: 24 bottles @ 1000 = 24000. Brake pad: 10 @ 2000 = 20000.
+    const a = await seedPurchaseItem({ variantId: lube, qtyOrdered: 24, unitCostMinor: 1000 });
+    const b = await seedPurchaseItem({ variantId: pad, qtyOrdered: 10, unitCostMinor: 2000 });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    // A delivery-wide "Customs" charge wrapping everything: 4400 over goods
+    // value 44000 → lube 2400 (24/44), pad 2000 (20/44).
+    const customs = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Customs",
+      costMinor: 4400,
+    });
+    // A per-carton freight scoped to the lubricant only, nested under customs.
+    const carton = await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: customs.id,
+      description: "Carton freight",
+      costMinor: 40_000, // Rp40,000 for the one carton → /24 per bottle
+    });
+    // Lubricant leaf sits under the carton freight node (so it bears it).
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: carton.id,
+      purchaseItemId: a.itemId,
+      description: "Lubricant 1L",
+      qty: 24,
+      costMinor: 24_000,
+    });
+    // Brake pad sits under customs only (not in the carton).
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: customs.id,
+      purchaseItemId: b.itemId,
+      description: "Brake pad",
+      qty: 10,
+      costMinor: 20_000,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    // Lubricant: (24000 base + 2400 customs + 40000 carton) / 24 = 2766.67 → 2767.
+    expect((await getVariant(lube))?.costMinor).toBe(2767);
+    // Brake pad: (20000 base + 2000 customs) / 10 = 2200. Carton never touches it.
+    expect((await getVariant(pad))?.costMinor).toBe(2200);
+  });
+
+  test("a charge with goods nested under it does not touch a sibling leaf", async () => {
+    const locationId = await seedLocation();
+    const inBox = await seedVariant();
+    const loose = await seedVariant();
+    const a = await seedPurchaseItem({ variantId: inBox, qtyOrdered: 4, unitCostMinor: 1000 });
+    const b = await seedPurchaseItem({ variantId: loose, qtyOrdered: 4, unitCostMinor: 1000 });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    const boxFreight = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Box freight",
+      costMinor: 4000,
+    });
+    // Only `a` is in the box; `b` is a root sibling, outside the charge.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: boxFreight.id,
+      purchaseItemId: a.itemId,
+      description: "Boxed",
+      qty: 4,
+      costMinor: 4000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: b.itemId,
+      description: "Loose",
+      qty: 4,
+      costMinor: 4000,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    // Box freight (4000) lands entirely on `a`: (4000 + 4000)/4 = 2000.
+    expect((await getVariant(inBox))?.costMinor).toBe(2000);
+    // `b` carries none of it: 4000/4 = 1000.
+    expect((await getVariant(loose))?.costMinor).toBe(1000);
+  });
+
+  test("rejects nesting a line under a goods leaf", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    const leaf = await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        parentItemId: leaf.id,
+        description: "Freight under a leaf",
+        costMinor: 100,
+      }),
+      "INVALID_INPUT",
+    );
+  });
+
   test("supports partial delivery across two deliveries", async () => {
     const locationId = await seedLocation();
     const variantId = await seedVariant();

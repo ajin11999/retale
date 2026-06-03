@@ -193,6 +193,14 @@ export async function createDeliveryItem(input: {
     if (parent.deliveryId !== input.deliveryId) {
       throw new DeliveryError("INVALID_INPUT", "parent belongs to a different delivery");
     }
+    // Only a cost node can group children; a goods leaf is terminal. This keeps
+    // the cost tree well-formed for subtree freight allocation.
+    if (parent.purchaseItemId != null) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "cannot nest a line under a goods leaf — only cost nodes can group",
+      );
+    }
   }
   // A leaf points at a purchase line and needs a positive qty; a grouping
   // node has neither.
@@ -380,12 +388,23 @@ function leafQtyByPurchaseItem(leaves: DeliveryItem[]): Map<string, number> {
 
 /**
  * Apportion the delivery's cost nodes — every item with no `purchaseItemId`,
- * i.e. the freight / customs / grouping rows — across the stock leaves in
+ * i.e. the freight / customs / grouping rows — onto the stock leaves, in
  * proportion to each leaf's line value (its own `costMinor`). This is the
  * landed-cost step: a product's received unit cost carries its share of the
- * delivery cost. Non-stock leaves (`variantId` null) are excluded — freight
+ * delivery cost.
+ *
+ * Scope follows the cost tree. A cost node's cost spreads only over the stock
+ * leaves **in its own subtree** — so nesting goods under a "Carton freight"
+ * node confines that charge to those goods (the carton's Rp40k over its 24
+ * bottles), while a broad "Customs" node wrapping everything spreads over all
+ * of it. A leaf nested under several cost nodes carries each one's share. As a
+ * convenience, a cost node with **no** goods in its subtree (a loose charge, or
+ * one sitting as a sibling of flat leaves — the receiving-check shape) is
+ * treated as delivery-wide and spreads over every stock leaf.
+ *
+ * Non-stock leaves (`variantId` null) are excluded everywhere — freight
  * capitalizes into goods of resale only (design-decisions.md → landed cost).
- * Largest-remainder rounding spreads the pool to the cent. Returns the freight
+ * Largest-remainder rounding spreads each node to the cent. Returns the freight
  * minor units to add on top of each leaf's base cost, keyed by leaf id.
  */
 function allocateFreightByValue(
@@ -394,32 +413,62 @@ function allocateFreightByValue(
   lines: Map<string, typeof purchaseItems.$inferSelect>,
 ): Map<string, number> {
   const out = new Map<string, number>();
-  const stockLeaves = leaves.filter(
-    (l) => lines.get(l.purchaseItemId as string)?.variantId != null,
-  );
+  const isStock = (l: DeliveryItem) =>
+    lines.get(l.purchaseItemId as string)?.variantId != null;
+  const stockLeaves = leaves.filter(isStock);
   for (const l of stockLeaves) out.set(l.id, 0);
+  if (stockLeaves.length === 0) return out;
 
-  const pool = items
-    .filter((i) => i.purchaseItemId == null)
-    .reduce((sum, i) => sum + i.costMinor, 0);
-  const base = stockLeaves.reduce((sum, l) => sum + l.costMinor, 0);
-  if (pool <= 0 || base <= 0) return out;
-
-  const remainders: { id: string; rem: number }[] = [];
-  let handed = 0;
-  for (const l of stockLeaves) {
-    const exact = (pool * l.costMinor) / base;
-    const floor = Math.floor(exact);
-    out.set(l.id, floor);
-    remainders.push({ id: l.id, rem: exact - floor });
-    handed += floor;
+  // parent id → child items, to walk a cost node's subtree.
+  const childrenOf = new Map<string | null, DeliveryItem[]>();
+  for (const it of items) {
+    const key = it.parentItemId ?? null;
+    const list = childrenOf.get(key);
+    if (list) list.push(it);
+    else childrenOf.set(key, [it]);
   }
-  // Hand the leftover cents to the largest fractional shares first. The
-  // leftover is always < the leaf count (each floor drops under one cent), so
-  // a single pass over the top remainders suffices.
-  remainders.sort((a, b) => b.rem - a.rem);
-  for (const { id } of remainders.slice(0, pool - handed)) {
-    out.set(id, (out.get(id) ?? 0) + 1);
+
+  /** The stock leaves anywhere beneath `nodeId` (transitive). */
+  function subtreeStockLeaves(nodeId: string): DeliveryItem[] {
+    const acc: DeliveryItem[] = [];
+    const walk = (id: string) => {
+      for (const child of childrenOf.get(id) ?? []) {
+        if (child.purchaseItemId != null) {
+          if (isStock(child)) acc.push(child);
+        } else {
+          walk(child.id);
+        }
+      }
+    };
+    walk(nodeId);
+    return acc;
+  }
+
+  // Spread one cost node's pool over a set of leaves by value, adding to `out`.
+  const spread = (pool: number, targets: DeliveryItem[]) => {
+    const base = targets.reduce((sum, l) => sum + l.costMinor, 0);
+    if (pool <= 0 || base <= 0) return;
+    const remainders: { id: string; rem: number }[] = [];
+    let handed = 0;
+    for (const l of targets) {
+      const exact = (pool * l.costMinor) / base;
+      const floor = Math.floor(exact);
+      out.set(l.id, (out.get(l.id) ?? 0) + floor);
+      remainders.push({ id: l.id, rem: exact - floor });
+      handed += floor;
+    }
+    // Hand the leftover cents to the largest fractional shares first; the
+    // leftover is always < the leaf count, so one pass over the top suffices.
+    remainders.sort((a, b) => b.rem - a.rem);
+    for (const { id } of remainders.slice(0, pool - handed)) {
+      out.set(id, (out.get(id) ?? 0) + 1);
+    }
+  };
+
+  for (const node of items) {
+    if (node.purchaseItemId != null || node.costMinor <= 0) continue;
+    const scoped = subtreeStockLeaves(node.id);
+    spread(node.costMinor, scoped.length > 0 ? scoped : stockLeaves);
   }
   return out;
 }

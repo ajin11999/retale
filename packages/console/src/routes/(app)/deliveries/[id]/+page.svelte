@@ -5,6 +5,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -50,6 +51,23 @@
         id
         name
       }
+      openPurchases: purchases(status: open) {
+        id
+        snapshotVendorName
+        items {
+          id
+          variantId
+          description
+          qtyOrdered
+          qtyDelivered
+          unitCostMinor
+        }
+      }
+      products(includeArchived: true) {
+        id
+        name
+        variants { id sku label }
+      }
     }
   `);
 
@@ -85,6 +103,7 @@
     mutation ConsoleCreateDeliveryItem(
       $deliveryId: ID!
       $parentItemId: ID
+      $purchaseItemId: ID
       $description: String!
       $qty: Float
       $costMinor: Float!
@@ -93,6 +112,7 @@
       createDeliveryItem(
         deliveryId: $deliveryId
         parentItemId: $parentItemId
+        purchaseItemId: $purchaseItemId
         description: $description
         qty: $qty
         costMinor: $costMinor
@@ -153,7 +173,59 @@
   const delivery = $derived($Detail.data?.delivery ?? null);
   const locations = $derived($Detail.data?.locations ?? []);
   const couriers = $derived($Detail.data?.couriers ?? []);
+  const openPurchases = $derived($Detail.data?.openPurchases ?? []);
+  const productList = $derived($Detail.data?.products ?? []);
   const items = $derived(delivery?.items ?? []);
+
+  // Flat variant lookup so PO lines label by product name / SKU, not raw id.
+  const variantLabel = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const p of productList) {
+      for (const v of p.variants) {
+        const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
+        m.set(v.id, `${p.name} · ${suffix}`);
+      }
+    }
+    return (id: string | null | undefined, fallback: string | null | undefined) =>
+      id ? (m.get(id) ?? fallback ?? "Unknown") : (fallback ?? "—");
+  });
+
+  // PO lines still owing goods, across every open purchase — the goods picker.
+  // A delivery can draw lines from several purchases; `remaining` is what's left
+  // to receive on the PO (this draft's own staged qty is enforced at commit).
+  type PoLine = {
+    itemId: string;
+    label: string;
+    remaining: number;
+    unitCostMinor: number;
+  };
+  const poLines = $derived.by(() => {
+    const out: PoLine[] = [];
+    for (const p of openPurchases) {
+      for (const it of p.items) {
+        const remaining = it.qtyOrdered - it.qtyDelivered;
+        if (remaining <= 0) continue;
+        out.push({
+          itemId: it.id,
+          label: `${p.snapshotVendorName} · ${variantLabel(it.variantId, it.description)}`,
+          remaining,
+          unitCostMinor: it.unitCostMinor,
+        });
+      }
+    }
+    return out;
+  });
+  const poLineById = $derived.by(() => {
+    const m = new Map<string, PoLine>();
+    for (const l of poLines) m.set(l.itemId, l);
+    return m;
+  });
+  const poLineOptions = $derived(
+    poLines.map((l) => ({
+      value: l.itemId,
+      label: `${l.label} · ${l.remaining} left @ ${formatMoney(l.unitCostMinor)}`,
+    })),
+  );
 
   // Server-computed landed cost per leaf, keyed by item id — the same
   // apportionment commit will apply, so the preview can't drift from it.
@@ -241,35 +313,64 @@
 
   // ---- Item add / edit / delete -------------------------------------------
   // addingUnder: id of the parent (or "" for a root). null means no form open.
+  // A new line is either a goods leaf (a PO line + qty) or a cost node
+  // (freight/customs, optionally owed to a courier).
   let addingUnder = $state<string | null | "">(null);
+  let nMode = $state<"goods" | "cost">("goods");
   let nDesc = $state("");
   let nCost = $state<number | null>(null);
   let nQty = $state<string>("");
   let nVendorId = $state("");
+  let nPoLineId = $state("");
 
   function startAdd(parentId: string | "") {
     addingUnder = parentId;
+    nMode = "goods";
     nDesc = "";
     nCost = null;
     nQty = "";
     nVendorId = "";
+    nPoLineId = "";
   }
+
+  // The PO line currently picked in the goods form, and the staged value
+  // (unit cost × qty) it would receive at — what gets stored as the leaf cost.
+  const nPoLine = $derived(nPoLineId ? poLineById.get(nPoLineId) : undefined);
+  const nGoodsQty = $derived(nQty.trim() ? Number(nQty) : NaN);
+  const nGoodsValid = $derived(
+    !!nPoLine && Number.isInteger(nGoodsQty) && nGoodsQty > 0,
+  );
+  const nGoodsValue = $derived(
+    nPoLine && Number.isFinite(nGoodsQty) ? nPoLine.unitCostMinor * nGoodsQty : 0,
+  );
 
   async function addItem() {
     if (!delivery || addingUnder === null) return;
-    if (!nDesc.trim() || nCost == null) return;
-    const qty = nQty.trim() ? Number(nQty) : null;
+    const parentItemId = addingUnder === "" ? null : addingUnder;
     busy = true;
     error = null;
     try {
-      const res = await CreateDeliveryItem.mutate({
-        deliveryId: delivery.id,
-        parentItemId: addingUnder === "" ? null : addingUnder,
-        description: nDesc.trim(),
-        qty,
-        costMinor: nCost,
-        vendorId: nVendorId || null,
-      });
+      let res;
+      if (nMode === "goods") {
+        if (!nGoodsValid || !nPoLine) return;
+        res = await CreateDeliveryItem.mutate({
+          deliveryId: delivery.id,
+          parentItemId,
+          purchaseItemId: nPoLineId,
+          description: nPoLine.label,
+          qty: nGoodsQty,
+          costMinor: nGoodsValue,
+        });
+      } else {
+        if (!nDesc.trim() || nCost == null) return;
+        res = await CreateDeliveryItem.mutate({
+          deliveryId: delivery.id,
+          parentItemId,
+          description: nDesc.trim(),
+          costMinor: nCost,
+          vendorId: nVendorId || null,
+        });
+      }
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
@@ -284,6 +385,8 @@
   }
 
   let editingId = $state<string | null>(null);
+  let eIsLeaf = $state(false);
+  let eUnitCost = $state(0); // derived from the leaf's stored cost ÷ qty
   let eDesc = $state("");
   let eCost = $state<number | null>(null);
   let eQty = $state<string>("");
@@ -291,26 +394,40 @@
 
   function startEdit(it: Item) {
     editingId = it.id;
+    eIsLeaf = it.purchaseItemId != null;
+    eUnitCost = eIsLeaf && it.qty ? Math.round(it.costMinor / it.qty) : 0;
     eDesc = it.description;
     eCost = it.costMinor;
     eQty = it.qty == null ? "" : String(it.qty);
     eVendorId = it.vendorId ?? "";
   }
 
+  // A goods leaf's stored value follows its qty at the PO line's unit cost.
+  const eGoodsQty = $derived(eQty.trim() ? Number(eQty) : NaN);
+  const eGoodsValid = $derived(Number.isInteger(eGoodsQty) && eGoodsQty > 0);
+
   async function saveEdit() {
     if (!editingId) return;
-    if (!eDesc.trim() || eCost == null) return;
-    const qty = eQty.trim() ? Number(eQty) : null;
     busy = true;
     error = null;
     try {
-      const res = await UpdateDeliveryItem.mutate({
-        id: editingId,
-        description: eDesc.trim(),
-        qty,
-        costMinor: eCost,
-        vendorId: eVendorId || null,
-      });
+      let res;
+      if (eIsLeaf) {
+        if (!eGoodsValid) return;
+        res = await UpdateDeliveryItem.mutate({
+          id: editingId,
+          qty: eGoodsQty,
+          costMinor: eUnitCost * eGoodsQty,
+        });
+      } else {
+        if (!eDesc.trim() || eCost == null) return;
+        res = await UpdateDeliveryItem.mutate({
+          id: editingId,
+          description: eDesc.trim(),
+          costMinor: eCost,
+          vendorId: eVendorId || null,
+        });
+      }
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
@@ -325,7 +442,7 @@
   }
 
   async function removeItem(id: string) {
-    if (!confirm("Delete this cost line and its children?")) return;
+    if (!confirm("Delete this line? Any lines nested under it move up to its parent.")) return;
     busy = true;
     error = null;
     try {
@@ -533,53 +650,25 @@
         <h2 class="text-sm font-semibold">Cost tree</h2>
         {#if editable}
           <Button size="sm" variant="outline" onclick={() => startAdd("")}>
-            Add root line
+            Add line
           </Button>
         {/if}
       </div>
       <p class="mb-3 text-xs text-muted-foreground">
-        Freight / customs cost lines are spread across product lines by value;
-        each product shows its landed unit cost (→ /unit).
+        Add goods lines from any open PO, and freight / customs cost lines. A
+        cost line is spread by value over the goods <em>nested under it</em> —
+        nest a carton's bottles under its freight to confine that charge to them;
+        leave a charge at the top to spread it across the whole delivery. Each
+        product shows its landed unit cost (→ /unit).
       </p>
 
       {#if addingUnder === ""}
-        <div class="mb-3 flex items-end gap-2 rounded-md border bg-muted/40 p-3">
-          <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Description</span>
-            <Input bind:value={nDesc} />
-          </label>
-          <label class="w-32 space-y-1">
-            <span class="text-xs font-medium">Qty</span>
-            <Input bind:value={nQty} inputmode="decimal" />
-          </label>
-          <label class="w-40 space-y-1">
-            <span class="text-xs font-medium">Cost (Rp)</span>
-            <MoneyInput bind:value={nCost} />
-          </label>
-          <label class="w-40 space-y-1">
-            <span class="text-xs font-medium">Courier (AP)</span>
-            <Select bind:value={nVendorId}>
-              <option value="">— None —</option>
-              {#each couriers as c (c.id)}
-                <option value={c.id}>{c.name}</option>
-              {/each}
-            </Select>
-          </label>
-          <Button size="sm" disabled={busy || !nDesc.trim() || nCost == null} onclick={addItem}>
-            Add
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onclick={() => (addingUnder = null)}>Cancel</Button
-          >
-        </div>
+        {@render addForm()}
       {/if}
 
       {#if items.length === 0}
         <p class="text-sm text-muted-foreground">
-          No cost lines yet{editable ? " — add a root line to get started." : "."}
+          No lines yet{editable ? " — add a goods or cost line to get started." : "."}
         </p>
       {:else}
         <ul class="space-y-1">
@@ -599,15 +688,22 @@
       style:padding-left="{depth * 1.25 + 0.5}rem"
     >
       {#if editingId === node.item.id}
-        <Input bind:value={eDesc} class="flex-1" />
-        <Input bind:value={eQty} class="w-24" inputmode="decimal" placeholder="qty" />
-        <MoneyInput bind:value={eCost} class="w-32" />
-        <Select bind:value={eVendorId} class="w-36">
-          <option value="">— No courier —</option>
-          {#each couriers as c (c.id)}
-            <option value={c.id}>{c.name}</option>
-          {/each}
-        </Select>
+        {#if eIsLeaf}
+          <span class="flex-1 truncate text-sm">{node.item.description}</span>
+          <Input bind:value={eQty} class="w-24" inputmode="numeric" placeholder="qty" />
+          <span class="w-32 text-right text-sm">
+            {formatMoney(eUnitCost * (eGoodsValid ? eGoodsQty : 0))}
+          </span>
+        {:else}
+          <Input bind:value={eDesc} class="flex-1" />
+          <MoneyInput bind:value={eCost} class="w-32" />
+          <Select bind:value={eVendorId} class="w-36">
+            <option value="">— No courier —</option>
+            {#each couriers as c (c.id)}
+              <option value={c.id}>{c.name}</option>
+            {/each}
+          </Select>
+        {/if}
         <Button size="sm" disabled={busy} onclick={saveEdit}>Save</Button>
         <Button
           size="sm"
@@ -651,10 +747,15 @@
         {:else}
           <span class="w-40"></span>
         {/if}
-        {#if editable && !node.item.purchaseItemId}
-          <Button size="sm" variant="ghost" onclick={() => startAdd(node.item.id)}>
-            +
-          </Button>
+        {#if editable}
+          {#if !node.item.purchaseItemId}
+            <Button
+              size="sm"
+              variant="ghost"
+              title="Add a line under this charge"
+              onclick={() => startAdd(node.item.id)}>+</Button
+            >
+          {/if}
           <Button size="sm" variant="ghost" onclick={() => startEdit(node.item)}>
             ✎
           </Button>
@@ -669,40 +770,8 @@
     </div>
 
     {#if addingUnder === node.item.id}
-      <div
-        class="mt-1 flex items-end gap-2 rounded-md border bg-muted/40 p-2"
-        style:margin-left="{(depth + 1) * 1.25}rem"
-      >
-        <label class="flex-1 space-y-1">
-          <span class="text-xs font-medium">Description</span>
-          <Input bind:value={nDesc} />
-        </label>
-        <label class="w-24 space-y-1">
-          <span class="text-xs font-medium">Qty</span>
-          <Input bind:value={nQty} inputmode="decimal" />
-        </label>
-        <label class="w-32 space-y-1">
-          <span class="text-xs font-medium">Cost (minor)</span>
-          <Input bind:value={nCost} inputmode="numeric" />
-        </label>
-        <label class="w-36 space-y-1">
-          <span class="text-xs font-medium">Courier (AP)</span>
-          <Select bind:value={nVendorId}>
-            <option value="">— None —</option>
-            {#each couriers as c (c.id)}
-              <option value={c.id}>{c.name}</option>
-            {/each}
-          </Select>
-        </label>
-        <Button size="sm" disabled={busy || !nDesc.trim() || !nCost} onclick={addItem}>
-          Add
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onclick={() => (addingUnder = null)}>Cancel</Button
-        >
+      <div style:margin-left="{(depth + 1) * 1.25}rem">
+        {@render addForm()}
       </div>
     {/if}
 
@@ -714,4 +783,92 @@
       </ul>
     {/if}
   </li>
+{/snippet}
+
+{#snippet addForm()}
+  <div class="my-1 space-y-2 rounded-md border bg-muted/40 p-3">
+    <div class="flex gap-1">
+      <Button
+        size="sm"
+        variant={nMode === "goods" ? "default" : "outline"}
+        onclick={() => (nMode = "goods")}>Goods line</Button
+      >
+      <Button
+        size="sm"
+        variant={nMode === "cost" ? "default" : "outline"}
+        onclick={() => (nMode = "cost")}>Cost line</Button
+      >
+    </div>
+
+    {#if nMode === "goods"}
+      <div class="flex items-end gap-2">
+        <label class="flex-1 space-y-1">
+          <span class="text-xs font-medium">PO line</span>
+          <Combobox
+            options={poLineOptions}
+            bind:value={nPoLineId}
+            placeholder="Search a purchase line…"
+          />
+        </label>
+        <label class="w-24 space-y-1">
+          <span class="text-xs font-medium">Qty</span>
+          <Input bind:value={nQty} inputmode="numeric" />
+        </label>
+        <div class="w-32 space-y-1">
+          <span class="text-xs font-medium">Value</span>
+          <p class="flex h-9 items-center justify-end rounded-md border bg-background px-3 text-sm">
+            {formatMoney(nGoodsValue)}
+          </p>
+        </div>
+        <Button size="sm" disabled={busy || !nGoodsValid} onclick={addItem}>Add</Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onclick={() => (addingUnder = null)}>Cancel</Button
+        >
+      </div>
+      {#if poLineOptions.length === 0}
+        <p class="text-xs text-muted-foreground">
+          No open PO lines left to receive.
+        </p>
+      {:else if nPoLine && Number.isFinite(nGoodsQty) && nGoodsQty > nPoLine.remaining}
+        <p class="text-xs text-amber-600">
+          Only {nPoLine.remaining} left on this PO line — commit rejects more than
+          that across the whole delivery.
+        </p>
+      {/if}
+    {:else}
+      <div class="flex items-end gap-2">
+        <label class="flex-1 space-y-1">
+          <span class="text-xs font-medium">Description</span>
+          <Input bind:value={nDesc} placeholder="Freight, customs, …" />
+        </label>
+        <label class="w-40 space-y-1">
+          <span class="text-xs font-medium">Cost (Rp)</span>
+          <MoneyInput bind:value={nCost} />
+        </label>
+        <label class="w-40 space-y-1">
+          <span class="text-xs font-medium">Courier (AP)</span>
+          <Select bind:value={nVendorId}>
+            <option value="">— None —</option>
+            {#each couriers as c (c.id)}
+              <option value={c.id}>{c.name}</option>
+            {/each}
+          </Select>
+        </label>
+        <Button
+          size="sm"
+          disabled={busy || !nDesc.trim() || nCost == null}
+          onclick={addItem}>Add</Button
+        >
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onclick={() => (addingUnder = null)}>Cancel</Button
+        >
+      </div>
+    {/if}
+  </div>
 {/snippet}

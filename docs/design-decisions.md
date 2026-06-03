@@ -215,7 +215,8 @@ Archive is the default everyday action. Hard delete is for mistakes/duplicates.
 ### Landed cost × variants
 
 - `landed_cost_items.variant_id` (not product_id). `purchase_orders` lines also key by `variant_id`.
-- The hierarchical cost-distribution tree is unchanged — it's math over PO quantities, not product structure. Multiple variants of the same product on one PO produce separate leaves; each variant's WAC updates independently.
+- The cost tree distributes each freight/customs node's cost **by line value** (a leaf's `qty × unit_cost`), not by quantity. Multiple variants of the same product on one PO produce separate leaves; each variant's WAC updates independently.
+- **Scope follows the tree.** A cost node's cost spreads only over the stock leaves in its own subtree, so nesting goods under a "Carton freight" node confines that charge to them (Rp40,000 over its 24 bottles), while a node wrapping everything spreads delivery-wide. A leaf nested under several cost nodes carries each one's share. Convenience rule: a cost node with **no** goods in its subtree (a loose charge, or one sitting as a sibling of flat receiving-check leaves) is treated as delivery-wide. See `allocateFreightByValue` in `delivery-service.ts`.
 - WAC lives on `product_variants.cost_minor`; the update path is per-variant.
 
 ### Categories
@@ -431,7 +432,7 @@ Joins are bounded (few items, few deliveries). Don't denormalize on `purchases` 
 
 The only step that touches stock and WAC. In one transaction:
 1. Validate partial-delivery constraint per item.
-2. For each leaf with `purchase_item_id` set **and the referenced `purchase_item.variant_id IS NOT NULL`**: write a `purchase_receive` `stock_movement` at `target_location_id` for `variant_id`, with `unit_cost = leaf.cost_minor / leaf.qty` (allocated cost, includes proportional share of parent freight/customs). Non-stock leaves (variant_id NULL) are recorded for receiving audit only — no stock movement, no WAC impact.
+2. For each leaf with `purchase_item_id` set **and the referenced `purchase_item.variant_id IS NOT NULL`**: write a `purchase_receive` `stock_movement` at `target_location_id` for `variant_id`, with `unit_cost = leaf.landed_cost / leaf.qty`, where `landed_cost = leaf.cost_minor + its by-value share of every freight/customs node scoped over it` (see "Landed cost × variants"). Non-stock leaves (variant_id NULL) are recorded for receiving audit only — no stock movement, no WAC impact.
 3. Recompute `product_variants.cost_minor` via WAC formula per variant.
 4. Increment `purchase_items.qty_delivered` per affected item.
 5. Auto-set `purchases.status = 'complete'` if all items now fully delivered.
