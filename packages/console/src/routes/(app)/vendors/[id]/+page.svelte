@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
@@ -368,7 +368,12 @@
     if (!vendor) return;
     await VendorDetail.fetch({ variables: { id: vendor.id } });
     if (canViewLedger) {
-      await VendorLedger.fetch({ variables: { vendorId: vendor.id } });
+      // NetworkOnly — a payment/adjustment adds a ledger row the mutation
+      // result doesn't carry, so the cached list would otherwise stay stale.
+      await VendorLedger.fetch({
+        variables: { vendorId: vendor.id },
+        policy: CachePolicy.NetworkOnly,
+      });
     }
   };
 
@@ -433,6 +438,83 @@
     if (ok) {
       payAmount = null;
       payNote = "";
+      await refetch();
+    }
+  }
+
+  // ---- Pay by selecting charges -------------------------------------------
+  // AP is a running balance, so individual charges can't be flagged settled.
+  // Instead, ticking outstanding charges sums them into a single payment for
+  // their exact total. Selectable rows are debits (positive amount) — the
+  // things we owe; payments and credits (negative) aren't selectable.
+  let selectedCharges = $state<Set<string>>(new Set());
+  const selectableLedger = $derived(ledger.filter((e) => e.amountMinor > 0));
+  const selectedCount = $derived(selectedCharges.size);
+  const selectedTotal = $derived(
+    selectableLedger
+      .filter((e) => selectedCharges.has(e.id))
+      .reduce((sum, e) => sum + e.amountMinor, 0),
+  );
+
+  // Drop selections whose rows vanished after a refetch.
+  $effect(() => {
+    const live = new Set(selectableLedger.map((e) => e.id));
+    if ([...selectedCharges].some((id) => !live.has(id)))
+      selectedCharges = new Set(
+        [...selectedCharges].filter((id) => live.has(id)),
+      );
+  });
+
+  function toggleCharge(id: string) {
+    const next = new Set(selectedCharges);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedCharges = next;
+  }
+  const allChargesChecked = $derived(
+    selectableLedger.length > 0 &&
+      selectableLedger.every((e) => selectedCharges.has(e.id)),
+  );
+  function toggleAllCharges() {
+    selectedCharges = allChargesChecked
+      ? new Set()
+      : new Set(selectableLedger.map((e) => e.id));
+  }
+  const clearCharges = () => (selectedCharges = new Set());
+
+  async function paySelectedCharges() {
+    if (!vendor || selectedCount === 0 || selectedTotal <= 0) return;
+    const rows = selectableLedger.filter((e) => selectedCharges.has(e.id));
+    const dues = rows
+      .map((r) => r.dueDate)
+      .filter((d): d is string => !!d)
+      .sort();
+    const range =
+      dues.length === 0
+        ? ""
+        : dues[0] === dues[dues.length - 1]
+          ? ` (due ${dues[0]})`
+          : ` (due ${dues[0]}…${dues[dues.length - 1]})`;
+    const note = `Payment for ${selectedCount} charge${
+      selectedCount === 1 ? "" : "s"
+    }${range}`;
+    if (
+      !confirm(
+        `Record a payment of ${formatMoney(selectedTotal)} for ${selectedCount} selected charge${
+          selectedCount === 1 ? "" : "s"
+        }?`,
+      )
+    )
+      return;
+    const ok = await run("Payment", () =>
+      RecordVendorPayment.mutate({
+        vendorId: vendor.id,
+        amountMinor: selectedTotal,
+        note,
+      }),
+    );
+    if (ok) {
+      clearCharges();
       await refetch();
     }
   }
@@ -720,12 +802,29 @@
     {#if canViewLedger}
       <section class="space-y-3 rounded-lg border bg-card p-5">
         <h2 class="text-sm font-semibold">AP ledger ({ledger.length})</h2>
+        {#if canRecordPayment && selectableLedger.length > 0}
+          <p class="text-xs text-muted-foreground">
+            Tick outstanding charges to pay their total in one payment. AP is a
+            running balance, so charges aren't individually marked paid.
+          </p>
+        {/if}
         {#if $VendorLedger.fetching && ledger.length === 0}
           <p class="text-sm text-muted-foreground">Loading…</p>
         {:else}
           <table class="w-full text-sm">
             <thead class="border-b text-left text-muted-foreground">
               <tr>
+                {#if canRecordPayment}
+                  <th class="w-8 py-1.5">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all charges"
+                      checked={allChargesChecked}
+                      disabled={busy || selectableLedger.length === 0}
+                      onchange={toggleAllCharges}
+                    />
+                  </th>
+                {/if}
                 <th class="py-1.5 font-medium">When</th>
                 <th class="py-1.5 font-medium">Type</th>
                 <th class="py-1.5 text-right font-medium">Amount</th>
@@ -735,7 +834,24 @@
             </thead>
             <tbody>
               {#each ledger as e (e.id)}
-                <tr class="border-b last:border-0">
+                <tr
+                  class="border-b last:border-0 {selectedCharges.has(e.id)
+                    ? 'bg-primary/5'
+                    : ''}"
+                >
+                  {#if canRecordPayment}
+                    <td class="py-1.5">
+                      {#if e.amountMinor > 0}
+                        <input
+                          type="checkbox"
+                          aria-label="Select charge"
+                          checked={selectedCharges.has(e.id)}
+                          disabled={busy}
+                          onchange={() => toggleCharge(e.id)}
+                        />
+                      {/if}
+                    </td>
+                  {/if}
                   <td class="py-1.5">{fmtDateTime(e.createdAt)}</td>
                   <td class="py-1.5">{e.type}</td>
                   <td
@@ -751,13 +867,40 @@
               {/each}
               {#if ledger.length === 0}
                 <tr>
-                  <td colspan="5" class="py-6 text-center text-muted-foreground">
+                  <td
+                    colspan={canRecordPayment ? 6 : 5}
+                    class="py-6 text-center text-muted-foreground"
+                  >
                     No ledger entries.
                   </td>
                 </tr>
               {/if}
             </tbody>
           </table>
+
+          {#if canRecordPayment && selectedCount > 0}
+            <div
+              class="flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
+            >
+              <span class="text-sm">
+                {selectedCount} charge{selectedCount === 1 ? "" : "s"} selected ·
+                <span class="font-medium">{formatMoney(selectedTotal)}</span>
+              </span>
+              <div class="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onclick={clearCharges}>Clear</Button
+                >
+                <Button
+                  size="sm"
+                  disabled={busy || selectedTotal <= 0}
+                  onclick={paySelectedCharges}>Pay selected</Button
+                >
+              </div>
+            </div>
+          {/if}
         {/if}
       </section>
     {/if}
