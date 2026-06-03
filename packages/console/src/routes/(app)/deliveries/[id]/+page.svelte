@@ -5,7 +5,6 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
-  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -203,6 +202,11 @@
   // to receive on the PO (this draft's own staged qty is enforced at commit).
   type PoLine = {
     itemId: string;
+    purchaseId: string;
+    vendorName: string;
+    /** Product / SKU label without the vendor prefix. */
+    lineLabel: string;
+    /** Full label (vendor · line) used when written onto a delivery item. */
     label: string;
     remaining: number;
     unitCostMinor: number;
@@ -213,9 +217,13 @@
       for (const it of p.items) {
         const remaining = it.qtyOrdered - it.qtyDelivered;
         if (remaining <= 0) continue;
+        const lineLabel = variantLabel(it.variantId, it.description);
         out.push({
           itemId: it.id,
-          label: `${p.snapshotVendorName} · ${variantLabel(it.variantId, it.description)}`,
+          purchaseId: p.id,
+          vendorName: p.snapshotVendorName,
+          lineLabel,
+          label: `${p.snapshotVendorName} · ${lineLabel}`,
           remaining,
           unitCostMinor: it.unitCostMinor,
         });
@@ -228,12 +236,19 @@
     for (const l of poLines) m.set(l.itemId, l);
     return m;
   });
-  const poLineOptions = $derived(
-    poLines.map((l) => ({
-      value: l.itemId,
-      label: `${l.label} · ${l.remaining} left @ ${formatMoney(l.unitCostMinor)}`,
-    })),
-  );
+  // Open purchases that still have lines to receive — step 1 of the picker.
+  const poGroups = $derived.by(() => {
+    const m = new Map<
+      string,
+      { id: string; vendorName: string; count: number }
+    >();
+    for (const l of poLines) {
+      const g = m.get(l.purchaseId);
+      if (g) g.count++;
+      else m.set(l.purchaseId, { id: l.purchaseId, vendorName: l.vendorName, count: 1 });
+    }
+    return [...m.values()];
+  });
 
   // Server-computed landed cost per leaf, keyed by item id — the same
   // apportionment commit will apply, so the preview can't drift from it.
@@ -342,58 +357,149 @@
   let nMode = $state<"goods" | "cost">("goods");
   let nDesc = $state("");
   let nCost = $state<number | null>(null);
-  let nQty = $state<string>("");
   let nVendorId = $state("");
-  let nPoLineId = $state("");
 
   function startAdd(parentId: string | "") {
     addingUnder = parentId;
     nMode = "goods";
     nDesc = "";
     nCost = null;
-    nQty = "";
     nVendorId = "";
-    nPoLineId = "";
   }
 
-  // The PO line currently picked in the goods form, and the staged value
-  // (unit cost × qty) it would receive at — what gets stored as the leaf cost.
-  const nPoLine = $derived(nPoLineId ? poLineById.get(nPoLineId) : undefined);
-  const nGoodsQty = $derived(nQty.trim() ? Number(nQty) : NaN);
-  const nGoodsValid = $derived(
-    !!nPoLine && Number.isInteger(nGoodsQty) && nGoodsQty > 0,
+  // ---- PO-line picker modal (multi-select goods) --------------------------
+  // Pick several PO lines at once, filter by purchase, and drop them all under
+  // the same parent (a cost line, or the root) in one go.
+  let pickerOpen = $state(false);
+  let pickerParent = $state<string | "">("");
+  let pickerPoId = $state(""); // "" = step 1 (pick a purchase); else show its lines
+  // poLine itemId → qty string. A key's presence means the line is selected.
+  let pickerQty = $state<Record<string, string>>({});
+
+  function openPicker() {
+    if (addingUnder === null) return;
+    pickerParent = addingUnder;
+    pickerPoId = "";
+    pickerQty = {};
+    pickerOpen = true;
+  }
+  function togglePick(line: PoLine) {
+    if (line.itemId in pickerQty) {
+      const rest = { ...pickerQty };
+      delete rest[line.itemId];
+      pickerQty = rest;
+    } else {
+      pickerQty = { ...pickerQty, [line.itemId]: String(line.remaining) };
+    }
+  }
+  // Select-all toggles only the lines of the purchase on screen, leaving any
+  // selection in other purchases intact (selections accumulate across POs).
+  function toggleAllPicker() {
+    const next = { ...pickerQty };
+    if (allPicked) {
+      for (const l of pickerLines) delete next[l.itemId];
+    } else {
+      for (const l of pickerLines)
+        if (!(l.itemId in next)) next[l.itemId] = String(l.remaining);
+    }
+    pickerQty = next;
+  }
+  function setPickQty(itemId: string, v: string) {
+    pickerQty = { ...pickerQty, [itemId]: v };
+  }
+
+  const pickerParentLabel = $derived(
+    pickerParent === ""
+      ? "Top level"
+      : (items.find((it) => it.id === pickerParent)?.description ?? "cost line"),
   );
-  const nGoodsValue = $derived(
-    nPoLine && Number.isFinite(nGoodsQty) ? nPoLine.unitCostMinor * nGoodsQty : 0,
+  const pickerLines = $derived(
+    poLines.filter((l) => l.purchaseId === pickerPoId),
+  );
+  const allPicked = $derived(
+    pickerLines.length > 0 && pickerLines.every((l) => l.itemId in pickerQty),
+  );
+  const somePicked = $derived(
+    !allPicked && pickerLines.some((l) => l.itemId in pickerQty),
+  );
+  const pickerPoName = $derived(
+    poGroups.find((g) => g.id === pickerPoId)?.vendorName ?? "",
+  );
+  // How many lines are currently ticked per purchase — shown on step 1 so a
+  // cross-purchase selection stays visible after switching purchases.
+  const selectedByPo = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const itemId of Object.keys(pickerQty)) {
+      const line = poLineById.get(itemId);
+      if (line) m.set(line.purchaseId, (m.get(line.purchaseId) ?? 0) + 1);
+    }
+    return m;
+  });
+  const pickerSelected = $derived.by(() => {
+    const out: { line: PoLine; qty: number }[] = [];
+    for (const [itemId, raw] of Object.entries(pickerQty)) {
+      const line = poLineById.get(itemId);
+      if (line) out.push({ line, qty: raw.trim() ? Number(raw) : NaN });
+    }
+    return out;
+  });
+  const pickerValid = $derived(
+    pickerSelected.length > 0 &&
+      pickerSelected.every((s) => Number.isInteger(s.qty) && s.qty > 0),
+  );
+  const pickerTotal = $derived(
+    pickerSelected.reduce(
+      (sum, s) =>
+        sum + (Number.isFinite(s.qty) ? s.line.unitCostMinor * s.qty : 0),
+      0,
+    ),
   );
 
+  async function confirmPicker() {
+    if (!delivery || !pickerValid) return;
+    const parentItemId = pickerParent === "" ? null : pickerParent;
+    busy = true;
+    error = null;
+    try {
+      for (const { line, qty } of pickerSelected) {
+        const res = await CreateDeliveryItem.mutate({
+          deliveryId: delivery.id,
+          parentItemId,
+          purchaseItemId: line.itemId,
+          description: line.label,
+          qty,
+          costMinor: line.unitCostMinor * qty,
+        });
+        if (res.errors?.length) {
+          error = res.errors[0].message;
+          break;
+        }
+      }
+      pickerOpen = false;
+      addingUnder = null;
+      await refetch();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Cost lines (freight / customs) are still added one at a time inline.
   async function addItem() {
     if (!delivery || addingUnder === null) return;
+    if (!nDesc.trim() || nCost == null) return;
     const parentItemId = addingUnder === "" ? null : addingUnder;
     busy = true;
     error = null;
     try {
-      let res;
-      if (nMode === "goods") {
-        if (!nGoodsValid || !nPoLine) return;
-        res = await CreateDeliveryItem.mutate({
-          deliveryId: delivery.id,
-          parentItemId,
-          purchaseItemId: nPoLineId,
-          description: nPoLine.label,
-          qty: nGoodsQty,
-          costMinor: nGoodsValue,
-        });
-      } else {
-        if (!nDesc.trim() || nCost == null) return;
-        res = await CreateDeliveryItem.mutate({
-          deliveryId: delivery.id,
-          parentItemId,
-          description: nDesc.trim(),
-          costMinor: nCost,
-          vendorId: nVendorId || null,
-        });
-      }
+      const res = await CreateDeliveryItem.mutate({
+        deliveryId: delivery.id,
+        parentItemId,
+        description: nDesc.trim(),
+        costMinor: nCost,
+        vendorId: nVendorId || null,
+      });
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
@@ -743,6 +849,166 @@
   {/if}
 </div>
 
+{#if pickerOpen}
+  <!-- PO-line picker. Step 1: pick a purchase. Step 2: tick its lines and set
+       qty. Selections accumulate across purchases; all are added at once. -->
+  <button
+    type="button"
+    aria-label="Close"
+    class="fixed inset-0 z-40 cursor-default bg-black/40"
+    onclick={() => (pickerOpen = false)}
+  ></button>
+  <div
+    class="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-[44rem] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-card shadow-xl"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="flex items-center gap-3 border-b p-4">
+      {#if pickerPoId}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="shrink-0"
+          onclick={() => (pickerPoId = "")}>← Purchases</Button
+        >
+      {/if}
+      <div>
+        <h2 class="text-sm font-semibold">
+          {pickerPoId ? pickerPoName : "Add goods lines"}
+        </h2>
+        <p class="text-xs text-muted-foreground">
+          {pickerPoId ? "Tick the lines to receive" : `into ${pickerParentLabel}`}
+        </p>
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto">
+      {#if !pickerPoId}
+        <!-- Step 1: pick a purchase -->
+        {#if poGroups.length === 0}
+          <p class="p-6 text-center text-sm text-muted-foreground">
+            No open purchases with lines left to receive.
+          </p>
+        {:else}
+          <ul class="divide-y">
+            {#each poGroups as g (g.id)}
+              {@const picked = selectedByPo.get(g.id) ?? 0}
+              <li>
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40"
+                  onclick={() => (pickerPoId = g.id)}
+                >
+                  <span>
+                    <span class="text-sm font-medium">{g.vendorName}</span>
+                    <span class="block text-xs text-muted-foreground">
+                      #{g.id.slice(-6)} · {g.count} line{g.count === 1 ? "" : "s"} left
+                    </span>
+                  </span>
+                  <span class="flex items-center gap-2 text-xs text-muted-foreground">
+                    {#if picked > 0}
+                      <Badge class="bg-primary/10 text-primary">{picked} picked</Badge>
+                    {/if}
+                    <span aria-hidden="true">›</span>
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <!-- Step 2: tick the chosen purchase's lines -->
+        <table class="w-full text-sm">
+          <thead
+            class="sticky top-0 border-b bg-muted text-left text-xs text-muted-foreground"
+          >
+            <tr>
+              <th class="w-8 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={allPicked}
+                  indeterminate={somePicked}
+                  onchange={toggleAllPicker}
+                  class="h-4 w-4"
+                  title="Select all lines in this purchase"
+                />
+              </th>
+              <th class="px-3 py-2 font-medium">PO line</th>
+              <th class="px-3 py-2 text-right font-medium">Left</th>
+              <th class="px-3 py-2 text-right font-medium">Unit cost</th>
+              <th class="w-28 px-3 py-2 text-right font-medium">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each pickerLines as l (l.itemId)}
+              {@const sel = l.itemId in pickerQty}
+              {@const q = pickerQty[l.itemId] ?? ""}
+              {@const over =
+                sel && Number.isFinite(Number(q)) && Number(q) > l.remaining}
+              <tr
+                class="border-b last:border-0 hover:bg-muted/40 {sel ? 'bg-primary/5' : ''}"
+              >
+                <td class="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={sel}
+                    onchange={() => togglePick(l)}
+                    class="h-4 w-4"
+                  />
+                </td>
+                <td class="px-3 py-2">
+                  <button
+                    type="button"
+                    class="text-left hover:underline"
+                    onclick={() => togglePick(l)}
+                  >
+                    <span class="font-medium">{l.lineLabel}</span>
+                  </button>
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">{l.remaining}</td>
+                <td class="px-3 py-2 text-right tabular-nums">
+                  {formatMoney(l.unitCostMinor)}
+                </td>
+                <td class="px-3 py-2 text-right">
+                  {#if sel}
+                    <input
+                      inputmode="numeric"
+                      value={q}
+                      oninput={(e) => setPickQty(l.itemId, e.currentTarget.value)}
+                      class="h-8 w-24 rounded-md border bg-background px-2 text-right text-sm {over
+                        ? 'border-amber-500'
+                        : 'border-input'}"
+                    />
+                  {:else}
+                    <span class="text-xs text-muted-foreground">—</span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+    </div>
+
+    <div class="flex items-center justify-between gap-3 border-t p-4">
+      <p class="text-sm text-muted-foreground">
+        {pickerSelected.length} selected · {formatMoney(pickerTotal)}
+      </p>
+      <div class="flex gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          onclick={() => (pickerOpen = false)}>Cancel</Button
+        >
+        <Button size="sm" disabled={busy || !pickerValid} onclick={confirmPicker}>
+          Add {pickerSelected.length || ""} line{pickerSelected.length === 1 ? "" : "s"}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#snippet renderNode(node: Node, depth: number)}
   <li>
     <div
@@ -880,43 +1146,22 @@
     </div>
 
     {#if nMode === "goods"}
-      <div class="flex items-end gap-2">
-        <label class="flex-1 space-y-1">
-          <span class="text-xs font-medium">PO line</span>
-          <Combobox
-            options={poLineOptions}
-            bind:value={nPoLineId}
-            placeholder="Search a purchase line…"
-          />
-        </label>
-        <label class="w-24 space-y-1">
-          <span class="text-xs font-medium">Qty</span>
-          <Input bind:value={nQty} inputmode="numeric" />
-        </label>
-        <div class="w-32 space-y-1">
-          <span class="text-xs font-medium">Value</span>
-          <p class="flex h-9 items-center justify-end rounded-md border bg-background px-3 text-sm">
-            {formatMoney(nGoodsValue)}
-          </p>
-        </div>
-        <Button size="sm" disabled={busy || !nGoodsValid} onclick={addItem}>Add</Button>
+      <div class="flex items-center gap-2">
+        <Button size="sm" disabled={busy || poLines.length === 0} onclick={openPicker}>
+          Choose PO lines…
+        </Button>
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
           onclick={() => (addingUnder = null)}>Cancel</Button
         >
+        {#if poLines.length === 0}
+          <span class="text-xs text-muted-foreground">
+            No open PO lines left to receive.
+          </span>
+        {/if}
       </div>
-      {#if poLineOptions.length === 0}
-        <p class="text-xs text-muted-foreground">
-          No open PO lines left to receive.
-        </p>
-      {:else if nPoLine && Number.isFinite(nGoodsQty) && nGoodsQty > nPoLine.remaining}
-        <p class="text-xs text-amber-600">
-          Only {nPoLine.remaining} left on this PO line — commit rejects more than
-          that across the whole delivery.
-        </p>
-      {/if}
     {:else}
       <div class="flex items-end gap-2">
         <label class="flex-1 space-y-1">

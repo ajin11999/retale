@@ -22,6 +22,7 @@ import {
   commitDelivery,
   createDelivery,
   createDeliveryItem,
+  deleteDelivery,
   DeliveryError,
   type DeliveryErrorCode,
 } from "./delivery-service.ts";
@@ -447,6 +448,40 @@ describe("commitDelivery", () => {
       }),
       "INVALID_INPUT",
     );
+  });
+
+  test("discards a draft whose goods are nested under a cost node", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    // Cost node created BEFORE the goods nested under it — the parent gets the
+    // smaller ULID, so a plain deliveryId cascade would hit the RESTRICT
+    // self-FK. deleteDelivery must flatten the tree first.
+    const freight = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 1000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: freight.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+
+    await deleteDelivery(delivery.id);
+    expect(await getDelivery(delivery.id)).toBeUndefined();
   });
 
   test("supports partial delivery across two deliveries", async () => {

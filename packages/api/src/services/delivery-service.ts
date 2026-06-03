@@ -164,7 +164,17 @@ export async function updateDelivery(
 export async function deleteDelivery(id: string): Promise<void> {
   const delivery = await loadDelivery(id);
   assertDraft(delivery);
-  await db.delete(purchaseDeliveries).where(eq(purchaseDeliveries.id, id));
+  await db.transaction(async (tx) => {
+    // Break the self-referential parent links first. That FK is RESTRICT, so the
+    // deliveryId cascade can't drop a parent node while a child still points at
+    // it (the cascade deletes by PK order, which need not be child-first).
+    // Flattening every item to a root lets the cascade remove them all cleanly.
+    await tx
+      .update(purchaseDeliveryItems)
+      .set({ parentItemId: null })
+      .where(eq(purchaseDeliveryItems.deliveryId, id));
+    await tx.delete(purchaseDeliveries).where(eq(purchaseDeliveries.id, id));
+  });
 }
 
 // --- Cost tree ---
