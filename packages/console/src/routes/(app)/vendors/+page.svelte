@@ -16,6 +16,7 @@
       vendors(includeArchived: true) {
         id
         name
+        kind
         phone
         email
         leadTimeDays
@@ -26,8 +27,8 @@
   `);
 
   const CreateVendor = graphql(`
-    mutation ConsoleCreateVendor($name: String!) {
-      createVendor(name: $name) {
+    mutation ConsoleCreateVendor($name: String!, $kind: VendorKind) {
+      createVendor(name: $name, kind: $kind) {
         id
       }
     }
@@ -42,18 +43,25 @@
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
   const canCreate = $derived(has("vendor.create"));
 
-  // ---- Search --------------------------------------------------------------
+  // ---- Search & kind filter ------------------------------------------------
   let search = $state("");
+  let kindFilter = $state<"all" | "supplier" | "expedition">("all");
+  const KIND_TABS: { value: "all" | "supplier" | "expedition"; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "supplier", label: "Suppliers" },
+    { value: "expedition", label: "Couriers" },
+  ];
   const rows = $derived.by(() => {
     const q = search.trim().toLowerCase();
-    const list = q
-      ? vendors.filter(
-          (v) =>
-            v.name.toLowerCase().includes(q) ||
-            (v.phone ?? "").toLowerCase().includes(q) ||
-            (v.email ?? "").toLowerCase().includes(q),
-        )
-      : vendors;
+    const list = vendors.filter((v) => {
+      if (kindFilter !== "all" && v.kind !== kindFilter) return false;
+      if (!q) return true;
+      return (
+        v.name.toLowerCase().includes(q) ||
+        (v.phone ?? "").toLowerCase().includes(q) ||
+        (v.email ?? "").toLowerCase().includes(q)
+      );
+    });
     // Active first, then by name.
     return [...list].sort((a, b) => {
       const av = a.archivedAt ? 1 : 0;
@@ -64,6 +72,7 @@
 
   // ---- New vendor ----------------------------------------------------------
   let newName = $state<string | null>(null);
+  let newKind = $state<"supplier" | "expedition">("supplier");
   let busy = $state(false);
   let error = $state<string | null>(null);
 
@@ -73,7 +82,7 @@
     busy = true;
     error = null;
     try {
-      const res = await CreateVendor.mutate({ name });
+      const res = await CreateVendor.mutate({ name, kind: newKind });
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
@@ -94,6 +103,19 @@
   <div class="flex items-center justify-between">
     <h1 class="text-xl font-semibold">Vendors</h1>
     <div class="flex items-center gap-3">
+      <div class="inline-flex overflow-hidden rounded-md border">
+        {#each KIND_TABS as t (t.value)}
+          <button
+            type="button"
+            class="px-3 py-1.5 text-sm {kindFilter === t.value
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-card hover:bg-muted'}"
+            onclick={() => (kindFilter = t.value)}
+          >
+            {t.label}
+          </button>
+        {/each}
+      </div>
       <div class="w-64">
         <Input
           type="search"
@@ -104,7 +126,10 @@
       <Button
         size="sm"
         disabled={busy || !canCreate}
-        onclick={() => (newName = "")}
+        onclick={() => {
+          newKind = kindFilter === "expedition" ? "expedition" : "supplier";
+          newName = "";
+        }}
       >
         New vendor
       </Button>
@@ -120,6 +145,16 @@
       <label class="flex-1 space-y-1">
         <span class="text-sm font-medium">Vendor name</span>
         <Input bind:value={newName} placeholder="Vendor name" />
+      </label>
+      <label class="space-y-1">
+        <span class="text-sm font-medium">Kind</span>
+        <select
+          bind:value={newKind}
+          class="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="supplier">Supplier</option>
+          <option value="expedition">Expedition / courier</option>
+        </select>
       </label>
       <Button
         size="sm"
@@ -145,6 +180,7 @@
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
             <th class="px-4 py-2 font-medium">Vendor</th>
+            <th class="px-4 py-2 font-medium">Kind</th>
             <th class="px-4 py-2 font-medium">Phone</th>
             <th class="px-4 py-2 font-medium">Email</th>
             <th class="px-4 py-2 text-right font-medium">Lead time</th>
@@ -162,6 +198,15 @@
                 >
                   {v.name}
                 </a>
+              </td>
+              <td class="px-4 py-2">
+                <Badge
+                  class={v.kind === "expedition"
+                    ? "bg-sky-100 text-sky-700"
+                    : "bg-violet-100 text-violet-700"}
+                >
+                  {v.kind === "expedition" ? "Courier" : "Supplier"}
+                </Badge>
               </td>
               <td class="px-4 py-2">{v.phone ?? "—"}</td>
               <td class="px-4 py-2">{v.email ?? "—"}</td>
@@ -187,7 +232,7 @@
           {#if rows.length === 0}
             <tr>
               <td
-                colspan="6"
+                colspan="7"
                 class="px-4 py-10 text-center text-muted-foreground"
               >
                 No vendors match.

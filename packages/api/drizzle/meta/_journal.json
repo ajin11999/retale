@@ -225,6 +225,13 @@
       "when": 1780386747135,
       "tag": "0031_polite_black_widow",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1780450598786,
+      "tag": "0032_loose_bromley",
+      "breakpoints": true
     }
   ]
 }

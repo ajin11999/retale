@@ -21,6 +21,7 @@ import {
 import { users } from "./auth.ts";
 import { locations } from "./locations.ts";
 import { purchaseItems, purchases } from "./purchases.ts";
+import { vendors } from "./vendors.ts";
 import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** `delivered` is set by the commit transaction; `cancelled` reverses it (root only). */
@@ -73,6 +74,11 @@ export const purchaseDeliveryItems = mysqlTable(
     purchaseItemId: ulidRef().references(() => purchaseItems.id, {
       onDelete: "set null",
     }),
+    // Courier/expedition this cost node is owed to. Set only on freight/customs
+    // cost nodes (no purchaseItemId); on commit the node's cost posts as
+    // `purchase_on_account` to this vendor. Null = freight we absorb (no AP).
+    // SET NULL on vendor delete drops the AP link but keeps the landed cost.
+    vendorId: ulidRef().references(() => vendors.id, { onDelete: "set null" }),
     description: varchar({ length: 300 }).notNull(),
     // Set only on leaves; in the variant's smallest unit.
     qty: bigint({ mode: "number" }),
@@ -120,6 +126,10 @@ export const purchaseDeliveryItemsRelations = relations(
     purchaseItem: one(purchaseItems, {
       fields: [purchaseDeliveryItems.purchaseItemId],
       references: [purchaseItems.id],
+    }),
+    vendor: one(vendors, {
+      fields: [purchaseDeliveryItems.vendorId],
+      references: [vendors.id],
     }),
   }),
 );

@@ -341,6 +341,63 @@ describe("COGS, receiving & inventory loss", () => {
     expect(lines["liability.payable"]?.creditMinor).toBe(5000);
   });
 
+  test("receiving sources AP from the ledger, splitting supplier and courier", async () => {
+    // A committed delivery: stock landed at 6000 (5000 goods + 1000 freight),
+    // with the goods owed to the supplier and the freight to a courier.
+    const supplierId = ulid();
+    const courierId = ulid();
+    await db.insert(vendors).values([
+      { id: supplierId, name: "Acme Supply", kind: "supplier" },
+      { id: courierId, name: "JNE", kind: "expedition" },
+    ]);
+    const purchaseId = ulid();
+    await db.insert(purchases).values({
+      id: purchaseId,
+      vendorId: supplierId,
+      snapshotVendorName: "Acme Supply",
+      date: "2026-05-08",
+    });
+    const deliveryId = ulid();
+    await db.insert(purchaseDeliveries).values({
+      id: deliveryId,
+      date: "2026-05-08",
+      targetLocationId: locationId,
+      purchaseId,
+      status: "delivered",
+      deliveredAt: inMay(8),
+    });
+    await db.insert(stockMovements).values({
+      id: ulid(),
+      variantId,
+      type: "purchase_receive",
+      qtyDelta: 10,
+      unitCost: 600, // landed unit cost → 6000 capitalized
+      refType: "purchase",
+      refId: deliveryId,
+      createdAt: inMay(8),
+    });
+    await db.insert(vendorLedger).values([
+      { id: ulid(), vendorId: supplierId, type: "purchase_on_account", amountMinor: 5000, refType: "purchase_delivery", refId: deliveryId, createdAt: inMay(8) },
+      { id: ulid(), vendorId: courierId, type: "purchase_on_account", amountMinor: 1000, refType: "purchase_delivery", refId: deliveryId, createdAt: inMay(8) },
+    ]);
+
+    const data = await journalExport(RANGE);
+    expectAllBalanced(data);
+
+    const receive = data.entries.find((e) => e.refId === deliveryId)!;
+    const lines = Object.fromEntries(receive.lines.map((l) => [l.accountCategory, l]));
+    expect(lines["asset.inventory"]?.debitMinor).toBe(6000);
+    expect(lines["liability.payable"]?.creditMinor).toBe(6000); // 5000 + 1000
+    // The two sides agree exactly — no residual plug, no residual warnings.
+    expect(
+      data.warnings.some(
+        (w) =>
+          w.refId === deliveryId &&
+          (w.kind === "receiving_residual" || w.kind === "untagged_expense"),
+      ),
+    ).toBe(false);
+  });
+
   test("a stock adjustment is reported as an untagged warning", async () => {
     await db.insert(stockMovements).values({
       id: ulid(),

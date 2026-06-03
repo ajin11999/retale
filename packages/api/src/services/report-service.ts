@@ -163,18 +163,29 @@ export interface AgingReport {
 }
 
 /**
+ * One ledger row for aging: `createdAt` drives FIFO payment application (oldest
+ * charge paid first); `ageAt` is the timestamp the charge is bucketed by — its
+ * due date for AP, or simply `createdAt` where there are no terms.
+ */
+interface AgingEntry {
+  amountMinor: number;
+  createdAt: Date;
+  ageAt: Date;
+}
+
+/**
  * Age the outstanding balance of one party's ledger. Credits (negative
  * amounts) consume the oldest charges first; each still-unpaid charge is
- * bucketed by how many days old it is.
+ * bucketed by how many days past its `ageAt` it is.
  */
 function ageLedger(
-  entries: { amountMinor: number; createdAt: Date }[],
+  entries: AgingEntry[],
   now: number,
 ): Omit<AgingRow, "partyId" | "partyName"> | null {
   const charges = entries
     .filter((e) => e.amountMinor > 0)
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-    .map((e) => ({ remaining: e.amountMinor, at: e.createdAt.getTime() }));
+    .map((e) => ({ remaining: e.amountMinor, at: e.ageAt.getTime() }));
   let credit = entries
     .filter((e) => e.amountMinor < 0)
     .reduce((s, e) => s - e.amountMinor, 0);
@@ -207,7 +218,7 @@ function ageLedger(
 
 /** Build an aging report from a party-keyed set of ledger entries. */
 function buildAging(
-  parties: Map<string, { name: string; entries: { amountMinor: number; createdAt: Date }[] }>,
+  parties: Map<string, { name: string; entries: AgingEntry[] }>,
 ): AgingReport {
   const now = Date.now();
   const rows: AgingRow[] = [];
@@ -235,19 +246,21 @@ export async function arAgingReport(): Promise<AgingReport> {
     .from(customerLedger)
     .innerJoin(customers, eq(customerLedger.customerId, customers.id));
 
-  const parties = new Map<
-    string,
-    { name: string; entries: { amountMinor: number; createdAt: Date }[] }
-  >();
+  const parties = new Map<string, { name: string; entries: AgingEntry[] }>();
   for (const r of rows) {
     const p = parties.get(r.customerId) ?? { name: r.name, entries: [] };
-    p.entries.push({ amountMinor: r.amountMinor, createdAt: r.createdAt });
+    // Customers carry no terms — age from when the charge was incurred.
+    p.entries.push({
+      amountMinor: r.amountMinor,
+      createdAt: r.createdAt,
+      ageAt: r.createdAt,
+    });
     parties.set(r.customerId, p);
   }
   return buildAging(parties);
 }
 
-/** Vendor debt aging — who we owe, and how overdue. */
+/** Vendor debt aging — who we owe, and how overdue (by each charge's due date). */
 export async function apAgingReport(): Promise<AgingReport> {
   const rows = await db
     .select({
@@ -255,17 +268,20 @@ export async function apAgingReport(): Promise<AgingReport> {
       name: vendors.name,
       amountMinor: vendorLedger.amountMinor,
       createdAt: vendorLedger.createdAt,
+      dueDate: vendorLedger.dueDate,
     })
     .from(vendorLedger)
     .innerJoin(vendors, eq(vendorLedger.vendorId, vendors.id));
 
-  const parties = new Map<
-    string,
-    { name: string; entries: { amountMinor: number; createdAt: Date }[] }
-  >();
+  const parties = new Map<string, { name: string; entries: AgingEntry[] }>();
   for (const r of rows) {
     const p = parties.get(r.vendorId) ?? { name: r.name, entries: [] };
-    p.entries.push({ amountMinor: r.amountMinor, createdAt: r.createdAt });
+    // Bucket by due date when the charge has terms; else by when incurred.
+    p.entries.push({
+      amountMinor: r.amountMinor,
+      createdAt: r.createdAt,
+      ageAt: r.dueDate ? new Date(`${r.dueDate}T00:00:00.000`) : r.createdAt,
+    });
     parties.set(r.vendorId, p);
   }
   return buildAging(parties);

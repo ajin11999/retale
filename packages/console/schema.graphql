@@ -20,7 +20,7 @@ type Query {
   location(id: ID!): Location
   variantStock(variantId: ID!): [StockLocation!]!
   variantStockMovements(variantId: ID!, limit: Int): [StockMovement!]!
-  vendors(includeArchived: Boolean): [Vendor!]!
+  vendors(includeArchived: Boolean, kind: VendorKind): [Vendor!]!
   vendor(id: ID!): Vendor
   vendorLedger(vendorId: ID!, limit: Int): [VendorLedgerEntry!]!
   purchases(status: PurchaseStatus, vendorId: ID, includeCancelled: Boolean): [Purchase!]!
@@ -201,8 +201,8 @@ type Mutation {
 
   """Snap a variant's weighted-average cost to an exact value."""
   overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
-  createVendor(name: String!, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
-  updateVendor(id: ID!, name: String, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
+  createVendor(name: String!, kind: VendorKind, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, paymentTermsDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
+  updateVendor(id: ID!, name: String, kind: VendorKind, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, paymentTermsDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
   setVendorArchived(id: ID!, archived: Boolean!): Vendor!
 
   """
@@ -246,8 +246,30 @@ type Mutation {
 
   """Discard a draft delivery and its cost tree."""
   deleteDelivery(id: ID!): Boolean!
-  createDeliveryItem(deliveryId: ID!, parentItemId: ID, purchaseItemId: ID, description: String!, qty: Float, costMinor: Float!, sortOrder: Int): PurchaseDeliveryItem!
-  updateDeliveryItem(id: ID!, description: String, qty: Float, costMinor: Float, sortOrder: Int): PurchaseDeliveryItem!
+  createDeliveryItem(
+    deliveryId: ID!
+    parentItemId: ID
+    purchaseItemId: ID
+
+    """Expedition owed for this cost node (freight/customs); cost nodes only."""
+    vendorId: ID
+    description: String!
+    qty: Float
+    costMinor: Float!
+    sortOrder: Int
+  ): PurchaseDeliveryItem!
+  updateDeliveryItem(
+    id: ID!
+    description: String
+    qty: Float
+    costMinor: Float
+
+    """
+    Expedition owed for this cost node; pass null to clear, omit to leave unchanged.
+    """
+    vendorId: ID
+    sortOrder: Int
+  ): PurchaseDeliveryItem!
   deleteDeliveryItem(id: ID!): Boolean!
 
   """
@@ -739,9 +761,20 @@ enum VendorSendChannel {
   email
 }
 
+"""
+What we owe a party for: a goods supplier or a delivery courier/expedition.
+"""
+enum VendorKind {
+  supplier
+  expedition
+}
+
 type Vendor {
   id: ID!
   name: String!
+
+  """Supplier (goods) or expedition (courier/freight). Same AP for both."""
+  kind: VendorKind!
   phone: String
   email: String
   address: String
@@ -750,6 +783,11 @@ type Vendor {
 
   """Typical delivery lead time in days; feeds the reorder forecast."""
   leadTimeDays: Int
+
+  """
+  Net payment terms in days; a charge's due date is delivery date + this. Null = due on receipt.
+  """
+  paymentTermsDays: Int
 
   """
   Default send channel pre-selected on the send screen; null = no preference.
@@ -780,6 +818,11 @@ type VendorLedgerEntry {
   amountMinor: Float!
   refType: VendorLedgerRefType
   refId: ID
+
+  """
+  Due date of this charge (YYYY-MM-DD), for AP aging; set on purchase_on_account rows.
+  """
+  dueDate: String
   note: String
   posSessionId: ID
   createdAt: String!
@@ -957,6 +1000,14 @@ type PurchaseDeliveryItem {
 
   """Set only on a leaf — the purchase line this node receives against."""
   purchaseItemId: ID
+
+  """
+  Set only on a cost node — the expedition this freight/customs cost is owed to.
+  """
+  vendorId: ID
+
+  """The resolved expedition vendor for a tagged cost node, if any."""
+  vendor: Vendor
   description: String!
 
   """Set only on a leaf; in the variant's smallest unit."""

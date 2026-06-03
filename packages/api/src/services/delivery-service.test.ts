@@ -15,6 +15,7 @@ import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { stockLocations, stockMovements } from "../db/schema/stock.ts";
 import { users } from "../db/schema/auth.ts";
+import { vendorLedger, vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import {
   cancelDelivery,
@@ -39,6 +40,8 @@ async function wipe(): Promise<void> {
     "purchase_items",
     "purchase_sections",
     "purchases",
+    "vendor_ledger",
+    "vendors",
     "product_variants",
     "products",
     "locations",
@@ -110,17 +113,19 @@ async function seedVariant(opts?: {
   return variantId;
 }
 
-/** Create an open ad-hoc purchase with one line. Returns the purchase line id. */
+/** Create an open purchase with one line. Ad-hoc (no vendor) unless `vendorId`. */
 async function seedPurchaseItem(input: {
   variantId: string | null;
   qtyOrdered: number;
   unitCostMinor: number;
   description?: string;
+  vendorId?: string;
 }): Promise<{ purchaseId: string; itemId: string }> {
   const purchaseId = ulid();
   const itemId = ulid();
   await db.insert(purchases).values({
     id: purchaseId,
+    vendorId: input.vendorId ?? null,
     snapshotVendorName: "Ad-hoc Supplier",
     date: "2026-05-16",
     createdByUserId: userId,
@@ -135,6 +140,28 @@ async function seedPurchaseItem(input: {
   });
   return { purchaseId, itemId };
 }
+
+/** Create a vendor (supplier by default). Returns its id. */
+async function seedVendor(opts?: {
+  kind?: "supplier" | "expedition";
+  paymentTermsDays?: number | null;
+}): Promise<string> {
+  const id = ulid();
+  await db.insert(vendors).values({
+    id,
+    name: opts?.kind === "expedition" ? "JNE" : "Acme Supply",
+    kind: opts?.kind ?? "supplier",
+    paymentTermsDays: opts?.paymentTermsDays ?? null,
+    createdByUserId: userId,
+  });
+  return id;
+}
+
+const ledgerFor = (vendorId: string) =>
+  db.select().from(vendorLedger).where(eq(vendorLedger.vendorId, vendorId));
+
+const getVendor = (id: string) =>
+  db.query.vendors.findFirst({ where: eq(vendors.id, id) });
 
 // --- Query helpers ---
 
@@ -476,5 +503,162 @@ describe("cancelDelivery", () => {
       createdByUserId: userId,
     });
     await expectError(cancelDelivery(draft.id, userId), "NOT_DELIVERED");
+  });
+});
+
+describe("delivery accounts payable", () => {
+  test("commit raises supplier AP (goods) and courier AP (tagged freight)", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const supplierId = await seedVendor({ paymentTermsDays: 30 });
+    const courierId = await seedVendor({ kind: "expedition", paymentTermsDays: 7 });
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+      vendorId: supplierId,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000, // base goods cost → supplier AP
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 1000, // tagged to the courier → expedition AP
+      vendorId: courierId,
+    });
+    await commitDelivery(delivery.id, userId);
+
+    const supplierLedger = await ledgerFor(supplierId);
+    expect(supplierLedger).toHaveLength(1);
+    expect(supplierLedger[0]?.type).toBe("purchase_on_account");
+    expect(supplierLedger[0]?.amountMinor).toBe(5000);
+    expect(supplierLedger[0]?.refType).toBe("purchase_delivery");
+    expect(supplierLedger[0]?.refId).toBe(delivery.id);
+    expect(supplierLedger[0]?.dueDate).toBe("2026-06-15"); // +30 days
+    expect((await getVendor(supplierId))?.balanceMinor).toBe(5000);
+
+    const courierLedger = await ledgerFor(courierId);
+    expect(courierLedger).toHaveLength(1);
+    expect(courierLedger[0]?.amountMinor).toBe(1000);
+    expect(courierLedger[0]?.dueDate).toBe("2026-05-23"); // +7 days
+    expect((await getVendor(courierId))?.balanceMinor).toBe(1000);
+
+    // The stock cost still capitalizes the freight (landed cost unchanged).
+    expect((await getVariant(variantId))?.costMinor).toBe(600); // (5000+1000)/10
+  });
+
+  test("untagged freight raises no courier AP; supplier owes goods only", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const supplierId = await seedVendor();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+      vendorId: supplierId,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight (absorbed)",
+      costMinor: 1000, // no vendorId → no AP
+    });
+    await commitDelivery(delivery.id, userId);
+
+    const supplierLedger = await ledgerFor(supplierId);
+    expect(supplierLedger).toHaveLength(1);
+    expect(supplierLedger[0]?.amountMinor).toBe(5000);
+    // No terms on this supplier → due on the delivery date.
+    expect(supplierLedger[0]?.dueDate).toBe("2026-05-16");
+  });
+
+  test("ad-hoc purchase (no vendor) raises no AP", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await commitDelivery(delivery.id, userId);
+
+    expect(await db.select().from(vendorLedger)).toHaveLength(0);
+  });
+
+  test("cancel reverses supplier and courier AP back to zero", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const supplierId = await seedVendor({ paymentTermsDays: 30 });
+    const courierId = await seedVendor({ kind: "expedition" });
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+      vendorId: supplierId,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 1000,
+      vendorId: courierId,
+    });
+    await commitDelivery(delivery.id, userId);
+    await cancelDelivery(delivery.id, userId);
+
+    const supplierLedger = await ledgerFor(supplierId);
+    expect(supplierLedger).toHaveLength(2); // charge + refund_credit
+    expect(supplierLedger.some((r) => r.type === "refund_credit" && r.amountMinor === -5000)).toBe(true);
+    expect((await getVendor(supplierId))?.balanceMinor).toBe(0);
+
+    expect((await getVendor(courierId))?.balanceMinor).toBe(0);
   });
 });

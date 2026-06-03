@@ -28,6 +28,8 @@
           id
           parentItemId
           purchaseItemId
+          vendorId
+          vendor { id name }
           description
           qty
           costMinor
@@ -41,6 +43,10 @@
         }
       }
       locations(includeArchived: false) {
+        id
+        name
+      }
+      couriers: vendors(kind: expedition) {
         id
         name
       }
@@ -82,6 +88,7 @@
       $description: String!
       $qty: Float
       $costMinor: Float!
+      $vendorId: ID
     ) {
       createDeliveryItem(
         deliveryId: $deliveryId
@@ -89,6 +96,7 @@
         description: $description
         qty: $qty
         costMinor: $costMinor
+        vendorId: $vendorId
       ) {
         id
       }
@@ -101,12 +109,14 @@
       $description: String
       $qty: Float
       $costMinor: Float
+      $vendorId: ID
     ) {
       updateDeliveryItem(
         id: $id
         description: $description
         qty: $qty
         costMinor: $costMinor
+        vendorId: $vendorId
       ) {
         id
       }
@@ -142,6 +152,7 @@
   const Detail = $derived(data.DeliveryDetail);
   const delivery = $derived($Detail.data?.delivery ?? null);
   const locations = $derived($Detail.data?.locations ?? []);
+  const couriers = $derived($Detail.data?.couriers ?? []);
   const items = $derived(delivery?.items ?? []);
 
   // Server-computed landed cost per leaf, keyed by item id — the same
@@ -234,12 +245,14 @@
   let nDesc = $state("");
   let nCost = $state<number | null>(null);
   let nQty = $state<string>("");
+  let nVendorId = $state("");
 
   function startAdd(parentId: string | "") {
     addingUnder = parentId;
     nDesc = "";
     nCost = null;
     nQty = "";
+    nVendorId = "";
   }
 
   async function addItem() {
@@ -255,6 +268,7 @@
         description: nDesc.trim(),
         qty,
         costMinor: nCost,
+        vendorId: nVendorId || null,
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -273,12 +287,14 @@
   let eDesc = $state("");
   let eCost = $state<number | null>(null);
   let eQty = $state<string>("");
+  let eVendorId = $state("");
 
   function startEdit(it: Item) {
     editingId = it.id;
     eDesc = it.description;
     eCost = it.costMinor;
     eQty = it.qty == null ? "" : String(it.qty);
+    eVendorId = it.vendorId ?? "";
   }
 
   async function saveEdit() {
@@ -293,6 +309,7 @@
         description: eDesc.trim(),
         qty,
         costMinor: eCost,
+        vendorId: eVendorId || null,
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -539,6 +556,15 @@
             <span class="text-xs font-medium">Cost (Rp)</span>
             <MoneyInput bind:value={nCost} />
           </label>
+          <label class="w-40 space-y-1">
+            <span class="text-xs font-medium">Courier (AP)</span>
+            <Select bind:value={nVendorId}>
+              <option value="">— None —</option>
+              {#each couriers as c (c.id)}
+                <option value={c.id}>{c.name}</option>
+              {/each}
+            </Select>
+          </label>
           <Button size="sm" disabled={busy || !nDesc.trim() || nCost == null} onclick={addItem}>
             Add
           </Button>
@@ -576,6 +602,12 @@
         <Input bind:value={eDesc} class="flex-1" />
         <Input bind:value={eQty} class="w-24" inputmode="decimal" placeholder="qty" />
         <MoneyInput bind:value={eCost} class="w-32" />
+        <Select bind:value={eVendorId} class="w-36">
+          <option value="">— No courier —</option>
+          {#each couriers as c (c.id)}
+            <option value={c.id}>{c.name}</option>
+          {/each}
+        </Select>
         <Button size="sm" disabled={busy} onclick={saveEdit}>Save</Button>
         <Button
           size="sm"
@@ -590,6 +622,10 @@
             <span class="ml-1 text-xs text-muted-foreground">
               · PO line {node.item.purchaseItemId.slice(-6)}
             </span>
+          {:else if node.item.vendor}
+            <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
+              → {node.item.vendor.name}
+            </Badge>
           {/if}
         </span>
         {#if node.item.qty != null}
@@ -648,6 +684,15 @@
         <label class="w-32 space-y-1">
           <span class="text-xs font-medium">Cost (minor)</span>
           <Input bind:value={nCost} inputmode="numeric" />
+        </label>
+        <label class="w-36 space-y-1">
+          <span class="text-xs font-medium">Courier (AP)</span>
+          <Select bind:value={nVendorId}>
+            <option value="">— None —</option>
+            {#each couriers as c (c.id)}
+              <option value={c.id}>{c.name}</option>
+            {/each}
+          </Select>
         </label>
         <Button size="sm" disabled={busy || !nDesc.trim() || !nCost} onclick={addItem}>
           Add

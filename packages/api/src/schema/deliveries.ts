@@ -8,6 +8,7 @@ import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
 import * as deliveries from "../services/delivery-service.ts";
 import * as locations from "../services/location-service.ts";
+import * as vendorService from "../services/vendor-service.ts";
 
 export const typeDefs = /* GraphQL */ `
   enum DeliveryStatus { draft delivered cancelled }
@@ -49,6 +50,10 @@ export const typeDefs = /* GraphQL */ `
     parentItemId: ID
     "Set only on a leaf — the purchase line this node receives against."
     purchaseItemId: ID
+    "Set only on a cost node — the expedition this freight/customs cost is owed to."
+    vendorId: ID
+    "The resolved expedition vendor for a tagged cost node, if any."
+    vendor: Vendor
     description: String!
     "Set only on a leaf; in the variant's smallest unit."
     qty: Float
@@ -76,6 +81,8 @@ export const typeDefs = /* GraphQL */ `
       deliveryId: ID!
       parentItemId: ID
       purchaseItemId: ID
+      "Expedition owed for this cost node (freight/customs); cost nodes only."
+      vendorId: ID
       description: String!
       qty: Float
       costMinor: Float!
@@ -86,6 +93,8 @@ export const typeDefs = /* GraphQL */ `
       description: String
       qty: Float
       costMinor: Float
+      "Expedition owed for this cost node; pass null to clear, omit to leave unchanged."
+      vendorId: ID
       sortOrder: Int
     ): PurchaseDeliveryItem!
     deleteDeliveryItem(id: ID!): Boolean!
@@ -118,6 +127,16 @@ export const resolvers = {
     targetLocation: (d: DeliveryRow) => locations.getLocation(d.targetLocationId),
     items: (d: DeliveryRow) => deliveries.listDeliveryItems(d.id),
     leafLandings: (d: DeliveryRow) => deliveries.deliveryLeafLandings(d.id),
+  },
+  PurchaseDeliveryItem: {
+    vendor: async (i: { vendorId: string | null }) => {
+      if (!i.vendorId) return null;
+      try {
+        return await vendorService.getVendor(i.vendorId);
+      } catch {
+        return null; // courier since deleted — treat as untagged
+      }
+    },
   },
 
   Query: {

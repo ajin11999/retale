@@ -161,6 +161,20 @@ describe("apAgingReport", () => {
     expect(report.rows[0]?.balanceMinor).toBe(30000);
     expect(report.rows[0]?.bucket31_60).toBe(30000);
   });
+
+  test("buckets by due date, not when the charge was incurred", async () => {
+    const vendorId = ulid();
+    await db.insert(vendors).values({ id: vendorId, name: "Net-60 Vendor" });
+    // Incurred 45 days ago, but with 60-day terms its due date is 15 days out —
+    // still current, so it must land in the 0-30 bucket, not 31-60.
+    const dueDate = new Date(Date.now() + 15 * 86_400_000).toISOString().slice(0, 10);
+    await db.insert(vendorLedger).values([
+      { id: ulid(), vendorId, type: "purchase_on_account", amountMinor: 30000, createdAt: daysAgo(45), dueDate },
+    ]);
+    const report = await apAgingReport();
+    expect(report.rows[0]?.bucket0_30).toBe(30000);
+    expect(report.rows[0]?.bucket31_60).toBe(0);
+  });
 });
 
 describe("sessionVarianceReport", () => {

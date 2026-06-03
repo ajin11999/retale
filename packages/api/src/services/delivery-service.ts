@@ -14,8 +14,13 @@ import {
 import { locations } from "../db/schema/locations.ts";
 import { productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
+import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import { recordMovement } from "./stock-service.ts";
+import {
+  postPurchaseOnAccount,
+  reverseDeliveryCharges,
+} from "./vendor-service.ts";
 
 export type DeliveryErrorCode =
   | "DELIVERY_NOT_FOUND"
@@ -171,6 +176,8 @@ export async function createDeliveryItem(input: {
   description: string;
   qty?: number | null;
   costMinor: number;
+  /** Expedition this cost node is owed to. Cost nodes (no purchaseItemId) only. */
+  vendorId?: string | null;
   sortOrder?: number;
 }): Promise<DeliveryItem> {
   const delivery = await loadDelivery(input.deliveryId);
@@ -200,6 +207,13 @@ export async function createDeliveryItem(input: {
   } else if (input.qty != null) {
     throw new DeliveryError("INVALID_INPUT", "qty is only valid on a leaf with a purchaseItemId");
   }
+  // A courier only makes sense on a freight/customs cost node, not a goods leaf.
+  if (input.vendorId && input.purchaseItemId) {
+    throw new DeliveryError(
+      "INVALID_INPUT",
+      "a courier (vendorId) is only valid on a cost node, not a goods leaf",
+    );
+  }
 
   const id = ulid();
   await db.transaction(async (tx) => {
@@ -208,6 +222,7 @@ export async function createDeliveryItem(input: {
       deliveryId: input.deliveryId,
       parentItemId: input.parentItemId ?? null,
       purchaseItemId: input.purchaseItemId ?? null,
+      vendorId: input.purchaseItemId ? null : (input.vendorId ?? null),
       description: input.description.trim(),
       qty: input.purchaseItemId ? (input.qty as number) : null,
       costMinor: input.costMinor,
@@ -221,7 +236,13 @@ export async function createDeliveryItem(input: {
 /** Edit a cost-tree node. Draft deliveries only. */
 export async function updateDeliveryItem(
   id: string,
-  patch: { description?: string; qty?: number | null; costMinor?: number; sortOrder?: number },
+  patch: {
+    description?: string;
+    qty?: number | null;
+    costMinor?: number;
+    vendorId?: string | null;
+    sortOrder?: number;
+  },
 ): Promise<DeliveryItem> {
   const item = await loadItem(id);
   const delivery = await loadDelivery(item.deliveryId);
@@ -244,6 +265,12 @@ export async function updateDeliveryItem(
       throw new DeliveryError("INVALID_INPUT", "leaf qty must be a positive integer");
     }
   }
+  if (patch.vendorId != null && item.purchaseItemId) {
+    throw new DeliveryError(
+      "INVALID_INPUT",
+      "a courier (vendorId) is only valid on a cost node, not a goods leaf",
+    );
+  }
 
   await db.transaction(async (tx) => {
     await tx
@@ -252,6 +279,7 @@ export async function updateDeliveryItem(
         ...(patch.description !== undefined && { description: patch.description.trim() }),
         ...(patch.qty !== undefined && { qty: patch.qty }),
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
+        ...(patch.vendorId !== undefined && { vendorId: patch.vendorId }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
       })
       .where(eq(purchaseDeliveryItems.id, id));
@@ -416,11 +444,74 @@ async function refreshPurchaseStatuses(tx: Tx, purchaseIds: Set<string>): Promis
   }
 }
 
+/** Add `days` to a `YYYY-MM-DD` date string, returning `YYYY-MM-DD`. */
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Raise accounts payable for a committed delivery. The cost tree already splits
+ * the two parties we owe: each leaf's base cost (vendor price × qty) is owed to
+ * its purchase's supplier, and each freight/customs cost node tagged with a
+ * `vendorId` is owed to that expedition. Ad-hoc purchases (null vendor) and
+ * untagged freight raise no AP. A charge's due date is the delivery date plus
+ * the vendor's net terms. Runs inside the commit transaction.
+ */
+async function postDeliveryAccountsPayable(
+  tx: Tx,
+  delivery: Delivery,
+  items: DeliveryItem[],
+  leaves: DeliveryItem[],
+  lines: Map<string, typeof purchaseItems.$inferSelect>,
+  userId: string,
+): Promise<void> {
+  // Supplier AP: each leaf's base cost, summed by the purchase's vendor.
+  const purchaseVendor = new Map<string, string | null>();
+  for (const pid of new Set([...lines.values()].map((pi) => pi.purchaseId))) {
+    const p = await tx.query.purchases.findFirst({ where: eq(purchases.id, pid) });
+    purchaseVendor.set(pid, p?.vendorId ?? null);
+  }
+
+  const owedByVendor = new Map<string, number>();
+  const add = (vendorId: string, amount: number) =>
+    owedByVendor.set(vendorId, (owedByVendor.get(vendorId) ?? 0) + amount);
+
+  for (const leaf of leaves) {
+    const pi = lines.get(leaf.purchaseItemId as string);
+    if (!pi) continue;
+    const vId = purchaseVendor.get(pi.purchaseId);
+    if (vId) add(vId, leaf.costMinor);
+  }
+
+  // Courier AP: every cost node (no purchaseItemId) tagged with an expedition.
+  for (const node of items) {
+    if (node.purchaseItemId == null && node.vendorId && node.costMinor > 0) {
+      add(node.vendorId, node.costMinor);
+    }
+  }
+  if (owedByVendor.size === 0) return;
+
+  // Each charge's due date needs the vendor's net terms (null = due on receipt).
+  for (const [vendorId, amountMinor] of owedByVendor) {
+    const v = await tx.query.vendors.findFirst({ where: eq(vendors.id, vendorId) });
+    await postPurchaseOnAccount(tx, {
+      vendorId,
+      amountMinor,
+      deliveryId: delivery.id,
+      dueDate: addDays(delivery.date, v?.paymentTermsDays ?? 0),
+      createdByUserId: userId,
+    });
+  }
+}
+
 /**
  * Commit a draft delivery. In one transaction: validate the partial-delivery
  * constraint per line, emit a `purchase_receive` movement for every stock leaf
  * (non-stock lines are receipt-only), advance `qty_delivered`, complete any
- * fully-received purchase, and stamp the delivery `delivered`.
+ * fully-received purchase, raise accounts payable to the supplier(s) and any
+ * tagged expedition, and stamp the delivery `delivered`.
  */
 export async function commitDelivery(id: string, userId: string): Promise<Delivery> {
   return db.transaction(async (tx) => {
@@ -507,7 +598,10 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
     const purchaseIds = new Set([...lines.values()].map((pi) => pi.purchaseId));
     await refreshPurchaseStatuses(tx, purchaseIds);
 
-    // 6. Stamp the delivery delivered.
+    // 6. Raise AP: goods to the supplier(s), tagged freight to the expedition.
+    await postDeliveryAccountsPayable(tx, delivery, items, leaves, lines, userId);
+
+    // 7. Stamp the delivery delivered.
     await tx
       .update(purchaseDeliveries)
       .set({ status: "delivered", deliveredAt: new Date(), deliveredByUserId: userId })
@@ -586,6 +680,9 @@ export async function cancelDelivery(id: string, userId: string): Promise<Delive
     // Reopen any purchase that is no longer fully delivered.
     const purchaseIds = new Set([...lines.values()].map((pi) => pi.purchaseId));
     await refreshPurchaseStatuses(tx, purchaseIds);
+
+    // Reverse the AP this delivery raised (supplier + any expedition).
+    await reverseDeliveryCharges(tx, id, userId);
 
     await tx
       .update(purchaseDeliveries)

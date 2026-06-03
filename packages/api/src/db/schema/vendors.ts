@@ -7,6 +7,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
+  date,
   index,
   int,
   mysqlEnum,
@@ -26,6 +27,14 @@ import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
  * (it means "handled off-system" — never something to pre-pick).
  */
 export const VENDOR_SEND_CHANNELS = ["whatsapp", "email"] as const;
+
+/**
+ * What we owe this party for. `supplier` is a goods vendor; `expedition` is a
+ * delivery courier / freight forwarder. Purely a UI/filtering tag — both share
+ * the same AP ledger machinery. A freight cost node on a delivery points at an
+ * `expedition` vendor to raise courier AP on commit.
+ */
+export const VENDOR_KINDS = ["supplier", "expedition"] as const;
 
 /** Ledger event categories. `amount_minor` is positive when we owe more. */
 export const VENDOR_LEDGER_TYPES = [
@@ -56,6 +65,9 @@ export const vendors = mysqlTable(
   {
     id: ulidPk(),
     name: varchar({ length: 300 }).notNull(),
+    // Supplier (goods) vs expedition (courier/freight). Drives the freight
+    // courier picker and the vendors-list filter; AP works the same for both.
+    kind: mysqlEnum(VENDOR_KINDS).notNull().default("supplier"),
     phone: varchar({ length: 50 }),
     email: varchar({ length: 200 }),
     address: text(),
@@ -64,6 +76,9 @@ export const vendors = mysqlTable(
     // Typical days from placing a purchase order to stock arriving. Feeds the
     // reorder forecast; null = unknown lead time.
     leadTimeDays: int(),
+    // Net payment terms in days. A `purchase_on_account` row's due date is the
+    // delivery date plus this; null = no terms (due immediately for aging).
+    paymentTermsDays: int(),
     // Default channel the send screen pre-selects for this vendor's POs;
     // null = no preference (the clerk picks each time).
     preferredSendChannel: mysqlEnum(VENDOR_SEND_CHANNELS),
@@ -87,6 +102,7 @@ export const vendors = mysqlTable(
   },
   (t) => [
     index("vendors_archived_at_idx").on(t.archivedAt),
+    index("vendors_kind_idx").on(t.kind),
     index("vendors_phone_idx").on(t.phone),
     index("vendors_search_text_idx").on(t.searchText),
   ],
@@ -111,6 +127,10 @@ export const vendorLedger = mysqlTable(
     amountMinor: bigint({ mode: "number" }).notNull(),
     refType: mysqlEnum(VENDOR_LEDGER_REF_TYPES),
     refId: ulidRef(),
+    // When this charge is due, for AP aging. Set on `purchase_on_account` rows
+    // (delivery date + vendor.paymentTermsDays); null on payments/credits and
+    // on charges with no terms (treated as due on `createdAt` by the ager).
+    dueDate: date({ mode: "string" }),
     // Required for `adjustment` rows — checked in the service layer.
     note: text(),
     posSessionId: ulidRef().references(() => posSessions.id),

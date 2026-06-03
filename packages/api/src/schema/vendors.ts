@@ -22,9 +22,14 @@ export const typeDefs = /* GraphQL */ `
   "Channel the send screen pre-selects for a vendor's purchase orders."
   enum VendorSendChannel { whatsapp email }
 
+  "What we owe a party for: a goods supplier or a delivery courier/expedition."
+  enum VendorKind { supplier expedition }
+
   type Vendor {
     id: ID!
     name: String!
+    "Supplier (goods) or expedition (courier/freight). Same AP for both."
+    kind: VendorKind!
     phone: String
     email: String
     address: String
@@ -32,6 +37,8 @@ export const typeDefs = /* GraphQL */ `
     notes: String
     "Typical delivery lead time in days; feeds the reorder forecast."
     leadTimeDays: Int
+    "Net payment terms in days; a charge's due date is delivery date + this. Null = due on receipt."
+    paymentTermsDays: Int
     "Default send channel pre-selected on the send screen; null = no preference."
     preferredSendChannel: VendorSendChannel
     "Our ship-to address printed on this vendor's POs; null falls back to the default address."
@@ -53,13 +60,15 @@ export const typeDefs = /* GraphQL */ `
     amountMinor: Float!
     refType: VendorLedgerRefType
     refId: ID
+    "Due date of this charge (YYYY-MM-DD), for AP aging; set on purchase_on_account rows."
+    dueDate: String
     note: String
     posSessionId: ID
     createdAt: String!
   }
 
   extend type Query {
-    vendors(includeArchived: Boolean): [Vendor!]!
+    vendors(includeArchived: Boolean, kind: VendorKind): [Vendor!]!
     vendor(id: ID!): Vendor
     vendorLedger(vendorId: ID!, limit: Int): [VendorLedgerEntry!]!
   }
@@ -67,24 +76,28 @@ export const typeDefs = /* GraphQL */ `
   extend type Mutation {
     createVendor(
       name: String!
+      kind: VendorKind
       phone: String
       email: String
       address: String
       taxId: String
       notes: String
       leadTimeDays: Int
+      paymentTermsDays: Int
       preferredSendChannel: VendorSendChannel
       defaultShipToAddressId: ID
     ): Vendor!
     updateVendor(
       id: ID!
       name: String
+      kind: VendorKind
       phone: String
       email: String
       address: String
       taxId: String
       notes: String
       leadTimeDays: Int
+      paymentTermsDays: Int
       preferredSendChannel: VendorSendChannel
       defaultShipToAddressId: ID
     ): Vendor!
@@ -135,11 +148,14 @@ export const resolvers = {
   Query: {
     vendors: async (
       _: unknown,
-      args: { includeArchived?: boolean },
+      args: { includeArchived?: boolean; kind?: "supplier" | "expedition" },
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "vendor.edit");
-      return vendors.listVendors(args.includeArchived ?? false);
+      return vendors.listVendors({
+        includeArchived: args.includeArchived ?? false,
+        kind: args.kind,
+      });
     },
     vendor: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
       await requirePermission(ctx, "vendor.edit");

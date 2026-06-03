@@ -389,10 +389,34 @@ export async function journalExport(range: DateRange): Promise<JournalExport> {
     );
   }
 
-  // Receiving credits AP — the goods-in side of a vendor purchase. The
-  // matching vendor_ledger `purchase_on_account` row, if any, is the same
-  // economic event and is deliberately not exported again.
-  const deliveryIds = [...receiveByDelivery.keys()];
+  // Receiving raises AP. The credit is sourced from the vendor ledger's
+  // `purchase_on_account` rows (so the export aggregate matches the operational
+  // AP, capturing both the supplier and any tagged expedition); the debit is
+  // the capitalized inventory from the receive movements. The two agree exactly
+  // for the common cases (goods only, or goods + courier-tagged freight). Any
+  // residual is a known deferral that balances to a plug line and is flagged:
+  // recorded payable above inventory is non-stock purchase value (expensed);
+  // inventory above payable is ad-hoc or untagged freight (credited to payable).
+  const apRows = await db
+    .select({ deliveryId: vendorLedger.refId, amountMinor: vendorLedger.amountMinor })
+    .from(vendorLedger)
+    .where(
+      and(
+        eq(vendorLedger.type, "purchase_on_account"),
+        eq(vendorLedger.refType, "purchase_delivery"),
+        gte(vendorLedger.createdAt, start),
+        lte(vendorLedger.createdAt, end),
+      ),
+    );
+  const apByDelivery = new Map<string, number>();
+  for (const r of apRows) {
+    if (!r.deliveryId) continue;
+    apByDelivery.set(r.deliveryId, (apByDelivery.get(r.deliveryId) ?? 0) + r.amountMinor);
+  }
+
+  const deliveryIds = [
+    ...new Set([...receiveByDelivery.keys(), ...apByDelivery.keys()]),
+  ];
   const deliveryRows = deliveryIds.length
     ? await db
         .select({
@@ -423,14 +447,42 @@ export async function journalExport(range: DateRange): Promise<JournalExport> {
     : [];
   const purchaseById = new Map(purchaseRows.map((p) => [p.id, p]));
 
-  for (const [deliveryId, g] of receiveByDelivery) {
+  for (const deliveryId of deliveryIds) {
     const d = deliveryById.get(deliveryId);
     const p = d?.purchaseId ? purchaseById.get(d.purchaseId) : undefined;
+    const inventory = receiveByDelivery.get(deliveryId)?.amountMinor ?? 0;
+    const apCredit = apByDelivery.get(deliveryId) ?? 0;
+    const postings: Posting[] = [
+      { category: "asset.inventory", amountMinor: inventory },
+      { category: "liability.payable", amountMinor: -apCredit },
+    ];
+    const residual = inventory - apCredit;
+    if (residual > 0) {
+      postings.push({ category: "liability.payable", amountMinor: -residual });
+      warnings.push({
+        kind: "receiving_residual",
+        refType: "purchase_delivery",
+        refId: deliveryId,
+        message: `delivery ${deliveryId}: ${residual} of goods received has no recorded payable (ad-hoc purchase or untagged freight) — credited to payable`,
+      });
+    } else if (residual < 0) {
+      postings.push({ category: "expense.other", amountMinor: -residual });
+      warnings.push({
+        kind: "untagged_expense",
+        refType: "purchase_delivery",
+        refId: deliveryId,
+        message: `delivery ${deliveryId}: ${-residual} of non-stock purchase value expensed to expense.other — needs a specific expense category`,
+      });
+    }
     emitEntry(
       entries,
       warnings,
       {
-        date: (d?.deliveredAt ?? g.latest).toISOString(),
+        date: (
+          d?.deliveredAt ??
+          receiveByDelivery.get(deliveryId)?.latest ??
+          end
+        ).toISOString(),
         refType: "purchase_delivery",
         refId: deliveryId,
         description: `Goods received ${deliveryId}`,
@@ -438,10 +490,7 @@ export async function journalExport(range: DateRange): Promise<JournalExport> {
         partyId: p?.vendorId ?? null,
         partyName: p?.snapshotVendorName ?? null,
       },
-      [
-        { category: "asset.inventory", amountMinor: g.amountMinor },
-        { category: "liability.payable", amountMinor: -g.amountMinor },
-      ],
+      postings,
     );
   }
 
@@ -552,8 +601,18 @@ export async function journalExport(range: DateRange): Promise<JournalExport> {
         refId: r.id,
         message: `vendor opening_balance for ${r.name} is not exported — no equity account in the catalog`,
       });
+    } else if (r.type === "refund_credit") {
+      // Most refund_credit rows are delivery cancellations; reversing them in
+      // the journal also requires reversing the stock side (adjustment_out),
+      // which is itself a deferred/warned case — so flag rather than half-post.
+      warnings.push({
+        kind: "uncaptured_reversal",
+        refType: "vendor_ledger",
+        refId: r.id,
+        message: `vendor refund_credit for ${r.name} (${r.amountMinor}) is not exported — delivery-cancellation reversal journaling is deferred`,
+      });
     }
-    // purchase_on_account / refund_credit: captured by the receiving entries.
+    // purchase_on_account: captured by the receiving entries above.
   }
 
   // --- Tracking-account ledger (commissions, draws, internal funds) ---

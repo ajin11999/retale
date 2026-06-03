@@ -19,12 +19,14 @@
       vendor(id: $id) {
         id
         name
+        kind
         phone
         email
         address
         taxId
         notes
         leadTimeDays
+        paymentTermsDays
         preferredSendChannel
         defaultShipToAddressId
         balanceMinor
@@ -57,6 +59,7 @@
         type
         amountMinor
         refType
+        dueDate
         note
         createdAt
       }
@@ -67,35 +70,41 @@
     mutation ConsoleUpdateVendor(
       $id: ID!
       $name: String
+      $kind: VendorKind
       $phone: String
       $email: String
       $address: String
       $taxId: String
       $notes: String
       $leadTimeDays: Int
+      $paymentTermsDays: Int
       $preferredSendChannel: VendorSendChannel
       $defaultShipToAddressId: ID
     ) {
       updateVendor(
         id: $id
         name: $name
+        kind: $kind
         phone: $phone
         email: $email
         address: $address
         taxId: $taxId
         notes: $notes
         leadTimeDays: $leadTimeDays
+        paymentTermsDays: $paymentTermsDays
         preferredSendChannel: $preferredSendChannel
         defaultShipToAddressId: $defaultShipToAddressId
       ) {
         id
         name
+        kind
         phone
         email
         address
         taxId
         notes
         leadTimeDays
+        paymentTermsDays
         preferredSendChannel
         defaultShipToAddressId
       }
@@ -225,25 +234,30 @@
 
   // ---- Header form ---------------------------------------------------------
   const CHANNELS = ["", "whatsapp", "email"];
+  const KINDS = ["supplier", "expedition"];
   interface VendorForm {
     name: string;
+    kind: string;
     phone: string;
     email: string;
     address: string;
     taxId: string;
     notes: string;
     leadTimeDays: number | null;
+    paymentTermsDays: number | null;
     preferredSendChannel: string;
     defaultShipToAddressId: string;
   }
   let form = $state<VendorForm>({
     name: "",
+    kind: "supplier",
     phone: "",
     email: "",
     address: "",
     taxId: "",
     notes: "",
     leadTimeDays: null,
+    paymentTermsDays: null,
     preferredSendChannel: "",
     defaultShipToAddressId: "",
   });
@@ -257,12 +271,14 @@
       syncedId = v.id;
       form = {
         name: v.name,
+        kind: v.kind,
         phone: v.phone ?? "",
         email: v.email ?? "",
         address: v.address ?? "",
         taxId: v.taxId ?? "",
         notes: v.notes ?? "",
         leadTimeDays: v.leadTimeDays ?? null,
+        paymentTermsDays: v.paymentTermsDays ?? null,
         preferredSendChannel: v.preferredSendChannel ?? "",
         defaultShipToAddressId: v.defaultShipToAddressId ?? "",
       };
@@ -362,12 +378,14 @@
       UpdateVendor.mutate({
         id: vendor.id,
         name: form.name.trim(),
+        kind: (form.kind || "supplier") as never,
         phone: form.phone.trim() || null,
         email: form.email.trim() || null,
         address: form.address.trim() || null,
         taxId: form.taxId.trim() || null,
         notes: form.notes.trim() || null,
         leadTimeDays: form.leadTimeDays,
+        paymentTermsDays: form.paymentTermsDays,
         preferredSendChannel: (form.preferredSendChannel || null) as never,
         defaultShipToAddressId: form.defaultShipToAddressId || null,
       }),
@@ -552,6 +570,14 @@
           <Input bind:value={form.name} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
+          <span class="text-sm font-medium">Kind</span>
+          <Select bind:value={form.kind} disabled={!canEdit}>
+            {#each KINDS as k (k)}
+              <option value={k}>{k === "expedition" ? "Expedition / courier" : "Supplier"}</option>
+            {/each}
+          </Select>
+        </label>
+        <label class="space-y-1">
           <span class="text-sm font-medium">Phone</span>
           <Input bind:value={form.phone} disabled={!canEdit} />
         </label>
@@ -570,6 +596,17 @@
             bind:value={form.leadTimeDays}
             disabled={!canEdit}
           />
+        </label>
+        <label class="space-y-1">
+          <span class="text-sm font-medium">Payment terms (days)</span>
+          <Input
+            type="number"
+            bind:value={form.paymentTermsDays}
+            disabled={!canEdit}
+          />
+          <span class="text-xs text-muted-foreground">
+            Net days from receipt; sets each charge's AP due date.
+          </span>
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Preferred send channel</span>
@@ -692,6 +729,7 @@
                 <th class="py-1.5 font-medium">When</th>
                 <th class="py-1.5 font-medium">Type</th>
                 <th class="py-1.5 text-right font-medium">Amount</th>
+                <th class="py-1.5 font-medium">Due</th>
                 <th class="py-1.5 font-medium">Note</th>
               </tr>
             </thead>
@@ -707,12 +745,13 @@
                   >
                     {formatMoney(e.amountMinor)}
                   </td>
+                  <td class="py-1.5 text-muted-foreground">{e.dueDate ?? "—"}</td>
                   <td class="py-1.5 text-muted-foreground">{e.note ?? "—"}</td>
                 </tr>
               {/each}
               {#if ledger.length === 0}
                 <tr>
-                  <td colspan="4" class="py-6 text-center text-muted-foreground">
+                  <td colspan="5" class="py-6 text-center text-muted-foreground">
                     No ledger entries.
                   </td>
                 </tr>
