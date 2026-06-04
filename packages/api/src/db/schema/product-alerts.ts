@@ -1,7 +1,8 @@
 // Product alerts: acknowledgeable signals about a product's pricing health —
 // the margin-threshold system from docs/design-decisions.md → "Product
-// alerts". Raised by a scan, never auto-closed: an alert stays open until a
-// person acknowledges it, even if the underlying numbers recover.
+// alerts". Raised by a scan; an alert stays open until either a person
+// acknowledges it or a later scan finds its condition resolved and
+// auto-acknowledges it (see product-alert-service → AUTO_RESOLVE_NOTE).
 
 import { relations } from "drizzle-orm";
 import { index, json, mysqlEnum, mysqlTable, text, timestamp } from "drizzle-orm/mysql-core";

@@ -2,9 +2,10 @@
 // evaluates every product's variants against its margin threshold and raises
 // `product_alerts` for breaches and data anomalies; `evaluateProductAlerts`
 // does one product. Idempotent — never a second open alert for the same
-// (product, type). Alerts are never auto-closed (the locked design): an alert
-// stays open until a person acknowledges it. See docs/design-decisions.md →
-// "Product alerts".
+// (product, type). A scan also auto-resolves: an open alert whose condition no
+// longer holds (e.g. the price was fixed) is acknowledged automatically with
+// AUTO_RESOLVE_NOTE, so fixing the numbers clears the alert without a manual
+// ack. See docs/design-decisions.md → "Product alerts".
 
 import { and, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -32,6 +33,9 @@ type ProductAlertType = (typeof PRODUCT_ALERT_TYPES)[number];
 
 /** Acknowledged alerts older than this are purged by the retention job. */
 export const ACK_RETENTION_DAYS = 365;
+
+/** Resolution note stamped on alerts the scan auto-acknowledges. */
+export const AUTO_RESOLVE_NOTE = "Auto-resolved: condition no longer met.";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -123,22 +127,50 @@ export function listProductAlerts(opts?: {
 
 // --- Evaluation ---
 
-/** Insert an alert per triggered type with no open alert yet; return the new rows. */
-async function raiseAlerts(
-  perProduct: {
-    productId: string;
-    thresholdBps: number | null;
-    triggered: Map<ProductAlertType, VariantContext[]>;
-  }[],
-  openByProduct: Map<string, Set<string>>,
+interface EvaluatedProduct {
+  productId: string;
+  thresholdBps: number | null;
+  triggered: Map<ProductAlertType, VariantContext[]>;
+}
+
+/** An open (unacknowledged) alert, as loaded for reconciliation. */
+interface OpenAlertRow {
+  id: string;
+  productId: string;
+  type: string;
+}
+
+/**
+ * Reconcile a set of evaluated products against their currently-open alerts:
+ *  - raise: insert an alert for each triggered (product, type) with no open
+ *    alert yet;
+ *  - resolve: auto-acknowledge any open alert whose type is no longer triggered
+ *    (the underlying numbers recovered), stamping AUTO_RESOLVE_NOTE.
+ *
+ * Only products in `evaluated` are reconciled — open alerts for products
+ * outside the scan (e.g. archived, so we can't reassess them) are left as-is.
+ * Returns the alerts raised (resolves happen silently).
+ */
+async function syncAlerts(
+  evaluated: EvaluatedProduct[],
+  openAlerts: OpenAlertRow[],
 ): Promise<ProductAlert[]> {
+  const openByProduct = new Map<string, Map<string, string>>();
+  for (const r of openAlerts) {
+    const byType = openByProduct.get(r.productId) ?? new Map<string, string>();
+    byType.set(r.type, r.id);
+    openByProduct.set(r.productId, byType);
+  }
+
   const now = new Date();
-  const rows: (typeof productAlerts.$inferInsert)[] = [];
-  for (const p of perProduct) {
-    const openTypes = openByProduct.get(p.productId) ?? new Set<string>();
+  const toInsert: (typeof productAlerts.$inferInsert)[] = [];
+  const toResolve: string[] = [];
+
+  for (const p of evaluated) {
+    const open = openByProduct.get(p.productId) ?? new Map<string, string>();
     for (const [type, variants] of p.triggered) {
-      if (openTypes.has(type)) continue;
-      rows.push({
+      if (open.has(type)) continue; // already open — keep it idempotent
+      toInsert.push({
         id: ulid(),
         productId: p.productId,
         type,
@@ -146,16 +178,27 @@ async function raiseAlerts(
         triggerContext: { thresholdBps: p.thresholdBps, variants },
       });
     }
+    for (const [type, id] of open) {
+      if (!p.triggered.has(type as ProductAlertType)) toResolve.push(id);
+    }
   }
-  if (rows.length === 0) return [];
-  await db.insert(productAlerts).values(rows);
+
+  if (toResolve.length > 0) {
+    await db
+      .update(productAlerts)
+      .set({ acknowledgedAt: now, resolutionNote: AUTO_RESOLVE_NOTE })
+      .where(inArray(productAlerts.id, toResolve));
+  }
+
+  if (toInsert.length === 0) return [];
+  await db.insert(productAlerts).values(toInsert);
   return db
     .select()
     .from(productAlerts)
     .where(
       inArray(
         productAlerts.id,
-        rows.map((r) => r.id as string),
+        toInsert.map((r) => r.id as string),
       ),
     );
 }
@@ -188,15 +231,19 @@ export async function evaluateProductAlerts(
     .where(eq(productVariants.productId, productId));
 
   const openRows = await db
-    .select({ type: productAlerts.type })
+    .select({
+      id: productAlerts.id,
+      productId: productAlerts.productId,
+      type: productAlerts.type,
+    })
     .from(productAlerts)
     .where(
       and(eq(productAlerts.productId, productId), isNull(productAlerts.acknowledgedAt)),
     );
 
-  return raiseAlerts(
+  return syncAlerts(
     [{ productId, thresholdBps, triggered: triggeredTypes(variants, thresholdBps) }],
-    new Map([[productId, new Set(openRows.map((r) => r.type))]]),
+    openRows,
   );
 }
 
@@ -237,17 +284,15 @@ export async function scanProductAlerts(): Promise<ProductAlert[]> {
   }
 
   const openRows = await db
-    .select({ productId: productAlerts.productId, type: productAlerts.type })
+    .select({
+      id: productAlerts.id,
+      productId: productAlerts.productId,
+      type: productAlerts.type,
+    })
     .from(productAlerts)
     .where(isNull(productAlerts.acknowledgedAt));
-  const openByProduct = new Map<string, Set<string>>();
-  for (const r of openRows) {
-    const set = openByProduct.get(r.productId) ?? new Set<string>();
-    set.add(r.type);
-    openByProduct.set(r.productId, set);
-  }
 
-  const perProduct = allProducts.map((p) => {
+  const evaluated = allProducts.map((p) => {
     const thresholdBps =
       p.minMarginBps ??
       (p.categoryId ? (categoryThreshold.get(p.categoryId) ?? null) : null);
@@ -258,7 +303,7 @@ export async function scanProductAlerts(): Promise<ProductAlert[]> {
     };
   });
 
-  return raiseAlerts(perProduct, openByProduct);
+  return syncAlerts(evaluated, openRows);
 }
 
 // --- Acknowledge & retention ---

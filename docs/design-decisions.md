@@ -806,9 +806,10 @@ Unique constraint: `(product_id, type)` WHERE `acknowledged_at IS NULL` — prev
 
 ### Acknowledgment
 
-- **Manual only.** Even when margin recovers above threshold, alert stays open until acknowledged. Dashboard shows current values alongside trigger-time values so admin sees what changed.
-- "Dismiss without changes" is a valid acknowledgment action (sets `acknowledged_at` + `resolution_note`).
-- No auto-close.
+- **Manual ack, plus auto-resolve on scan.** A person can always acknowledge an alert directly. In addition, when a scan re-evaluates a product and finds an open alert's condition no longer holds (e.g. the price was fixed so the margin recovered), it acknowledges that alert automatically — setting `acknowledged_at` and a `resolution_note` of `"Auto-resolved: condition no longer met."`, with `acknowledged_by_user_id` left null (system action). This avoids the tedium of manually clearing alerts whose underlying problem you've already fixed.
+  - _History note: this supersedes the original "manual only / no auto-close" rule. The dashboard still shows trigger-time context, and auto-resolved alerts remain in the acknowledged history with their system note._
+- "Dismiss without changes" is a valid manual acknowledgment action (sets `acknowledged_at` + `resolution_note`).
+- Scans never *reopen* an acknowledged alert; if a condition recurs after acknowledgment, a fresh alert is raised.
 
 ### Retention
 

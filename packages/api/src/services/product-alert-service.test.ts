@@ -15,6 +15,7 @@ import { productCategories, products, productVariants } from "../db/schema/produ
 import { db } from "../lib/db.ts";
 import {
   acknowledgeProductAlert,
+  AUTO_RESOLVE_NOTE,
   classifyVariant,
   evaluateProductAlerts,
   listProductAlerts,
@@ -165,6 +166,47 @@ describe("scanProductAlerts", () => {
     expect(await scanProductAlerts()).toHaveLength(0);
     expect(await listProductAlerts({ acknowledged: false })).toHaveLength(1);
   });
+
+  test("auto-resolves an open alert once its condition recovers", async () => {
+    const productId = await seedProduct({
+      minMarginBps: 2000,
+      priceMinor: 1000,
+      costMinor: 900,
+    });
+    expect(await scanProductAlerts()).toHaveLength(1);
+
+    // Reprice to a healthy margin, then rescan.
+    await db
+      .update(productVariants)
+      .set({ priceMinor: 2000 })
+      .where(eq(productVariants.productId, productId));
+    expect(await scanProductAlerts()).toHaveLength(0);
+
+    // The open alert is gone; it now lives in history with the system note.
+    expect(await listProductAlerts({ acknowledged: false })).toHaveLength(0);
+    const [resolved] = await listProductAlerts({ acknowledged: true });
+    expect(resolved?.acknowledgedAt).not.toBeNull();
+    expect(resolved?.acknowledgedByUserId).toBeNull();
+    expect(resolved?.resolutionNote).toBe(AUTO_RESOLVE_NOTE);
+  });
+
+  test("leaves alerts for archived products untouched", async () => {
+    // Raise an alert, then archive the product. A later scan can't reassess it,
+    // so it must not auto-resolve the still-open alert.
+    const productId = await seedProduct({
+      minMarginBps: 2000,
+      priceMinor: 1000,
+      costMinor: 900,
+    });
+    expect(await scanProductAlerts()).toHaveLength(1);
+    await db
+      .update(products)
+      .set({ archivedAt: new Date() })
+      .where(eq(products.id, productId));
+
+    expect(await scanProductAlerts()).toHaveLength(0);
+    expect(await listProductAlerts({ acknowledged: false })).toHaveLength(1);
+  });
 });
 
 describe("evaluateProductAlerts", () => {
@@ -181,6 +223,22 @@ describe("evaluateProductAlerts", () => {
 
   test("rejects an unknown product", async () => {
     await expectError(evaluateProductAlerts(ulid()), "PRODUCT_NOT_FOUND");
+  });
+
+  test("auto-resolves the product's open alert when it recovers", async () => {
+    const productId = await seedProduct({
+      minMarginBps: 2000,
+      priceMinor: 1000,
+      costMinor: 900,
+    });
+    expect(await evaluateProductAlerts(productId)).toHaveLength(1);
+
+    await db
+      .update(productVariants)
+      .set({ priceMinor: 2000 })
+      .where(eq(productVariants.productId, productId));
+    expect(await evaluateProductAlerts(productId)).toHaveLength(0);
+    expect(await listProductAlerts({ acknowledged: false })).toHaveLength(0);
   });
 });
 
