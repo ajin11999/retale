@@ -6,9 +6,9 @@
 // Money is integer minor units; qty is an integer count of the variant's
 // smallest unit. See docs/design-decisions.md → "Cost accounting".
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
-import { productVariants } from "../db/schema/products.ts";
+import { products, productVariants } from "../db/schema/products.ts";
 import {
   STOCK_MOVEMENT_TYPES,
   STOCK_REF_TYPES,
@@ -289,4 +289,100 @@ export async function listMovements(variantId: string, limit = 100): Promise<Mov
     .where(eq(stockMovements.variantId, variantId))
     .orderBy(desc(stockMovements.createdAt))
     .limit(Math.min(Math.max(limit, 1), 500));
+}
+
+/** A variant's on-hand stock at one location, joined with naming for display. */
+export interface LocationStockLevel {
+  variantId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  label: string | null;
+  barcode: string | null;
+  unit: string;
+  qtyDecimals: number;
+  onHand: number;
+}
+
+/**
+ * Every variant holding a stock_locations row at `locationId` (null = the
+ * unlocated root bucket), with its on-hand and naming. Powers the bulk stock
+ * editor's per-location count sheet. Rows exist wherever stock ever moved, so
+ * a zero row may appear — that is intentional (confirm-the-zero during a count).
+ */
+export function getLocationStockLevels(locationId: string | null): Promise<LocationStockLevel[]> {
+  return db
+    .select({
+      variantId: productVariants.id,
+      productId: products.id,
+      productName: products.name,
+      sku: productVariants.sku,
+      label: productVariants.label,
+      barcode: productVariants.barcode,
+      unit: productVariants.unit,
+      qtyDecimals: productVariants.qtyDecimals,
+      onHand: stockLocations.qty,
+    })
+    .from(stockLocations)
+    .innerJoin(productVariants, eq(stockLocations.variantId, productVariants.id))
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .where(
+      locationId == null
+        ? isNull(stockLocations.locationId)
+        : eq(stockLocations.locationId, locationId),
+    )
+    .orderBy(asc(products.name), asc(productVariants.sku));
+}
+
+export interface BulkCountLine {
+  variantId: string;
+  /** The counted on-hand quantity at the location, in the variant's smallest unit. */
+  countedQty: number;
+}
+
+/**
+ * Reconcile several variants' on-hand at one location to counted values in a
+ * single transaction. Per line, `delta = counted − current`; zero-deltas are
+ * skipped. Each non-zero delta becomes an `adjustment_in`/`adjustment_out`
+ * ledger row sharing the one `reason`. Returns the count of lines adjusted.
+ */
+export function bulkAdjustStock(input: {
+  locationId?: string | null;
+  reason: string;
+  lines: BulkCountLine[];
+  createdByUserId: string;
+}): Promise<number> {
+  const reason = input.reason.trim();
+  if (!reason) throw new StockError("INVALID_INPUT", "a reason is required");
+  const locationId = input.locationId ?? null;
+  return db.transaction(async (tx) => {
+    let adjusted = 0;
+    for (const line of input.lines) {
+      if (!Number.isFinite(line.countedQty) || line.countedQty < 0) {
+        throw new StockError("INVALID_INPUT", "counted quantity must be a non-negative number");
+      }
+      const counted = Math.round(line.countedQty);
+      const existing = await tx
+        .select()
+        .from(stockLocations)
+        .where(stockRowWhere(line.variantId, locationId));
+      const current = existing[0]?.qty ?? 0;
+      const delta = counted - current;
+      if (delta === 0) continue;
+      await recordMovement(
+        {
+          variantId: line.variantId,
+          locationId,
+          type: delta > 0 ? "adjustment_in" : "adjustment_out",
+          qtyDelta: delta,
+          refType: "adjustment",
+          reason,
+          createdByUserId: input.createdByUserId,
+        },
+        tx,
+      );
+      adjusted++;
+    }
+    return adjusted;
+  });
 }

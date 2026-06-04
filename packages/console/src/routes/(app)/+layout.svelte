@@ -21,6 +21,7 @@
     { href: "/customers", label: "Customers" },
     { href: "/vendors", label: "Vendors" },
     { href: "/locations", label: "Locations" },
+    { href: "/stock", label: "Stock editor", perm: "stock.adjust" },
     { href: "/transfers", label: "Stock transfers" },
     { href: "/purchases", label: "Purchases" },
     { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },

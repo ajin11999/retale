@@ -20,6 +20,11 @@ type Query {
   location(id: ID!): Location
   variantStock(variantId: ID!): [StockLocation!]!
   variantStockMovements(variantId: ID!, limit: Int): [StockMovement!]!
+
+  """
+  Every variant holding stock at a location (locationId null = unlocated root).
+  """
+  locationStockLevels(locationId: ID): [LocationStockLevel!]!
   vendors(includeArchived: Boolean, kind: VendorKind): [Vendor!]!
   vendor(id: ID!): Vendor
   vendorLedger(vendorId: ID!, limit: Int): [VendorLedgerEntry!]!
@@ -201,6 +206,13 @@ type Mutation {
 
   """Snap a variant's weighted-average cost to an exact value."""
   overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
+
+  """
+  Reconcile several variants' on-hand at one location to counted values in one
+  transaction (locationId null = unlocated root). Returns the number of lines
+  that differed from the current on-hand and were adjusted.
+  """
+  bulkAdjustStock(locationId: ID, reason: String!, lines: [BulkStockCountInput!]!): Int!
   createVendor(name: String!, kind: VendorKind, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, paymentTermsDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
   updateVendor(id: ID!, name: String, kind: VendorKind, phone: String, email: String, address: String, taxId: String, notes: String, leadTimeDays: Int, paymentTermsDays: Int, preferredSendChannel: VendorSendChannel, defaultShipToAddressId: ID): Vendor!
   setVendorArchived(id: ID!, archived: Boolean!): Vendor!
@@ -742,6 +754,29 @@ type StockMovement {
   refId: ID
   reason: String
   createdAt: String!
+}
+
+"""
+A variant's on-hand at one location, with naming for the bulk count sheet.
+"""
+type LocationStockLevel {
+  variantId: ID!
+  productId: ID!
+  productName: String!
+  sku: String!
+  label: String
+  barcode: String
+  unit: VariantUnit!
+  qtyDecimals: Int!
+  onHand: Float!
+}
+
+"""
+One line of a bulk count: a variant and its counted on-hand at the location.
+"""
+input BulkStockCountInput {
+  variantId: ID!
+  countedQty: Float!
 }
 
 enum VendorLedgerType {

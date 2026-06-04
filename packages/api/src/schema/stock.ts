@@ -43,6 +43,25 @@ export const typeDefs = /* GraphQL */ `
     createdAt: String!
   }
 
+  "A variant's on-hand at one location, with naming for the bulk count sheet."
+  type LocationStockLevel {
+    variantId: ID!
+    productId: ID!
+    productName: String!
+    sku: String!
+    label: String
+    barcode: String
+    unit: VariantUnit!
+    qtyDecimals: Int!
+    onHand: Float!
+  }
+
+  "One line of a bulk count: a variant and its counted on-hand at the location."
+  input BulkStockCountInput {
+    variantId: ID!
+    countedQty: Float!
+  }
+
   extend type ProductVariant {
     "Per-location stock rows for this variant (locationId null = unlocated root)."
     stock: [StockLocation!]!
@@ -51,6 +70,8 @@ export const typeDefs = /* GraphQL */ `
   extend type Query {
     variantStock(variantId: ID!): [StockLocation!]!
     variantStockMovements(variantId: ID!, limit: Int): [StockMovement!]!
+    "Every variant holding stock at a location (locationId null = unlocated root)."
+    locationStockLevels(locationId: ID): [LocationStockLevel!]!
   }
 
   extend type Mutation {
@@ -58,6 +79,12 @@ export const typeDefs = /* GraphQL */ `
     adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String!): StockMovement!
     "Snap a variant's weighted-average cost to an exact value."
     overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
+    """
+    Reconcile several variants' on-hand at one location to counted values in one
+    transaction (locationId null = unlocated root). Returns the number of lines
+    that differed from the current on-hand and were adjusted.
+    """
+    bulkAdjustStock(locationId: ID, reason: String!, lines: [BulkStockCountInput!]!): Int!
   }
 `;
 
@@ -105,6 +132,14 @@ export const resolvers = {
         asGraphQLError(e);
       }
     },
+    locationStockLevels: async (
+      _: unknown,
+      args: { locationId?: string | null },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "stock.adjust");
+      return stock.getLocationStockLevels(args.locationId ?? null);
+    },
   },
 
   Mutation: {
@@ -137,6 +172,27 @@ export const resolvers = {
           variantId: args.variantId,
           unitCost: args.unitCost,
           reason: args.reason ?? "",
+          createdByUserId: viewer.userId,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    bulkAdjustStock: async (
+      _: unknown,
+      args: {
+        locationId?: string | null;
+        reason: string;
+        lines: { variantId: string; countedQty: number }[];
+      },
+      ctx: GraphQLContext,
+    ) => {
+      const viewer = await requirePermission(ctx, "stock.adjust");
+      try {
+        return await stock.bulkAdjustStock({
+          locationId: args.locationId ?? null,
+          reason: args.reason,
+          lines: args.lines,
           createdByUserId: viewer.userId,
         });
       } catch (e) {
