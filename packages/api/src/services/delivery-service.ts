@@ -5,7 +5,7 @@
 // Cancelling a delivered delivery reverses the stock without re-valuing WAC.
 // See docs/design-decisions.md → "Delivery commit".
 
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   purchaseDeliveries,
@@ -68,6 +68,23 @@ async function loadItem(id: string): Promise<DeliveryItem> {
   });
   if (!row) throw new DeliveryError("ITEM_NOT_FOUND");
   return row;
+}
+
+type PurchaseItemRow = typeof purchaseItems.$inferSelect;
+
+/** Batch-load purchase lines by id into a map, in one query. */
+async function loadPurchaseItemsByIds(
+  exec: typeof db | Tx,
+  ids: string[],
+): Promise<Map<string, PurchaseItemRow>> {
+  const map = new Map<string, PurchaseItemRow>();
+  if (ids.length === 0) return map;
+  const rows = await exec
+    .select()
+    .from(purchaseItems)
+    .where(inArray(purchaseItems.id, ids));
+  for (const row of rows) map.set(row.id, row);
+  return map;
 }
 
 function assertDraft(d: Delivery): void {
@@ -417,13 +434,10 @@ export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLand
     .orderBy(asc(purchaseDeliveryItems.sortOrder));
   const leaves = items.filter((i) => i.purchaseItemId != null);
 
-  const lines = new Map<string, typeof purchaseItems.$inferSelect>();
-  for (const pid of new Set(leaves.map((l) => l.purchaseItemId as string))) {
-    const pi = await db.query.purchaseItems.findFirst({
-      where: eq(purchaseItems.id, pid),
-    });
-    if (pi) lines.set(pid, pi);
-  }
+  const lines = await loadPurchaseItemsByIds(
+    db,
+    [...new Set(leaves.map((l) => l.purchaseItemId as string))],
+  );
 
   const freightByLeaf = allocateFreightByValue(items, leaves, lines);
   return leaves.map((l) => {
@@ -543,21 +557,42 @@ function allocateFreightByValue(
 
 /** Re-evaluate every touched purchase: open ⇄ complete based on item delivery state. */
 async function refreshPurchaseStatuses(tx: Tx, purchaseIds: Set<string>): Promise<void> {
-  for (const pid of purchaseIds) {
-    const items = await tx
-      .select()
-      .from(purchaseItems)
-      .where(eq(purchaseItems.purchaseId, pid));
-    const allDelivered = items.every((i) => i.qtyDelivered >= i.qtyOrdered);
+  const ids = [...purchaseIds];
+  if (ids.length === 0) return;
+
+  // Load every touched purchase's lines in one query, then group by purchase.
+  const items = await tx
+    .select()
+    .from(purchaseItems)
+    .where(inArray(purchaseItems.purchaseId, ids));
+  const byPurchase = new Map<string, PurchaseItemRow[]>();
+  for (const it of items) {
+    const list = byPurchase.get(it.purchaseId);
+    if (list) list.push(it);
+    else byPurchase.set(it.purchaseId, [it]);
+  }
+
+  const toComplete: string[] = [];
+  const toOpen: string[] = [];
+  for (const pid of ids) {
+    const lineItems = byPurchase.get(pid) ?? [];
+    const allDelivered = lineItems.every((i) => i.qtyDelivered >= i.qtyOrdered);
+    (allDelivered ? toComplete : toOpen).push(pid);
+  }
+
+  // Two bulk updates; each keeps the opposite-status guard so we only write rows
+  // that actually flip.
+  if (toComplete.length > 0) {
     await tx
       .update(purchases)
-      .set({ status: allDelivered ? "complete" : "open" })
-      .where(
-        and(
-          eq(purchases.id, pid),
-          eq(purchases.status, allDelivered ? "open" : "complete"),
-        ),
-      );
+      .set({ status: "complete" })
+      .where(and(inArray(purchases.id, toComplete), eq(purchases.status, "open")));
+  }
+  if (toOpen.length > 0) {
+    await tx
+      .update(purchases)
+      .set({ status: "open" })
+      .where(and(inArray(purchases.id, toOpen), eq(purchases.status, "complete")));
   }
 }
 
@@ -586,9 +621,13 @@ async function postDeliveryAccountsPayable(
 ): Promise<void> {
   // Supplier AP: each leaf's base cost, summed by the purchase's vendor.
   const purchaseVendor = new Map<string, string | null>();
-  for (const pid of new Set([...lines.values()].map((pi) => pi.purchaseId))) {
-    const p = await tx.query.purchases.findFirst({ where: eq(purchases.id, pid) });
-    purchaseVendor.set(pid, p?.vendorId ?? null);
+  const purchaseIds = [...new Set([...lines.values()].map((pi) => pi.purchaseId))];
+  if (purchaseIds.length > 0) {
+    const rows = await tx
+      .select()
+      .from(purchases)
+      .where(inArray(purchases.id, purchaseIds));
+    for (const p of rows) purchaseVendor.set(p.id, p.vendorId ?? null);
   }
 
   const owedByVendor = new Map<string, number>();
@@ -611,13 +650,17 @@ async function postDeliveryAccountsPayable(
   if (owedByVendor.size === 0) return;
 
   // Each charge's due date needs the vendor's net terms (null = due on receipt).
+  const vendorRows = await tx
+    .select()
+    .from(vendors)
+    .where(inArray(vendors.id, [...owedByVendor.keys()]));
+  const termsByVendor = new Map(vendorRows.map((v) => [v.id, v.paymentTermsDays]));
   for (const [vendorId, amountMinor] of owedByVendor) {
-    const v = await tx.query.vendors.findFirst({ where: eq(vendors.id, vendorId) });
     await postPurchaseOnAccount(tx, {
       vendorId,
       amountMinor,
       deliveryId: delivery.id,
-      dueDate: addDays(delivery.date, v?.paymentTermsDays ?? 0),
+      dueDate: addDays(delivery.date, termsByVendor.get(vendorId) ?? 0),
       createdByUserId: userId,
     });
   }
@@ -656,13 +699,9 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
 
     // Load every referenced purchase line once.
     const byItem = leafQtyByPurchaseItem(leaves);
-    const lines = new Map<string, typeof purchaseItems.$inferSelect>();
+    const lines = await loadPurchaseItemsByIds(tx, [...byItem.keys()]);
     for (const pid of byItem.keys()) {
-      const pi = await tx.query.purchaseItems.findFirst({
-        where: eq(purchaseItems.id, pid),
-      });
-      if (!pi) throw new DeliveryError("PURCHASE_ITEM_NOT_FOUND", pid);
-      lines.set(pid, pi);
+      if (!lines.has(pid)) throw new DeliveryError("PURCHASE_ITEM_NOT_FOUND", pid);
     }
 
     // 1. Partial-delivery constraint: cannot deliver more than ordered.
@@ -754,21 +793,30 @@ export async function cancelDelivery(id: string, userId: string): Promise<Delive
     const leaves = items.filter((i) => i.purchaseItemId != null && i.qty != null);
     const byItem = leafQtyByPurchaseItem(leaves);
 
-    const lines = new Map<string, typeof purchaseItems.$inferSelect>();
-    for (const pid of byItem.keys()) {
-      const pi = await tx.query.purchaseItems.findFirst({
-        where: eq(purchaseItems.id, pid),
-      });
-      if (pi) lines.set(pid, pi);
+    const lines = await loadPurchaseItemsByIds(tx, [...byItem.keys()]);
+
+    // Batch-load the variants behind these lines for their fallback unit cost.
+    const variantIds = [
+      ...new Set(
+        [...lines.values()]
+          .map((pi) => pi.variantId)
+          .filter((v): v is string => v != null),
+      ),
+    ];
+    const variants = new Map<string, typeof productVariants.$inferSelect>();
+    if (variantIds.length > 0) {
+      const rows = await tx
+        .select()
+        .from(productVariants)
+        .where(inArray(productVariants.id, variantIds));
+      for (const v of rows) variants.set(v.id, v);
     }
 
     // Reverse the stock with non-cost-affecting outbound movements.
     for (const leaf of leaves) {
       const pi = lines.get(leaf.purchaseItemId as string);
       if (!pi?.variantId) continue;
-      const variant = await tx.query.productVariants.findFirst({
-        where: eq(productVariants.id, pi.variantId),
-      });
+      const variant = variants.get(pi.variantId);
       await recordMovement(
         {
           variantId: pi.variantId,
