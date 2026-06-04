@@ -17,9 +17,9 @@ class CartLine {
   int qty;
   int discountMinor;
 
-  /// Cashier-entered price for open-price (and service) lines; null means use
-  /// the variant's base price.
-  final int? overridePriceMinor;
+  /// Cashier-entered price for open-price (and service) lines, or an override
+  /// edited on the cart; null means use the variant's base price.
+  int? overridePriceMinor;
 
   /// The effective unit price: an entered override wins over the base price.
   int get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
@@ -83,6 +83,14 @@ class Cart extends ChangeNotifier {
 
   void setDiscount(CartLine line, int discountMinor) {
     line.discountMinor = discountMinor < 0 ? 0 : discountMinor;
+    notifyListeners();
+  }
+
+  /// Override a line's unit price. A non-positive value clears the override,
+  /// reverting to the variant's base price.
+  void setPrice(CartLine line, int? priceMinor) {
+    line.overridePriceMinor =
+        (priceMinor != null && priceMinor > 0) ? priceMinor : null;
     notifyListeners();
   }
 

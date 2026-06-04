@@ -554,11 +554,22 @@ class _CartLineTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final overridden = line.overridePriceMinor != null;
     return ListTile(
+      onTap: () => _edit(context),
       title: Text(line.displayName),
-      subtitle: Text(
-          '${Money.format(line.unitPriceMinor)} each'
-          '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}'),
+      subtitle: Row(
+        children: [
+          if (overridden) ...[
+            Icon(Icons.edit, size: 12, color: Theme.of(context).hintColor),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            '${Money.format(line.unitPriceMinor)} each'
+            '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}',
+          ),
+        ],
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -580,6 +591,62 @@ class _CartLineTile extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Edit dialog reached by tapping the line: override the unit price and set
+  /// an exact quantity. Prefilled with plain (non-grouped) numbers so they
+  /// parse back cleanly.
+  Future<void> _edit(BuildContext context) async {
+    final priceController = TextEditingController(
+        text: (line.unitPriceMinor / Money.minorPerMajor).toStringAsFixed(2));
+    final qtyController = TextEditingController(text: '${line.qty}');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(line.displayName),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: priceController,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Unit price',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: qtyController,
+              keyboardType: TextInputType.number,
+              onSubmitted: (_) => Navigator.pop(ctx, true),
+              decoration: const InputDecoration(
+                labelText: 'Quantity',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final qty = int.tryParse(qtyController.text.trim()) ?? line.qty;
+    if (qty <= 0) {
+      cart.setQty(line, qty); // 0 or less removes the line
+      return;
+    }
+    cart.setPrice(line, Money.parse(priceController.text));
+    cart.setQty(line, qty);
   }
 }
 
