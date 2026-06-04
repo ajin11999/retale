@@ -14,6 +14,7 @@ import '../models/product.dart';
 import '../sync/connectivity.dart';
 import '../sync/sync_service.dart';
 import '../widgets/common.dart';
+import 'order_history_screen.dart';
 import 'router_screen.dart';
 
 /// The register: product search on the left, the live cart on the right.
@@ -218,6 +219,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
             tooltip: 'Refresh catalog',
             icon: const Icon(Icons.sync),
             onPressed: _catalogLoading ? null : _refreshCatalog,
+          ),
+          IconButton(
+            tooltip: 'This shift’s orders',
+            icon: const Icon(Icons.receipt_long),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) =>
+                  OrderHistoryScreen(posSessionId: widget.session.id),
+            )),
           ),
           PopupMenuButton<String>(
             onSelected: (v) {

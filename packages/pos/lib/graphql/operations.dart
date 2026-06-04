@@ -95,6 +95,59 @@ class Ops {
     }
   ''';
 
+  /// Orders rung on a POS session, newest first — the register history view.
+  static const sessionOrders = '''
+    query SessionOrders(\$posSessionId: ID!, \$limit: Int) {
+      orders(posSessionId: \$posSessionId, limit: \$limit) {
+        id displayNumber status totalMinor createdAt
+      }
+    }
+  ''';
+
+  /// Recent orders across every session — the history view's "All orders"
+  /// scope, used to find a sale (often another clerk's) to return against.
+  static const recentOrders = '''
+    query RecentOrders(\$limit: Int) {
+      orders(limit: \$limit) {
+        id displayNumber status totalMinor createdAt
+      }
+    }
+  ''';
+
+  /// Full detail of one order — lines and payments — for the detail view.
+  static const orderDetail = '''
+    query OrderDetail(\$id: ID!) {
+      order(id: \$id) {
+        id displayNumber status totalMinor createdAt closedAt returnOfOrderId
+        items {
+          id displayName qty discountMinor
+          snapshotPriceMinor lineTotalMinor voidedAt
+        }
+        payments { method amountMinor }
+      }
+    }
+  ''';
+
+  /// Reverse part of a closed order. Refund as cash or store credit; rung
+  /// against the returning clerk's own open session.
+  static const createReturn = '''
+    mutation CreateReturn(
+      \$originalOrderId: ID!,
+      \$posSessionId: ID!,
+      \$items: [ReturnItemInput!]!,
+      \$refundMethod: RefundMethod!
+    ) {
+      createReturn(
+        originalOrderId: \$originalOrderId,
+        posSessionId: \$posSessionId,
+        items: \$items,
+        refundMethod: \$refundMethod
+      ) {
+        id displayNumber totalMinor
+      }
+    }
+  ''';
+
   /// Ring an atomic POS sale. Closed on create against an open session.
   static const createPosOrder = '''
     mutation CreatePosOrder(
