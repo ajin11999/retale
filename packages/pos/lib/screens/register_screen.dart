@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../auth/auth_service.dart';
 import '../cache/product_cache.dart';
@@ -42,6 +43,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _query = '';
   bool _catalogLoading = false;
   String? _catalogError;
+
+  /// The most recent completed sale, kept so Ctrl+P can reprint it.
+  _CompletedSale? _lastSale;
 
   @override
   void initState() {
@@ -215,7 +219,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return CallbackShortcuts(
+      // Ctrl+P reprints the last completed sale. Works on the Windows/Linux
+      // desktop register; on web the browser may claim the shortcut first.
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyP, control: true): () =>
+            _printLastSale(),
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text('Register · ${AppConfig.instance.posId ?? ''}'),
         actions: [
@@ -263,6 +274,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             Expanded(flex: 2, child: _buildCart()),
           ],
         ),
+      ),
       ),
     );
   }
@@ -446,53 +458,97 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _searchController.clear();
     setState(() => _query = '');
     if (outcome.result.status == SubmitStatus.confirmed) {
-      _offerReceipt(
+      final sale = _CompletedSale(
         displayNumber: outcome.result.displayNumber,
         lines: lines,
         totalMinor: totalMinor,
         paidMinor: outcome.paidMinor,
         customer: outcome.customer,
+        createdAt: DateTime.now(),
       );
+      setState(() => _lastSale = sale);
+      _announceSale(sale);
     } else {
       _toast('Offline — sale queued, will sync when reconnected');
     }
   }
 
-  /// Confirm the sale and offer to WhatsApp the receipt. The action is always
-  /// available; when a customer was attached, their number prefills the field.
-  void _offerReceipt({
-    required String? displayNumber,
-    required List<ReceiptLine> lines,
-    required int totalMinor,
-    required int? paidMinor,
-    required Customer? customer,
-  }) {
+  /// Confirm the sale with a snackbar whose action opens the receipt choices
+  /// (print or WhatsApp). Ctrl+P is the faster path to the same print.
+  void _announceSale(_CompletedSale sale) {
     if (!mounted) return;
-    final changeMinor = (paidMinor != null && paidMinor > totalMinor)
-        ? paidMinor - totalMinor
-        : null;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Sale completed · ${displayNumber ?? 'recorded'}'),
+      content: Text('Sale completed · ${sale.displayNumber ?? 'recorded'}'),
       action: SnackBarAction(
-        label: 'Send receipt',
-        onPressed: () async {
-          final store = await ReceiptService.instance.storeInfo();
-          if (!mounted) return;
-          final receipt = Receipt(
-            store: store,
-            lines: lines,
-            totalMinor: totalMinor,
-            displayNumber: displayNumber,
-            createdAt: DateTime.now(),
-            paidMinor: paidMinor,
-            changeMinor: changeMinor,
-            customerName: customer?.name,
-          );
-          await showSendReceiptDialog(context,
-              receipt: receipt, phone: customer?.phone);
-        },
+        label: 'Receipt',
+        onPressed: () => _openReceiptActions(sale),
       ),
     ));
+  }
+
+  /// Fetch the store header and assemble a [Receipt] for [sale].
+  Future<Receipt> _receiptFor(_CompletedSale sale) async {
+    final store = await ReceiptService.instance.storeInfo();
+    final changeMinor =
+        (sale.paidMinor != null && sale.paidMinor! > sale.totalMinor)
+            ? sale.paidMinor! - sale.totalMinor
+            : null;
+    return Receipt(
+      store: store,
+      lines: sale.lines,
+      totalMinor: sale.totalMinor,
+      displayNumber: sale.displayNumber,
+      createdAt: sale.createdAt,
+      paidMinor: sale.paidMinor,
+      changeMinor: changeMinor,
+      customerName: sale.customer?.name,
+    );
+  }
+
+  /// Bottom sheet offering to print or WhatsApp the receipt for [sale].
+  Future<void> _openReceiptActions(_CompletedSale sale) async {
+    final receipt = await _receiptFor(sale);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.print_outlined),
+              title: const Text('Print receipt'),
+              onTap: () {
+                Navigator.pop(ctx);
+                ReceiptService.instance.printReceipt(receipt);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.chat_outlined),
+              title: const Text('Send via WhatsApp'),
+              onTap: () {
+                Navigator.pop(ctx);
+                showSendReceiptDialog(context,
+                    receipt: receipt, phone: sale.customer?.phone);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ctrl+P: print the last completed sale, if there is one.
+  Future<void> _printLastSale() async {
+    final sale = _lastSale;
+    if (sale == null) {
+      _toast('No recent sale to print');
+      return;
+    }
+    final receipt = await _receiptFor(sale);
+    if (!mounted) return;
+    await ReceiptService.instance.printReceipt(receipt);
   }
 
   /// Show per-line and cart-wide margins for the active cart.
@@ -1026,6 +1082,26 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
       ],
     );
   }
+}
+
+/// A confirmed sale's receipt data, retained so it can be printed (Ctrl+P) or
+/// WhatsApp'd after the cart that produced it is cleared.
+class _CompletedSale {
+  _CompletedSale({
+    required this.displayNumber,
+    required this.lines,
+    required this.totalMinor,
+    required this.paidMinor,
+    required this.customer,
+    required this.createdAt,
+  });
+
+  final String? displayNumber;
+  final List<ReceiptLine> lines;
+  final int totalMinor;
+  final int? paidMinor;
+  final Customer? customer;
+  final DateTime createdAt;
 }
 
 /// What a completed (or queued) checkout hands back: the submit result, the

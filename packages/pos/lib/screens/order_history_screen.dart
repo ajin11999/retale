@@ -210,6 +210,13 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
     );
   }
 
+  /// Reprint this order via the OS/browser print dialog.
+  Future<void> _printReceipt(Map<String, dynamic> o) async {
+    final store = await ReceiptService.instance.storeInfo();
+    if (!mounted) return;
+    await ReceiptService.instance.printReceipt(Receipt.fromOrderDetail(o, store));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -262,10 +269,24 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.chat_outlined),
-                      label: const Text('Send receipt'),
-                      onPressed: () => _sendReceipt(o),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.print_outlined),
+                            label: const Text('Print'),
+                            onPressed: () => _printReceipt(o),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.chat_outlined),
+                            label: const Text('WhatsApp'),
+                            onPressed: () => _sendReceipt(o),
+                          ),
+                        ),
+                      ],
                     ),
                     if (_returnable(o)) ...[
                       const SizedBox(height: 8),

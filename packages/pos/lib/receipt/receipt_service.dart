@@ -1,8 +1,10 @@
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import 'receipt.dart';
+import 'receipt_pdf.dart';
 
 /// Fetches the receipt header once, normalises phone numbers, and opens
 /// WhatsApp (a `wa.me` deep link) with the rendered receipt text.
@@ -50,5 +52,11 @@ class ReceiptService {
     final uri = Uri.parse(
         'https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
     return launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Open the OS/browser print dialog with [receipt] rendered to PDF. The
+  /// layout adapts to the paper the dialog picks (min 80mm — a thermal roll).
+  Future<void> printReceipt(Receipt receipt) {
+    return Printing.layoutPdf(onLayout: (format) => buildReceiptPdf(receipt, format));
   }
 }

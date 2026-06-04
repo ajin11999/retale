@@ -27,6 +27,11 @@ dependencies:
   # Open WhatsApp (wa.me deep link) to send a receipt.
   url_launcher: ^6.3.0
 
+  # Render the receipt to a PDF and open the OS/browser print dialog. Works on
+  # Windows/Linux desktop and web alike.
+  printing: ^5.13.0
+  pdf: ^3.11.0
+
   intl: ^0.20.2
 
 dev_dependencies:

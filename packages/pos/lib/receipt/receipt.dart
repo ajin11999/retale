@@ -50,6 +50,9 @@ class Receipt {
 
   static final _dateFmt = DateFormat('yyyy-MM-dd HH:mm');
 
+  /// Local time formatted for a receipt header.
+  static String formatDate(DateTime dt) => _dateFmt.format(dt.toLocal());
+
   /// Build from a fetched `orderDetail` map (drops voided / zero-qty lines).
   factory Receipt.fromOrderDetail(
     Map<String, dynamic> order,
@@ -90,7 +93,7 @@ class Receipt {
     }
     b.writeln();
     if (displayNumber != null) b.writeln('Receipt $displayNumber');
-    if (createdAt != null) b.writeln(_dateFmt.format(createdAt!.toLocal()));
+    if (createdAt != null) b.writeln(formatDate(createdAt!));
     if (customerName != null && customerName!.trim().isNotEmpty) {
       b.writeln('Customer: $customerName');
     }
