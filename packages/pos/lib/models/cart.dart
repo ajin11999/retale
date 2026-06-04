@@ -30,6 +30,28 @@ class CartLine {
     return gross < 0 ? 0 : gross;
   }
 
+  /// Per-unit cost. Open-price products derive cost from the entered price via
+  /// the product's ratio (matching the API's snapshot rule); everything else
+  /// uses the variant's weighted-average cost.
+  int get unitCostMinor {
+    final ratio = product.costRatioBps;
+    if (product.kind == 'open_price' && ratio != null) {
+      return (unitPriceMinor * ratio / 10000).round();
+    }
+    return variant.costMinor;
+  }
+
+  /// qty * unit cost — the cost of goods for this line.
+  int get lineCostMinor => unitCostMinor * qty;
+
+  /// Line revenue minus line cost. Can be negative if sold below cost.
+  int get lineMarginMinor => lineTotalMinor - lineCostMinor;
+
+  /// Gross margin as a fraction of revenue (0.25 = 25%), or null when the line
+  /// has no revenue to measure against.
+  double? get marginFraction =>
+      lineTotalMinor == 0 ? null : lineMarginMinor / lineTotalMinor;
+
   String get displayName {
     final label = variant.label;
     return label == null || label.isEmpty
@@ -49,6 +71,17 @@ class Cart extends ChangeNotifier {
   bool get isEmpty => _lines.isEmpty;
   int get totalMinor =>
       _lines.fold(0, (sum, l) => sum + l.lineTotalMinor);
+
+  /// Cost of goods across every line.
+  int get totalCostMinor =>
+      _lines.fold(0, (sum, l) => sum + l.lineCostMinor);
+
+  /// Total revenue minus total cost.
+  int get totalMarginMinor => totalMinor - totalCostMinor;
+
+  /// Cart-wide gross margin as a fraction of revenue, or null when empty.
+  double? get marginFraction =>
+      totalMinor == 0 ? null : totalMarginMinor / totalMinor;
 
   /// Add a variant; if it is already in the cart, bump its quantity.
   void add(Product product, Variant variant) {

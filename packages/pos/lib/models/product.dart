@@ -7,6 +7,7 @@ class Variant {
     required this.label,
     required this.unit,
     required this.priceMinor,
+    required this.costMinor,
     required this.totalQty,
   });
 
@@ -16,6 +17,7 @@ class Variant {
   final String? label;
   final String unit;
   final int priceMinor;
+  final int costMinor;
   final double totalQty;
 
   factory Variant.fromJson(Map<String, dynamic> j) => Variant(
@@ -25,6 +27,7 @@ class Variant {
         label: j['label'] as String?,
         unit: j['unit'] as String? ?? 'piece',
         priceMinor: (j['priceMinor'] as num).round(),
+        costMinor: (j['costMinor'] as num?)?.round() ?? 0,
         totalQty: (j['totalQty'] as num?)?.toDouble() ?? 0,
       );
 
@@ -35,6 +38,7 @@ class Variant {
         'label': label,
         'unit': unit,
         'priceMinor': priceMinor,
+        'costMinor': costMinor,
         'totalQty': totalQty,
       };
 }
@@ -46,6 +50,7 @@ class Product {
     required this.name,
     required this.publicDisplayName,
     required this.kind,
+    required this.costRatioBps,
     required this.variants,
   });
 
@@ -53,6 +58,10 @@ class Product {
   final String name;
   final String publicDisplayName;
   final String kind;
+
+  /// open_price only: snapshot cost = entered price × ratio ÷ 10000. Null on
+  /// other products, where the variant's [Variant.costMinor] is the cost.
+  final int? costRatioBps;
   final List<Variant> variants;
 
   factory Product.fromJson(Map<String, dynamic> j) => Product(
@@ -61,6 +70,7 @@ class Product {
         publicDisplayName:
             j['publicDisplayName'] as String? ?? j['name'] as String,
         kind: j['kind'] as String? ?? 'physical',
+        costRatioBps: (j['costRatioBps'] as num?)?.round(),
         variants: (j['variants'] as List<dynamic>? ?? [])
             .map((v) => Variant.fromJson(v as Map<String, dynamic>))
             .toList(),
@@ -71,6 +81,7 @@ class Product {
         'name': name,
         'publicDisplayName': publicDisplayName,
         'kind': kind,
+        'costRatioBps': costRatioBps,
         'variants': variants.map((v) => v.toJson()).toList(),
       };
 }

@@ -87,9 +87,9 @@ class Ops {
   static const products = '''
     query Products(\$search: String) {
       products(search: \$search) {
-        id name publicDisplayName kind
+        id name publicDisplayName kind costRatioBps
         variants {
-          id sku barcode label unit priceMinor totalQty
+          id sku barcode label unit priceMinor costMinor totalQty
         }
       }
     }

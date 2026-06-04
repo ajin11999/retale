@@ -387,7 +387,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
         const Divider(height: 1),
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
           child: Row(
             children: [
               const Text('Total', style: TextStyle(fontSize: 18)),
@@ -395,6 +395,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text(Money.format(cart.totalMinor),
                   style: const TextStyle(
                       fontSize: 22, fontWeight: FontWeight.bold)),
+              IconButton(
+                tooltip: 'Margin breakdown',
+                icon: const Icon(Icons.insights_outlined),
+                onPressed: cart.isEmpty ? null : () => _showMargins(cart),
+              ),
             ],
           ),
         ),
@@ -430,6 +435,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } else {
       _toast('Offline — sale queued, will sync when reconnected');
     }
+  }
+
+  /// Show per-line and cart-wide margins for the active cart.
+  void _showMargins(Cart cart) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => _CartDetailSheet(cart: cart),
+    );
   }
 }
 
@@ -685,6 +699,111 @@ class _VariantPicker extends StatelessWidget {
               )),
         ],
       ),
+    );
+  }
+}
+
+/// A read-only breakdown of the active cart: each line's revenue, cost and
+/// margin, plus the cart-wide totals at the foot. Opened from the Total row.
+class _CartDetailSheet extends StatelessWidget {
+  const _CartDetailSheet({required this.cart});
+
+  final Cart cart;
+
+  static String _pct(double? fraction) =>
+      fraction == null ? '—' : '${(fraction * 100).toStringAsFixed(0)}%';
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Cart detail',
+                  style:
+                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: cart.lines.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final line = cart.lines[i];
+                final negative = line.lineMarginMinor < 0;
+                return ListTile(
+                  dense: true,
+                  title: Text('${line.displayName}  ×${line.qty}'),
+                  subtitle: Text(
+                    'Revenue ${Money.format(line.lineTotalMinor)}'
+                    '   ·   Cost ${Money.format(line.lineCostMinor)}',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        Money.format(line.lineMarginMinor),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: negative ? scheme.error : null,
+                        ),
+                      ),
+                      Text(_pct(line.marginFraction),
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: negative
+                                  ? scheme.error
+                                  : scheme.onSurfaceVariant)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _summaryRow(context, 'Revenue', Money.format(cart.totalMinor)),
+                const SizedBox(height: 4),
+                _summaryRow(
+                    context, 'Cost', Money.format(cart.totalCostMinor)),
+                const SizedBox(height: 8),
+                _summaryRow(
+                  context,
+                  'Margin',
+                  '${Money.format(cart.totalMarginMinor)}'
+                      '   (${_pct(cart.marginFraction)})',
+                  emphasize: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(BuildContext context, String label, String value,
+      {bool emphasize = false}) {
+    final style = emphasize
+        ? const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+        : const TextStyle(fontSize: 15);
+    return Row(
+      children: [
+        Text(label, style: style),
+        const Spacer(),
+        Text(value, style: style),
+      ],
     );
   }
 }
