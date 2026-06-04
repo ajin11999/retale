@@ -40,6 +40,9 @@ class CartLine {
 
 /// The current sale. A [ChangeNotifier] so the register UI rebuilds on edits.
 class Cart extends ChangeNotifier {
+  /// Cashier-set name shown on the rail; null falls back to an auto "C{n}".
+  String? label;
+
   final List<CartLine> _lines = [];
 
   List<CartLine> get lines => List.unmodifiable(_lines);
@@ -93,6 +96,13 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Set or clear the display label. A blank name reverts to the auto "C{n}".
+  void rename(String? newLabel) {
+    final trimmed = newLabel?.trim();
+    label = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    notifyListeners();
+  }
+
   /// Serialise to `PosOrderItemInput[]` for the createPosOrder mutation.
   List<Map<String, dynamic>> toOrderItemsInput() => _lines
       .map((l) => {
@@ -103,4 +113,71 @@ class Cart extends ChangeNotifier {
               'priceOverrideMinor': l.overridePriceMinor,
           })
       .toList();
+}
+
+/// The open carts for one register screen, with the active one tracked.
+/// Each cart is an independent in-progress sale — "park one, start another".
+///
+/// Subscribes to every owned [Cart] and re-broadcasts, so a single listener on
+/// the [Register] repaints the rail (item counts, labels) and the active cart.
+class Register extends ChangeNotifier {
+  Register() {
+    _add(Cart());
+  }
+
+  final List<Cart> _carts = [];
+  int _activeIndex = 0;
+
+  List<Cart> get carts => List.unmodifiable(_carts);
+  int get activeIndex => _activeIndex;
+  Cart get active => _carts[_activeIndex];
+  int get count => _carts.length;
+
+  /// Display name for a tab: the custom label, else the auto "C{n}".
+  String labelFor(int index) => _carts[index].label ?? 'C${index + 1}';
+
+  void _add(Cart cart) {
+    cart.addListener(notifyListeners); // bubble line + label edits to the rail
+    _carts.add(cart);
+  }
+
+  void select(int index) {
+    if (index < 0 || index >= _carts.length || index == _activeIndex) return;
+    _activeIndex = index;
+    notifyListeners();
+  }
+
+  /// Open a fresh cart and switch to it.
+  void addCart() {
+    _add(Cart());
+    _activeIndex = _carts.length - 1;
+    notifyListeners();
+  }
+
+  /// Drop a cart. Confirmation (if the cart has items) is the caller's job;
+  /// this just removes. Never drops the last one — clears and unnames it so
+  /// exactly one sale is always open.
+  void closeCart(int index) {
+    if (index < 0 || index >= _carts.length) return;
+    if (_carts.length == 1) {
+      _carts.first
+        ..clear()
+        ..rename(null);
+    } else {
+      final removed = _carts.removeAt(index);
+      removed.removeListener(notifyListeners);
+      removed.dispose();
+      if (_activeIndex >= _carts.length) _activeIndex = _carts.length - 1;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _carts) {
+      c.removeListener(notifyListeners);
+      c.dispose();
+    }
+    super.dispose();
+  }
 }

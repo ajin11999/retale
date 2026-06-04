@@ -27,7 +27,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _cart = Cart();
+  final _register = Register();
   final _searchController = TextEditingController();
   final _cache = ProductCache.instance;
   final _sync = SyncService.instance;
@@ -51,7 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _debounce?.cancel();
     _connectivity.removeListener(_onConnectivityChanged);
     _searchController.dispose();
-    _cart.dispose();
+    _register.dispose();
     super.dispose();
   }
 
@@ -93,7 +93,64 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (_) => _VariantPicker(product: product),
       );
     }
-    if (variant != null) _cart.add(product, variant);
+    if (variant != null) _register.active.add(product, variant);
+  }
+
+  /// Close a cart tab. Empty carts close instantly; carts with items prompt
+  /// first so a half-rung sale is not discarded by accident.
+  Future<void> _closeCart(int index) async {
+    final cart = _register.carts[index];
+    if (!cart.isEmpty) {
+      final n = cart.lines.length;
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Close ${_register.labelFor(index)}?'),
+          content: Text(
+              'This cart has $n item${n == 1 ? '' : 's'}. Closing discards them.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Keep')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Discard')),
+          ],
+        ),
+      );
+      if (discard != true) return;
+    }
+    _register.closeCart(index);
+  }
+
+  /// Rename a cart tab. A blank name reverts it to the auto "C{n}".
+  Future<void> _renameCart(int index) async {
+    final cart = _register.carts[index];
+    final controller = TextEditingController(text: cart.label ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Name cart'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+          decoration: const InputDecoration(
+            hintText: 'e.g. John, Table 4, Wholesale',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name != null) cart.rename(name);
   }
 
   Future<void> _closeShift() async {
@@ -178,12 +235,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: _StatusBar(connectivity: _connectivity, sync: _sync),
         ),
       ),
-      body: Row(
-        children: [
-          Expanded(flex: 3, child: _buildCatalog()),
-          const VerticalDivider(width: 1),
-          Expanded(flex: 2, child: _buildCart()),
-        ],
+      body: AnimatedBuilder(
+        animation: _register,
+        builder: (context, _) => Row(
+          children: [
+            _CartRail(
+              register: _register,
+              onRename: _renameCart,
+              onClose: _closeCart,
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(flex: 3, child: _buildCatalog()),
+            const VerticalDivider(width: 1),
+            Expanded(flex: 2, child: _buildCart()),
+          ],
+        ),
       ),
     );
   }
@@ -263,7 +329,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
     );
     if (priceMinor != null && priceMinor > 0) {
-      _cart.addOpenPrice(product, product.variants.first, priceMinor);
+      _register.active.addOpenPrice(product, product.variants.first, priceMinor);
     }
   }
 
@@ -296,47 +362,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Widget _buildCart() {
-    return AnimatedBuilder(
-      animation: _cart,
-      builder: (context, _) {
-        return Column(
-          children: [
-            Expanded(
-              child: _cart.isEmpty
-                  ? const Center(child: Text('Cart is empty'))
-                  : ListView.builder(
-                      itemCount: _cart.lines.length,
-                      itemBuilder: (context, i) =>
-                          _CartLineTile(cart: _cart, line: _cart.lines[i]),
-                    ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Text('Total', style: TextStyle(fontSize: 18)),
-                  const Spacer(),
-                  Text(Money.format(_cart.totalMinor),
-                      style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.payments),
-                  label: const Text('Charge'),
-                  onPressed: _cart.isEmpty ? null : _checkout,
+    // The body's AnimatedBuilder on _register (which forwards every cart's
+    // notifications) drives rebuilds, so no inner listener is needed here.
+    final cart = _register.active;
+    return Column(
+      children: [
+        Expanded(
+          child: cart.isEmpty
+              ? const Center(child: Text('Cart is empty'))
+              : ListView.builder(
+                  itemCount: cart.lines.length,
+                  itemBuilder: (context, i) =>
+                      _CartLineTile(cart: cart, line: cart.lines[i]),
                 ),
-              ),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Text('Total', style: TextStyle(fontSize: 18)),
+              const Spacer(),
+              Text(Money.format(cart.totalMinor),
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.payments),
+              label: const Text('Charge'),
+              onPressed: cart.isEmpty ? null : _checkout,
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 
@@ -344,10 +408,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final result = await showDialog<SubmitResult>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _CheckoutDialog(cart: _cart, session: widget.session),
+      builder: (_) =>
+          _CheckoutDialog(cart: _register.active, session: widget.session),
     );
     if (result == null) return; // cancelled
-    _cart.clear();
+    // A completed sale, not a discard: close the tab silently (no confirm).
+    _register.closeCart(_register.activeIndex);
     _searchController.clear();
     setState(() => _query = '');
     if (result.status == SubmitStatus.confirmed) {
@@ -389,6 +455,93 @@ class _StatusBar extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// The left rail of open carts. Tap a tab to switch; the bottom `+` opens a
+/// new cart; long-press a tab for Rename / Close.
+class _CartRail extends StatelessWidget {
+  const _CartRail({
+    required this.register,
+    required this.onRename,
+    required this.onClose,
+  });
+
+  final Register register;
+  final void Function(int index) onRename;
+  final void Function(int index) onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 76,
+      color: scheme.surfaceContainerHighest,
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: register.count,
+              itemBuilder: (context, i) {
+                final cart = register.carts[i];
+                final selected = i == register.activeIndex;
+                final n = cart.lines.length;
+                return InkWell(
+                  onTap: () => register.select(i),
+                  onLongPress: () => _showMenu(context, i),
+                  child: Container(
+                    color: selected ? scheme.primaryContainer : null,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                    child: Column(
+                      children: [
+                        Text(
+                          register.labelFor(i),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontWeight: selected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal),
+                        ),
+                        if (n > 0)
+                          Text('$n item${n == 1 ? '' : 's'}',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: scheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: 'New cart',
+            icon: const Icon(Icons.add),
+            onPressed: register.addCart,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showMenu(BuildContext context, int index) async {
+    final box = context.findRenderObject() as RenderBox;
+    final origin = box.localToGlobal(Offset.zero);
+    final overlay = Offset.zero & MediaQuery.of(context).size;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(origin & box.size, overlay),
+      items: const [
+        PopupMenuItem(value: 'rename', child: Text('Rename')),
+        PopupMenuItem(value: 'close', child: Text('Close')),
+      ],
+    );
+    if (choice == 'rename') onRename(index);
+    if (choice == 'close') onClose(index);
   }
 }
 
