@@ -1,13 +1,14 @@
 <script lang="ts">
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
-  import { Archive, ArchiveRestore, Pencil, Trash2 } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import { Archive, ArchiveRestore, Boxes, Pencil, Trash2 } from "@lucide/svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -100,6 +101,7 @@
   const canEdit = $derived(has("location.edit"));
   const canArchive = $derived(has("location.archive"));
   const canHardDelete = $derived(has("location.hard_delete"));
+  const canViewStock = $derived(has("stock.adjust"));
 
   // ---- Hierarchy ordering --------------------------------------------------
   // Flatten the self-referential forest into a depth-tagged, parent-before-
@@ -201,6 +203,28 @@
     }
     return tree.filter((n) => !banned.has(n.id));
   });
+
+  // Full ancestry path per node ("Warehouse › Aisle 3 › Bin A"), so the parent
+  // Combobox shows hierarchy context in a flat, searchable list. `tree` is
+  // parent-before-child, so each node's parent path is already computed.
+  const pathById = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const n of tree) {
+      const parentPath = n.parentId ? m.get(n.parentId) : undefined;
+      m.set(n.id, parentPath ? `${parentPath} › ${n.name}` : n.name);
+    }
+    return m;
+  });
+
+  // { value, label } parent options: a leading "Top level" row, then each
+  // allowed parent (descendants of the edited node are excluded) by full path.
+  const parentComboOptions = $derived([
+    { value: "", label: "— Top level —" },
+    ...parentOptions.map((n) => ({
+      value: n.id,
+      label: pathById.get(n.id) ?? n.name,
+    })),
+  ]);
 
   function newLocation() {
     draft = {
@@ -344,12 +368,12 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Parent</span>
-          <Select bind:value={draft.parentId} disabled={!canEdit}>
-            <option value="">— Top level —</option>
-            {#each parentOptions as p (p.id)}
-              <option value={p.id}>{"— ".repeat(p.depth)}{p.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={parentComboOptions}
+            bind:value={draft.parentId}
+            placeholder="Search parent location…"
+            disabled={!canEdit}
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Code</span>
@@ -429,6 +453,14 @@
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
                 <span class="inline-flex items-center gap-0.5">
+                  {#if canViewStock}
+                    <IconButton
+                      icon={Boxes}
+                      label="Stock"
+                      disabled={busy}
+                      onclick={() => goto(`/stock?location=${n.id}`)}
+                    />
+                  {/if}
                   <IconButton
                     icon={Pencil}
                     label="Edit"
