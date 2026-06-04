@@ -3,7 +3,7 @@
 // purchase-order message that consumes the template lives in the purchases
 // domain (`purchaseSendDraft`).
 
-import { requirePermission } from "../lib/authz.ts";
+import { requireAuth, requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
 import {
   clearBusinessLogo,
@@ -26,8 +26,20 @@ export const typeDefs = /* GraphQL */ `
     updatedAt: String
   }
 
+  "Business identity safe to print on a customer receipt."
+  type BusinessReceiptInfo {
+    name: String!
+    phone: String
+  }
+
   extend type Query {
     businessSettings: BusinessSettings!
+    """
+    Business name and phone for a receipt header. Readable by any authenticated
+    user (the full businessSettings query is admin-gated), so POS clerks can
+    build receipts.
+    """
+    businessReceiptInfo: BusinessReceiptInfo!
   }
 
   extend type Mutation {
@@ -55,6 +67,11 @@ export const resolvers = {
     businessSettings: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       await requirePermission(ctx, "admin.settings.manage");
       return getBusinessSettings();
+    },
+    businessReceiptInfo: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      requireAuth(ctx);
+      const s = await getBusinessSettings();
+      return { name: s.name, phone: s.phone ?? null };
     },
   },
 

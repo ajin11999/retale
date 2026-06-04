@@ -5,6 +5,7 @@
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
+import { getCustomer } from "../services/customer-service.ts";
 import * as orders from "../services/order-service.ts";
 
 export const typeDefs = /* GraphQL */ `
@@ -29,6 +30,15 @@ export const typeDefs = /* GraphQL */ `
     createdAt: String!
     items: [OrderItem!]!
     payments: [OrderPayment!]!
+    "Live contact details of the attached customer, for sending a receipt. Null when no customer is attached or the customer was deleted."
+    customer: OrderCustomer
+  }
+
+  "The subset of customer fields a receipt needs. Readable wherever the order is."
+  type OrderCustomer {
+    id: ID!
+    name: String!
+    phone: String
   }
 
   type OrderItem {
@@ -177,6 +187,16 @@ export const resolvers = {
     createdAt: (o: { createdAt: Date | string }) => iso(o.createdAt),
     items: (o: { id: string }) => orders.listOrderItems(o.id),
     payments: (o: { id: string }) => orders.listOrderPayments(o.id),
+    customer: async (o: { customerId: string | null }) => {
+      if (!o.customerId) return null;
+      // A hard-deleted customer leaves the snapshot name on the order but no
+      // live row — return null rather than surfacing the error.
+      try {
+        return await getCustomer(o.customerId);
+      } catch {
+        return null;
+      }
+    },
   },
   OrderItem: {
     lineTotalMinor: (i: ItemRow) =>

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import '../models/money.dart';
+import '../receipt/receipt.dart';
+import '../receipt/receipt_service.dart';
+import '../receipt/send_receipt_dialog.dart';
 import '../widgets/common.dart';
 
 /// Which orders the history view lists.
@@ -194,6 +197,19 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
     }
   }
 
+  /// Build a receipt from this order and offer to WhatsApp it. Prefills the
+  /// attached customer's number when the order has one.
+  Future<void> _sendReceipt(Map<String, dynamic> o) async {
+    final store = await ReceiptService.instance.storeInfo();
+    if (!mounted) return;
+    final customer = o['customer'] as Map<String, dynamic>?;
+    await showSendReceiptDialog(
+      context,
+      receipt: Receipt.fromOrderDetail(o, store),
+      phone: customer?['phone'] as String?,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -241,18 +257,27 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
                   ],
                 ),
               ),
-              if (_returnable(o))
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.assignment_return),
-                      label: const Text('Return items'),
-                      onPressed: () => _startReturn(o),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('Send receipt'),
+                      onPressed: () => _sendReceipt(o),
                     ),
-                  ),
+                    if (_returnable(o)) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.assignment_return),
+                        label: const Text('Return items'),
+                        onPressed: () => _startReturn(o),
+                      ),
+                    ],
+                  ],
                 ),
+              ),
             ],
           );
         },

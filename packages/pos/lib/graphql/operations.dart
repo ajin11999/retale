@@ -115,16 +115,35 @@ class Ops {
   ''';
 
   /// Full detail of one order — lines and payments — for the detail view.
+  /// Carries the attached customer (if any) so a receipt can be sent to them.
   static const orderDetail = '''
     query OrderDetail(\$id: ID!) {
       order(id: \$id) {
         id displayNumber status totalMinor createdAt closedAt returnOfOrderId
+        snapshotCustomerName
+        customer { id name phone }
         items {
           id displayName qty discountMinor
           snapshotPriceMinor lineTotalMinor voidedAt
         }
         payments { method amountMinor }
       }
+    }
+  ''';
+
+  /// Name/phone search over active customers, for attaching one to a POS sale.
+  static const posCustomerSearch = '''
+    query PosCustomerSearch(\$search: String, \$limit: Int) {
+      posCustomerSearch(search: \$search, limit: \$limit) {
+        id name phone
+      }
+    }
+  ''';
+
+  /// Business name + phone for the receipt header.
+  static const businessReceiptInfo = '''
+    query BusinessReceiptInfo {
+      businessReceiptInfo { name phone }
     }
   ''';
 

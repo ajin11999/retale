@@ -5,7 +5,7 @@
 // the same transaction so the cached total never drifts.
 // See docs/design-decisions.md → "Customers" and "Payments & customer debt".
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, or, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   customerLedger,
@@ -44,6 +44,34 @@ export function listCustomers(includeArchived = false): Promise<Customer[]> {
     .select()
     .from(customers)
     .where(includeArchived ? undefined : isNull(customers.archivedAt));
+}
+
+/**
+ * Lightweight name/phone search for the POS register, used to attach a customer
+ * to a sale. Archived customers are excluded; an empty `search` lists the first
+ * `limit` active customers by name. `limit` is clamped to 1..50.
+ */
+export function searchCustomers(
+  search: string | null | undefined,
+  limit = 20,
+): Promise<Customer[]> {
+  const cap = Math.min(Math.max(limit, 1), 50);
+  const trimmed = search?.trim();
+  const where = trimmed
+    ? and(
+        isNull(customers.archivedAt),
+        or(
+          like(customers.name, `%${trimmed}%`),
+          like(customers.phone, `%${trimmed}%`),
+        ),
+      )
+    : isNull(customers.archivedAt);
+  return db
+    .select()
+    .from(customers)
+    .where(where)
+    .orderBy(customers.name)
+    .limit(cap);
 }
 
 async function loadCustomer(id: string): Promise<Customer> {

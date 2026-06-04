@@ -62,6 +62,12 @@ export const typeDefs = /* GraphQL */ `
     customer(id: ID!): Customer
     customerLedger(customerId: ID!, limit: Int): [CustomerLedgerEntry!]!
     customerPrices(customerId: ID!): [CustomerPrice!]!
+    """
+    Lightweight customer search for the POS register — matches name or phone,
+    excludes archived. Gated on order.create_pos so any cashier can attach a
+    customer to a sale (the broader customers query needs customer.edit).
+    """
+    posCustomerSearch(search: String, limit: Int): [Customer!]!
   }
 
   extend type Mutation {
@@ -171,6 +177,14 @@ export const resolvers = {
       } catch (e) {
         asGraphQLError(e);
       }
+    },
+    posCustomerSearch: async (
+      _: unknown,
+      args: { search?: string | null; limit?: number | null },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "order.create_pos");
+      return customers.searchCustomers(args.search, args.limit ?? 20);
     },
   },
 

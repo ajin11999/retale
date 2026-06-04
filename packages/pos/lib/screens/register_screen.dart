@@ -8,9 +8,13 @@ import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import '../models/cart.dart';
+import '../models/customer.dart';
 import '../models/money.dart';
 import '../models/pos.dart';
 import '../models/product.dart';
+import '../receipt/receipt.dart';
+import '../receipt/receipt_service.dart';
+import '../receipt/send_receipt_dialog.dart';
 import '../sync/connectivity.dart';
 import '../sync/sync_service.dart';
 import '../widgets/common.dart';
@@ -419,22 +423,76 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _checkout() async {
-    final result = await showDialog<SubmitResult>(
+    final cart = _register.active;
+    // Snapshot the lines and total now: a completed sale clears the cart right
+    // after, but the receipt (offered below) still needs them.
+    final lines = cart.lines
+        .map((l) => ReceiptLine(
+              name: l.displayName,
+              qty: l.qty,
+              unitPriceMinor: l.unitPriceMinor,
+              lineTotalMinor: l.lineTotalMinor,
+            ))
+        .toList();
+    final totalMinor = cart.totalMinor;
+    final outcome = await showDialog<_CheckoutOutcome>(
       context: context,
       barrierDismissible: false,
-      builder: (_) =>
-          _CheckoutDialog(cart: _register.active, session: widget.session),
+      builder: (_) => _CheckoutDialog(cart: cart, session: widget.session),
     );
-    if (result == null) return; // cancelled
+    if (outcome == null) return; // cancelled
     // A completed sale, not a discard: close the tab silently (no confirm).
     _register.closeCart(_register.activeIndex);
     _searchController.clear();
     setState(() => _query = '');
-    if (result.status == SubmitStatus.confirmed) {
-      _toast('Sale completed · ${result.displayNumber ?? 'recorded'}');
+    if (outcome.result.status == SubmitStatus.confirmed) {
+      _offerReceipt(
+        displayNumber: outcome.result.displayNumber,
+        lines: lines,
+        totalMinor: totalMinor,
+        paidMinor: outcome.paidMinor,
+        customer: outcome.customer,
+      );
     } else {
       _toast('Offline — sale queued, will sync when reconnected');
     }
+  }
+
+  /// Confirm the sale and offer to WhatsApp the receipt. The action is always
+  /// available; when a customer was attached, their number prefills the field.
+  void _offerReceipt({
+    required String? displayNumber,
+    required List<ReceiptLine> lines,
+    required int totalMinor,
+    required int? paidMinor,
+    required Customer? customer,
+  }) {
+    if (!mounted) return;
+    final changeMinor = (paidMinor != null && paidMinor > totalMinor)
+        ? paidMinor - totalMinor
+        : null;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Sale completed · ${displayNumber ?? 'recorded'}'),
+      action: SnackBarAction(
+        label: 'Send receipt',
+        onPressed: () async {
+          final store = await ReceiptService.instance.storeInfo();
+          if (!mounted) return;
+          final receipt = Receipt(
+            store: store,
+            lines: lines,
+            totalMinor: totalMinor,
+            displayNumber: displayNumber,
+            createdAt: DateTime.now(),
+            paidMinor: paidMinor,
+            changeMinor: changeMinor,
+            customerName: customer?.name,
+          );
+          await showSendReceiptDialog(context,
+              receipt: receipt, phone: customer?.phone);
+        },
+      ),
+    ));
   }
 
   /// Show per-line and cart-wide margins for the active cart.
@@ -821,6 +879,7 @@ class _CheckoutDialog extends StatefulWidget {
 
 class _CheckoutDialogState extends State<_CheckoutDialog> {
   final _tendered = TextEditingController();
+  Customer? _customer;
   bool _busy = false;
   String? _error;
 
@@ -836,21 +895,45 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     return change > 0 ? change : 0;
   }
 
+  Future<void> _pickCustomer() async {
+    final picked = await showModalBottomSheet<Customer>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const _CustomerPicker(),
+    );
+    // A sheet dismiss returns null (keep the current choice); the "Walk-in"
+    // entry returns the sentinel below to actively clear it.
+    if (picked == null) return;
+    setState(() => _customer = identical(picked, _walkIn) ? null : picked);
+  }
+
   Future<void> _submit() async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
+      final tendered = Money.parse(_tendered.text);
       final result = await SyncService.instance.submitOrder(
         posSessionId: widget.session.id,
+        customerId: _customer?.id,
         items: widget.cart.toOrderItemsInput(),
         payments: [
           {'method': 'cash', 'amountMinor': widget.cart.totalMinor},
         ],
         totalMinor: widget.cart.totalMinor,
       );
-      if (mounted) Navigator.pop(context, result);
+      if (mounted) {
+        Navigator.pop(
+          context,
+          _CheckoutOutcome(
+            result: result,
+            customer: _customer,
+            paidMinor: tendered > 0 ? tendered : null,
+          ),
+        );
+      }
     } on GraphQLAppException catch (e) {
       setState(() => _error = e.message);
     } finally {
@@ -866,6 +949,30 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          InkWell(
+            onTap: _busy ? null : _pickCustomer,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _customer?.name ?? 'Walk-in customer',
+                      style: TextStyle(
+                          color: _customer == null
+                              ? Theme.of(context).hintColor
+                              : null),
+                    ),
+                  ),
+                  Text(_customer == null ? 'Add' : 'Change',
+                      style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                ],
+              ),
+            ),
+          ),
+          const Divider(),
           Row(
             children: [
               const Text('Total due'),
@@ -917,6 +1024,136 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
               : const Text('Complete sale'),
         ),
       ],
+    );
+  }
+}
+
+/// What a completed (or queued) checkout hands back: the submit result, the
+/// attached customer (if any) and the cash tendered, so the register can offer
+/// a receipt afterwards.
+class _CheckoutOutcome {
+  _CheckoutOutcome({
+    required this.result,
+    required this.customer,
+    required this.paidMinor,
+  });
+
+  final SubmitResult result;
+  final Customer? customer;
+  final int? paidMinor;
+}
+
+/// The "Walk-in customer" sentinel the picker returns to clear an attached
+/// customer (distinct from a null dismiss, which keeps the current choice).
+final _walkIn = const Customer(id: '', name: 'Walk-in customer');
+
+/// Searches active customers by name or phone so the cashier can attach one to
+/// the sale. Returns the chosen [Customer], [_walkIn] to clear, or null on
+/// dismiss. Online-only — needs the API, like the rest of checkout.
+class _CustomerPicker extends StatefulWidget {
+  const _CustomerPicker();
+
+  @override
+  State<_CustomerPicker> createState() => _CustomerPickerState();
+}
+
+class _CustomerPickerState extends State<_CustomerPicker> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  String _query = '';
+  late Future<List<Customer>> _future = _search('');
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<List<Customer>> _search(String term) async {
+    final data = await GraphQLService.instance.query(
+      Ops.posCustomerSearch,
+      variables: {'search': term.isEmpty ? null : term, 'limit': 30},
+    );
+    return (data['posCustomerSearch'] as List<dynamic>)
+        .map((c) => Customer.fromJson(c as Map<String, dynamic>))
+        .toList();
+  }
+
+  void _onChanged(String text) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      setState(() {
+        _query = text;
+        _future = _search(text.trim());
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            onChanged: _onChanged,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Search customer name or phone',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.person_off_outlined),
+            title: const Text('Walk-in (no customer)'),
+            onTap: () => Navigator.pop(context, _walkIn),
+          ),
+          const Divider(height: 1),
+          SizedBox(
+            height: 280,
+            child: FutureBuilder<List<Customer>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text(describeError(snapshot.error!)));
+                }
+                final results = snapshot.data!;
+                if (results.isEmpty) {
+                  return Center(
+                    child: Text(_query.isEmpty
+                        ? 'No customers yet'
+                        : 'No matching customers'),
+                  );
+                }
+                return ListView.separated(
+                  itemCount: results.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final c = results[i];
+                    return ListTile(
+                      title: Text(c.name),
+                      subtitle: c.hasPhone ? Text(c.phone!) : null,
+                      trailing: c.hasPhone
+                          ? const Icon(Icons.chat_outlined, size: 18)
+                          : null,
+                      onTap: () => Navigator.pop(context, c),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
