@@ -1,0 +1,44 @@
+# Retale POS — HTTPS host for the installable PWA.
+#
+# Browsers only register a service worker (offline shell) and offer "Install"
+# over a secure context. On a LAN that means HTTPS, which this Caddyfile
+# provides via Caddy's built-in local CA (`tls internal`).
+#
+#   1. Build the web bundle:   bun run build:pos-web   (from the repo root)
+#   2. From THIS directory:    caddy run
+#   3. Trust the local CA once per device (see notes at the bottom).
+#
+# `root` is relative to the working directory, so run `caddy run` from
+# packages/pos (where this file lives).
+
+# Replace the IP with this machine's LAN address. Caddy's internal CA issues a
+# cert whose SAN matches it, so the POS devices reach the app at https://<ip>/.
+# If you have local DNS/mDNS, a hostname (e.g. pos.local) works here too.
+https://192.168.1.50 {
+	root * build/web
+	encode zstd gzip
+
+	# Never cache the entry point, service worker, or manifest, so a fresh
+	# `build:pos-web` is picked up immediately. The hashed asset files Flutter
+	# emits are content-addressed and safe to cache hard (default behavior).
+	@noCache path /index.html /flutter_service_worker.js /manifest.json
+	header @noCache Cache-Control "no-cache, no-store, must-revalidate"
+
+	# SPA fallback: any unknown path resolves to the app shell.
+	try_files {path} /index.html
+	file_server
+
+	# Caddy's local CA. First run generates a root cert under Caddy's data dir.
+	tls internal
+}
+
+# ── Trusting the local CA ──────────────────────────────────────────────────
+# On the server:   caddy trust          (installs the root into the OS store)
+# On other devices: install Caddy's root cert, then reach https://<ip>/:
+#   - Find it:  caddy environ | findstr CADDY    (locates the data dir), or
+#     copy <data-dir>/pki/authorities/local/root.crt to the device.
+#   - Windows:  import root.crt into "Trusted Root Certification Authorities".
+#   - Android:  Settings → Security → Encryption → Install a certificate → CA.
+#   - iOS:      install the profile, then enable it under
+#               Settings → General → About → Certificate Trust Settings.
+# Once trusted, the device can install the PWA and run it offline.

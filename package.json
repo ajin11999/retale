@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun run --filter @retale/api dev",
     "dev:console": "bun run --filter @retale/console dev",
+    "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy offline-first",
     "test": "bun test",
     "typecheck": "bun run --filter @retale/api typecheck",
     "db:generate": "bun run --filter @retale/api db:generate",
