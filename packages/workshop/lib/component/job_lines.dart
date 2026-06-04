@@ -8,6 +8,11 @@ import 'package:retale_workshop/util/project_calc.dart';
 /// The job's line tree: stock/service/open-price leaves, optionally grouped into
 /// sections. Edits mutate the tree in place and report the whole root list via
 /// [onChanged]; the parent persists it to Isar (the source of truth).
+///
+/// When editable, each level is a [ReorderableListView] so lines can be
+/// drag-reordered among their siblings (top-level items among themselves, a
+/// section's children among themselves). Order is implicit in list position, so
+/// a reorder is just a list mutation followed by [onChanged] — no schema change.
 class JobLines extends StatelessWidget {
   const JobLines({
     super.key,
@@ -57,20 +62,37 @@ class JobLines extends StatelessWidget {
     onChanged(lines);
   }
 
+  void _reorder(List<WorkLine> list, int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final moved = list.removeAt(oldIndex);
+    list.insert(newIndex, moved);
+    onChanged(lines);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final Widget body;
+    if (lines.isEmpty) {
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: Text('No lines yet.')),
+      );
+    } else if (readOnly) {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: _plainList(context, lines),
+      );
+    } else {
+      body = _reorderableList(context, lines, depth: 0);
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ..._buildList(context, lines),
-            if (lines.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: Text('No lines yet.')),
-              ),
+            body,
             if (!readOnly) ...[
               const Divider(),
               Row(
@@ -94,26 +116,75 @@ class JobLines extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildList(BuildContext context, List<WorkLine> list,
+  /// Read-only rendering: a flat list of rows, sections inlined, no handles.
+  List<Widget> _plainList(BuildContext context, List<WorkLine> list,
       {int depth = 0}) {
     final widgets = <Widget>[];
     for (final line in list) {
       if (line.isGroup) {
-        widgets.add(_groupHeader(context, list, line, depth));
-        widgets.addAll(_buildList(context, line.children ?? [], depth: depth + 1));
+        widgets.add(_groupHeader(context, list, line, depth, 0));
+        widgets.addAll(_plainList(context, line.children ?? [], depth: depth + 1));
       } else {
-        widgets.add(_leafRow(context, list, line, depth));
+        widgets.add(_leafRow(context, list, line, depth, 0));
       }
     }
     return widgets;
   }
 
-  Widget _groupHeader(
-      BuildContext context, List<WorkLine> parent, WorkLine group, int depth) {
+  /// Editable rendering: one reorderable level. Section children get their own
+  /// nested reorderable level so they reorder among themselves.
+  Widget _reorderableList(BuildContext context, List<WorkLine> list,
+      {required int depth}) {
+    return ReorderableListView(
+      shrinkWrap: true,
+      primary: false,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      onReorder: (oldIndex, newIndex) => _reorder(list, oldIndex, newIndex),
+      children: [
+        for (var i = 0; i < list.length; i++)
+          _reorderableItem(context, list, list[i], depth, i),
+      ],
+    );
+  }
+
+  Widget _reorderableItem(BuildContext context, List<WorkLine> parent,
+      WorkLine line, int depth, int index) {
+    if (line.isGroup) {
+      final children = line.children ?? [];
+      return Column(
+        // ObjectKey: identity is stable within a build/drag; a fresh tree from
+        // Isar after save just yields fresh keys, which is fine.
+        key: ObjectKey(line),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _groupHeader(context, parent, line, depth, index),
+          if (children.isNotEmpty)
+            _reorderableList(context, children, depth: depth + 1),
+        ],
+      );
+    }
+    return _leafRow(context, parent, line, depth, index);
+  }
+
+  Widget _dragHandle(int index) {
+    return ReorderableDragStartListener(
+      index: index,
+      child: const Padding(
+        padding: EdgeInsets.only(right: 4),
+        child: Icon(Icons.drag_indicator, size: 18, color: Colors.black38),
+      ),
+    );
+  }
+
+  Widget _groupHeader(BuildContext context, List<WorkLine> parent,
+      WorkLine group, int depth, int index) {
     return Padding(
+      key: ObjectKey(group),
       padding: EdgeInsets.only(left: depth * 16.0, top: 8, bottom: 2),
       child: Row(
         children: [
+          if (!readOnly) _dragHandle(index),
           const Icon(Icons.folder_outlined, size: 18),
           const SizedBox(width: 6),
           Expanded(
@@ -144,12 +215,14 @@ class JobLines extends StatelessWidget {
     );
   }
 
-  Widget _leafRow(
-      BuildContext context, List<WorkLine> parent, WorkLine leaf, int depth) {
+  Widget _leafRow(BuildContext context, List<WorkLine> parent, WorkLine leaf,
+      int depth, int index) {
     return Padding(
+      key: ObjectKey(leaf),
       padding: EdgeInsets.only(left: depth * 16.0, top: 2, bottom: 2),
       child: Row(
         children: [
+          if (!readOnly) _dragHandle(index),
           Expanded(
             flex: 5,
             child: Column(
