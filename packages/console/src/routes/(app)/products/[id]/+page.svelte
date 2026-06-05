@@ -645,6 +645,15 @@
   const formatMarginBps = (bps: number | null): string =>
     bps == null ? "—" : `${(bps / 100).toFixed(1)}%`;
 
+  // Min margin is stored in basis points but entered as a percent — humans
+  // think "20%", not "2000 bps". Convert at the input boundary.
+  const bpsToPct = (bps: number | null): number | null =>
+    bps == null ? null : bps / 100;
+  const pctToBps = (pct: string): number | null => {
+    const n = Number.parseFloat(pct);
+    return Number.isFinite(n) ? Math.round(n * 100) : null;
+  };
+
   // ---- Stock adjustment ----------------------------------------------------
   // A manual write-on / write-off against one variant at one location.
   interface StockDraft {
@@ -937,10 +946,13 @@
           <Input type="number" bind:value={form.minQty} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min margin (basis points)</span>
+          <span class="text-sm font-medium">Min margin (%)</span>
           <Input
             type="number"
-            bind:value={form.minMarginBps}
+            step="0.1"
+            value={bpsToPct(form.minMarginBps)}
+            oninput={(e) =>
+              (form.minMarginBps = pctToBps(e.currentTarget.value))}
             disabled={!canEdit}
           />
         </label>

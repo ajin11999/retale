@@ -186,6 +186,17 @@
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
+  // Min margin is stored in basis points but entered/shown as a percent —
+  // humans think "20%", not "2000 bps". Convert at the input boundary.
+  const bpsToPct = (bps: number | null): number | null =>
+    bps == null ? null : bps / 100;
+  const pctToBps = (pct: string): number | null => {
+    const n = Number.parseFloat(pct);
+    return Number.isFinite(n) ? Math.round(n * 100) : null;
+  };
+  const formatPct = (bps: number | null): string =>
+    bps == null ? "—" : `${(bps / 100).toFixed(1)}%`;
+
   // Parent options for a draft — a category cannot be its own descendant.
   const parentOptions = $derived.by(() => {
     if (!draft) return tree;
@@ -458,10 +469,13 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min margin (basis points)</span>
+          <span class="text-sm font-medium">Min margin (%)</span>
           <Input
             type="number"
-            bind:value={draft.minMarginBps}
+            step="0.1"
+            value={bpsToPct(draft.minMarginBps)}
+            oninput={(e) =>
+              (draft!.minMarginBps = pctToBps(e.currentTarget.value))}
             placeholder="Inherited / none"
             disabled={!canEdit}
           />
@@ -497,7 +511,7 @@
             <th class="px-4 py-2 font-medium">Category</th>
             <th class="px-4 py-2 text-right font-medium">Products</th>
             <th class="px-4 py-2 text-right font-medium">Min qty</th>
-            <th class="px-4 py-2 text-right font-medium">Min margin (bps)</th>
+            <th class="px-4 py-2 text-right font-medium">Min margin</th>
             <th class="px-4 py-2 font-medium">Status</th>
             <th class="px-4 py-2"></th>
           </tr>
@@ -565,7 +579,7 @@
                   {n.minQty ?? "—"}
                 {/if}
               </td>
-              <td class="px-4 py-2 text-right">{n.minMarginBps ?? "—"}</td>
+              <td class="px-4 py-2 text-right">{formatPct(n.minMarginBps)}</td>
               <td class="px-4 py-2">
                 <Badge
                   class={n.archived
