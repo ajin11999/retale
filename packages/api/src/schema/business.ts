@@ -34,6 +34,8 @@ export const typeDefs = /* GraphQL */ `
   type BusinessReceiptInfo {
     name: String!
     phone: String
+    "API-relative URL of the business logo (PNG), printed in place of the name when set."
+    logoUrl: String
   }
 
   extend type Query {
@@ -77,7 +79,7 @@ export const resolvers = {
     businessReceiptInfo: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       requireAuth(ctx);
       const s = await getBusinessSettings();
-      return { name: s.name, phone: s.phone ?? null };
+      return { name: s.name, phone: s.phone ?? null, logoUrl: s.logoUrl ?? null };
     },
   },
 

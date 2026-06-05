@@ -36,6 +36,10 @@ export const businessLogoRoute = new Elysia()
     // Fixed filename, mutable content — let the browser revalidate so a
     // replaced logo shows up. Callers also append ?v=<updatedAt>.
     set.headers["cache-control"] = "no-cache";
+    // The POS web app (a different origin on the LAN) fetches these bytes via
+    // XHR to embed the logo on a printed receipt, so allow cross-origin reads.
+    // The asset is unauthenticated and public-ish, so `*` is fine.
+    set.headers["access-control-allow-origin"] = "*";
     return file;
   })
   .post(
