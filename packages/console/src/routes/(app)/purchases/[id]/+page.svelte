@@ -1042,9 +1042,12 @@
     channel: string;
     recipientOverride: string;
     note: string;
+    /** WhatsApp only: "text" = wa.me deep link, "pdf" = share the PO PDF. */
+    format: "text" | "pdf";
   }
   let composer = $state<Composer | null>(null);
   let previewing = $state(false);
+  let sharing = $state(false);
 
   // The rendered draft (body + resolved recipient + deep link) for the
   // current composer channel / recipient.
@@ -1064,7 +1067,12 @@
     previewing = true;
     feedback = null;
     try {
+      // NetworkOnly — the rendered body embeds the business name / greeting /
+      // footer and the vendor's contact, none of which are query variables, so
+      // a cached draft would keep showing the old business details after a
+      // settings edit. Always re-render server-side.
       await SendDraftQuery.fetch({
+        policy: "NetworkOnly",
         variables: {
           purchaseId: purchase.id,
           channel: c.channel as never,
@@ -1079,8 +1087,48 @@
   }
 
   function startCompose() {
-    composer = { channel: "whatsapp", recipientOverride: "", note: "" };
+    composer = { channel: "whatsapp", recipientOverride: "", note: "", format: "text" };
     preview();
+  }
+
+  /**
+   * Share the PO PDF via the device's native share sheet (Web Share API) so the
+   * clerk can pick WhatsApp and the PDF goes as an attachment — a wa.me link can
+   * only carry text, never a file. The OS share sheet picks the recipient, so
+   * the resolved number is informational only here. Respects the price-visibility
+   * toggle by reusing the same proxied PDF URL as the Download PDF link. A
+   * dismissed share sheet (AbortError) is a no-op, not a failure.
+   */
+  async function sharePdf() {
+    if (!purchase) return;
+    sharing = true;
+    feedback = null;
+    try {
+      const res = await fetch(pdfHref, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`PDF unavailable (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], `po-${purchase.id}.pdf`, {
+        type: "application/pdf",
+      });
+      if (!navigator.canShare?.({ files: [file] })) {
+        feedback = {
+          ok: false,
+          text: "This device can't share files. Use Download PDF, then attach it in WhatsApp.",
+        };
+        return;
+      }
+      const caption = `${draft?.subject ?? "Purchase Order"} — see the attached PDF.`;
+      await navigator.share({
+        files: [file],
+        title: draft?.subject ?? "Purchase Order",
+        text: caption,
+      });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // dismissed
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      sharing = false;
+    }
   }
 
   // The recipient to log: an explicit override wins, else the resolved one.
@@ -1824,15 +1872,31 @@
             </label>
           </div>
 
+          {#if composer.channel === "whatsapp"}
+            <label class="space-y-1">
+              <span class="text-xs font-medium">Format</span>
+              <Select bind:value={composer.format}>
+                <option value="text">Message text</option>
+                <option value="pdf">PDF attachment</option>
+              </Select>
+            </label>
+          {/if}
+
           {#if previewing}
             <p class="text-sm text-muted-foreground">Rendering preview…</p>
           {:else if draft}
             <div class="space-y-2">
               {#if composer.channel !== "manual"}
+                {@const pdfMode =
+                  composer.channel === "whatsapp" && composer.format === "pdf"}
                 <p class="text-xs">
                   <span class="font-medium">Recipient:</span>
                   {draft.recipient ?? "—"}
-                  {#if !draft.recipientAvailable}
+                  {#if pdfMode}
+                    <span class="text-muted-foreground"
+                      >— you'll pick the contact in the share sheet</span
+                    >
+                  {:else if !draft.recipientAvailable}
                     <Badge class="ml-1 bg-amber-100 text-amber-800">
                       {draft.recipient
                         ? "unusable for this channel"
@@ -1858,6 +1922,14 @@
               {#if composer.channel === "manual"}
                 <span class="text-xs text-muted-foreground">
                   Manual send — copy the message above and send it off-system.
+                </span>
+              {:else if composer.channel === "whatsapp" && composer.format === "pdf"}
+                <Button size="sm" disabled={busy || sharing} onclick={sharePdf}>
+                  {sharing ? "Preparing PDF…" : "Send PDF to WhatsApp"}
+                </Button>
+                <span class="text-xs text-muted-foreground">
+                  Attaches the PO PDF with a short caption — pick the vendor in
+                  the share sheet.
                 </span>
               {:else if draft.deepLink}
                 <a
