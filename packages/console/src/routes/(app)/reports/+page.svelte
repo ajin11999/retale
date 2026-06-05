@@ -93,6 +93,49 @@
     }
   `);
 
+  // Current tracking-account balances — read-only mirror of /tracking, shown as
+  // a Reports tab. Not period-driven; reuses the existing trackingAccounts field.
+  const TrackingBalances = graphql(`
+    query TrackingBalances {
+      trackingAccounts {
+        id
+        parentId
+        name
+        code
+        accountCategory
+        balanceMinor
+        archivedAt
+      }
+    }
+  `);
+
+  // Buying activity — purchases and delivery costs for the period, for manual
+  // GnuCash inventory-valuation entry. Both reuse the existing list queries and
+  // are summed client-side (retail volumes are small).
+  const ReportPurchases = graphql(`
+    query ReportPurchases {
+      purchases(includeCancelled: true) {
+        id
+        snapshotVendorName
+        date
+        status
+        totalInvoiceCost
+      }
+    }
+  `);
+  const ReportDeliveries = graphql(`
+    query ReportDeliveries {
+      deliveries {
+        id
+        date
+        status
+        leafLandings {
+          freightMinor
+        }
+      }
+    }
+  `);
+
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -115,6 +158,13 @@
       perm: "report.session_variance.view",
       ranged: true,
     },
+    {
+      id: "buying",
+      label: "Purchases & Deliveries",
+      perm: "purchase.edit",
+      ranged: true,
+    },
+    { id: "tracking", label: "Tracking", perm: "tracking_account.edit", ranged: false },
   ];
   const tabs = $derived(ALL_TABS.filter((t) => has(t.perm)));
 
@@ -146,6 +196,11 @@
       else if (tabId === "ap") await ApAgingReport.fetch();
       else if (tabId === "variance")
         await SessionVarianceReport.fetch({ variables: range });
+      else if (tabId === "tracking") await TrackingBalances.fetch();
+      else if (tabId === "buying") {
+        await ReportPurchases.fetch();
+        if (has("delivery.draft")) await ReportDeliveries.fetch();
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -172,6 +227,73 @@
   const ar = $derived($ArAgingReport.data?.arAgingReport);
   const ap = $derived($ApAgingReport.data?.apAgingReport);
   const variance = $derived($SessionVarianceReport.data?.sessionVarianceReport);
+
+  // ---- Tracking balances tree ----------------------------------------------
+  type TrackingAcc = NonNullable<
+    typeof $TrackingBalances.data
+  >["trackingAccounts"][number];
+  type TrackingNode = { acc: TrackingAcc; children: TrackingNode[] };
+
+  const trackingAccounts = $derived(
+    $TrackingBalances.data?.trackingAccounts ?? [],
+  );
+  const trackingTree = $derived.by<TrackingNode[]>(() => {
+    const visible = trackingAccounts.filter((a) => !a.archivedAt);
+    const byParent = new Map<string | null, TrackingAcc[]>();
+    for (const a of visible) {
+      const key = a.parentId ?? null;
+      const list = byParent.get(key) ?? [];
+      list.push(a);
+      byParent.set(key, list);
+    }
+    for (const list of byParent.values()) {
+      list.sort((x, y) => x.name.localeCompare(y.name));
+    }
+    const build = (parentId: string | null): TrackingNode[] =>
+      (byParent.get(parentId) ?? []).map((acc) => ({
+        acc,
+        children: build(acc.id),
+      }));
+    return build(null);
+  });
+  const trackingTotalMinor = $derived(
+    trackingAccounts.reduce(
+      (s, a) => (a.archivedAt ? s : s + a.balanceMinor),
+      0,
+    ),
+  );
+
+  // ---- Purchases & deliveries totals ---------------------------------------
+  // Both `date` fields are `YYYY-MM-DD`, so a lexical range test is exact.
+  const inRange = (d: string) =>
+    d.slice(0, 10) >= periodStart && d.slice(0, 10) <= periodEnd;
+
+  const purchaseRows = $derived(
+    ($ReportPurchases.data?.purchases ?? []).filter(
+      (p) => p.status !== "cancelled" && inRange(p.date),
+    ),
+  );
+  const purchasesTotalMinor = $derived(
+    purchaseRows.reduce((s, p) => s + p.totalInvoiceCost, 0),
+  );
+
+  interface DeliveryRecap {
+    id: string;
+    date: string;
+    freightMinor: number;
+  }
+  const deliveryRows = $derived<DeliveryRecap[]>(
+    ($ReportDeliveries.data?.deliveries ?? [])
+      .filter((d) => d.status === "delivered" && inRange(d.date))
+      .map((d) => ({
+        id: d.id,
+        date: d.date,
+        freightMinor: d.leafLandings.reduce((s, l) => s + l.freightMinor, 0),
+      })),
+  );
+  const deliveryCostTotalMinor = $derived(
+    deliveryRows.reduce((s, d) => s + d.freightMinor, 0),
+  );
 
   const fmtDate = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
@@ -440,5 +562,131 @@
         </table>
       </div>
     {/if}
+
+    <!-- ---- Purchases & deliveries --------------------------------------- -->
+    {#if active === "buying" && !busy}
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border bg-card p-4">
+          <p class="text-sm text-muted-foreground">
+            Total purchases ({purchaseRows.length})
+          </p>
+          <p class="text-2xl font-semibold">
+            {formatMoney(purchasesTotalMinor)}
+          </p>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Goods ordered (non-cancelled), by purchase date.
+          </p>
+        </div>
+        <div class="rounded-lg border bg-card p-4">
+          <p class="text-sm text-muted-foreground">
+            Total delivery cost ({deliveryRows.length})
+          </p>
+          {#if has("delivery.draft")}
+            <p class="text-2xl font-semibold">
+              {formatMoney(deliveryCostTotalMinor)}
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Freight / customs added on receipt, excluding goods lines.
+            </p>
+          {:else}
+            <p class="text-2xl font-semibold text-muted-foreground">—</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              Requires delivery access.
+            </p>
+          {/if}
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-lg border bg-card">
+        <table class="w-full text-sm">
+          <thead class="border-b bg-muted/50 text-left text-muted-foreground">
+            <tr>
+              <th class="px-4 py-2 font-medium">Date</th>
+              <th class="px-4 py-2 font-medium">Vendor</th>
+              <th class="px-4 py-2 text-right font-medium">Invoice total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each purchaseRows as p (p.id)}
+              <tr class="border-b last:border-0">
+                <td class="px-4 py-2">{fmtDate(p.date)}</td>
+                <td class="px-4 py-2">{p.snapshotVendorName ?? "—"}</td>
+                <td class="px-4 py-2 text-right">
+                  {formatMoney(p.totalInvoiceCost)}
+                </td>
+              </tr>
+            {/each}
+            {#if purchaseRows.length === 0}
+              <tr>
+                <td
+                  colspan="3"
+                  class="px-4 py-8 text-center text-muted-foreground"
+                >
+                  No purchases in this period.
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+
+    <!-- ---- Tracking balances -------------------------------------------- -->
+    {#if active === "tracking" && !busy}
+      <div class="overflow-hidden rounded-lg border bg-card">
+        <table class="w-full text-sm">
+          <thead class="border-b bg-muted/50 text-left text-muted-foreground">
+            <tr>
+              <th class="px-4 py-2 font-medium">Account</th>
+              <th class="px-4 py-2 font-medium">Category</th>
+              <th class="px-4 py-2 text-right font-medium">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each trackingTree as node (node.acc.id)}
+              {@render trackingRow(node, 0)}
+            {/each}
+            {#if trackingTree.length === 0}
+              <tr>
+                <td
+                  colspan="3"
+                  class="px-4 py-8 text-center text-muted-foreground"
+                >
+                  No tracking accounts.
+                </td>
+              </tr>
+            {:else}
+              <tr class="border-t bg-muted/30 font-medium">
+                <td class="px-4 py-2" colspan="2">Total owed</td>
+                <td class="px-4 py-2 text-right">
+                  {formatMoney(trackingTotalMinor)}
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </div>
+
+{#snippet trackingRow(node: TrackingNode, depth: number)}
+  <tr class="border-b last:border-0">
+    <td class="px-4 py-2" style:padding-left="{depth * 1.25 + 1}rem">
+      <span class="font-medium">{node.acc.name}</span>
+      {#if node.acc.code}
+        <span class="ml-1 text-xs text-muted-foreground">{node.acc.code}</span>
+      {/if}
+    </td>
+    <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
+      {node.acc.accountCategory}
+    </td>
+    <td class="px-4 py-2 text-right">
+      <span class={node.acc.balanceMinor > 0 ? "font-medium" : ""}>
+        {formatMoney(node.acc.balanceMinor)}
+      </span>
+    </td>
+  </tr>
+  {#each node.children as child (child.acc.id)}
+    {@render trackingRow(child, depth + 1)}
+  {/each}
+{/snippet}
