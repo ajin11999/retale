@@ -10,6 +10,8 @@ import { timestamps, ulidPk } from "./_helpers.ts";
  * The one business-settings row. `name` / `phone` / `email` identify the
  * business on a sent purchase order; `poGreeting` / `poFooter` are the
  * configurable template text the PO message body is wrapped in.
+ * `receiptGreeting` / `receiptFooter` are the customer-facing equivalents
+ * wrapped around a sent order receipt.
  */
 export const businessSettings = mysqlTable("business_settings", {
   id: ulidPk(),
@@ -20,5 +22,7 @@ export const businessSettings = mysqlTable("business_settings", {
   logoUrl: varchar({ length: 500 }),
   poGreeting: text(),
   poFooter: text(),
+  receiptGreeting: text(),
+  receiptFooter: text(),
   ...timestamps,
 });

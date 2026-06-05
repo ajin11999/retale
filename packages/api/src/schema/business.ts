@@ -23,6 +23,10 @@ export const typeDefs = /* GraphQL */ `
     poGreeting: String
     "Footer appended to a rendered purchase-order message."
     poFooter: String
+    "Greeting prepended to a rendered customer-receipt message."
+    receiptGreeting: String
+    "Footer appended to a rendered customer-receipt message."
+    receiptFooter: String
     updatedAt: String
   }
 
@@ -49,6 +53,8 @@ export const typeDefs = /* GraphQL */ `
       email: String
       poGreeting: String
       poFooter: String
+      receiptGreeting: String
+      receiptFooter: String
     ): BusinessSettings!
     "Remove the business logo (clears the URL and deletes the stored file)."
     clearBusinessLogo: BusinessSettings!

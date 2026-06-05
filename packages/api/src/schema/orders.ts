@@ -6,11 +6,28 @@ import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
 import { getCustomer } from "../services/customer-service.ts";
+import { buildOrderSendDraft } from "../services/order-message-service.ts";
 import * as orders from "../services/order-service.ts";
 
 export const typeDefs = /* GraphQL */ `
   enum OrderStatus { open closed cancelled }
   enum OrderPaymentMethod { cash }
+  enum OrderSendChannel { whatsapp email manual }
+
+  "A customer sale rendered for one send channel: receipt message + recipient + deep link."
+  type OrderSendDraft {
+    channel: OrderSendChannel!
+    "The recipient on file or overridden; raw, for display."
+    recipient: String
+    "False when the recipient is missing or unusable for this channel."
+    recipientAvailable: Boolean!
+    subject: String!
+    body: String!
+    "wa.me / mailto: URL; null when the recipient is unusable or channel is manual."
+    deepLink: String
+    "API path to the receipt PDF, for sharing as an attachment. Always present."
+    pdfUrl: String!
+  }
 
   type Order {
     id: ID!
@@ -112,6 +129,12 @@ export const typeDefs = /* GraphQL */ `
   extend type Query {
     order(id: ID!): Order
     orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
+    "Render a customer sale for sending: receipt body + recipient + wa.me / mailto: deep link."
+    orderSendDraft(
+      orderId: ID!
+      channel: OrderSendChannel!
+      recipientOverride: String
+    ): OrderSendDraft!
   }
 
   extend type Mutation {
@@ -229,6 +252,26 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "report.sales.view");
       return orders.listOrders(args);
+    },
+    orderSendDraft: async (
+      _: unknown,
+      args: {
+        orderId: string;
+        channel: "whatsapp" | "email" | "manual";
+        recipientOverride?: string | null;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "order.send");
+      try {
+        return await buildOrderSendDraft(
+          args.orderId,
+          args.channel,
+          args.recipientOverride ?? null,
+        );
+      } catch (e) {
+        asGraphQLError(e);
+      }
     },
   },
 

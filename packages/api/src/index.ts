@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { createYoga } from "graphql-yoga";
 import { businessLogoRoute } from "./http/business-logo-route.ts";
 import { journalCsvRoute } from "./http/journal-csv-route.ts";
+import { orderReceiptRoute } from "./http/order-receipt-route.ts";
 import { productImagesRoute } from "./http/product-images-route.ts";
 import { purchasePdfRoute } from "./http/purchase-pdf-route.ts";
 import { buildContext } from "./lib/context.ts";
@@ -20,6 +21,7 @@ const app = new Elysia()
   .use(productImagesRoute)
   .use(businessLogoRoute)
   .use(purchasePdfRoute)
+  .use(orderReceiptRoute)
   .use(journalCsvRoute)
   .mount(yoga)
   .listen(env.port);

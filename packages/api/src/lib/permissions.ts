@@ -16,6 +16,7 @@ export const PERMISSIONS = [
   "order.refund",
   "order.change_customer",
   "order.attribute",
+  "order.send",
   // POS sessions
   "session.open",
   "session.close_own",
@@ -123,6 +124,7 @@ const CLERK: PermissionKey[] = [
   "order.discount",
   "order.refund",
   "order.attribute",
+  "order.send",
   "customer.create",
   "customer.edit",
   "customer.archive",

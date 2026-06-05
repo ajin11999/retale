@@ -54,6 +54,11 @@ type Query {
   posSession(id: ID!): PosSession
   order(id: ID!): Order
   orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
+
+  """
+  Render a customer sale for sending: receipt body + recipient + wa.me / mailto: deep link.
+  """
+  orderSendDraft(orderId: ID!, channel: OrderSendChannel!, recipientOverride: String): OrderSendDraft!
   trackingAccounts(includeArchived: Boolean): [TrackingAccount!]!
   trackingAccount(id: ID!): TrackingAccount
   trackingAccountLedger(accountId: ID!, limit: Int): [TrackingAccountLedgerEntry!]!
@@ -507,7 +512,7 @@ type Mutation {
 
   """Acknowledge an alert — a person has seen it."""
   acknowledgeProductAlert(id: ID!, resolutionNote: String): ProductAlert!
-  updateBusinessSettings(name: String, phone: String, email: String, poGreeting: String, poFooter: String): BusinessSettings!
+  updateBusinessSettings(name: String, phone: String, email: String, poGreeting: String, poFooter: String, receiptGreeting: String, receiptFooter: String): BusinessSettings!
 
   """Remove the business logo (clears the URL and deletes the stored file)."""
   clearBusinessLogo: BusinessSettings!
@@ -1182,6 +1187,37 @@ enum OrderPaymentMethod {
   cash
 }
 
+enum OrderSendChannel {
+  whatsapp
+  email
+  manual
+}
+
+"""
+A customer sale rendered for one send channel: receipt message + recipient + deep link.
+"""
+type OrderSendDraft {
+  channel: OrderSendChannel!
+
+  """The recipient on file or overridden; raw, for display."""
+  recipient: String
+
+  """False when the recipient is missing or unusable for this channel."""
+  recipientAvailable: Boolean!
+  subject: String!
+  body: String!
+
+  """
+  wa.me / mailto: URL; null when the recipient is unusable or channel is manual.
+  """
+  deepLink: String
+
+  """
+  API path to the receipt PDF, for sharing as an attachment. Always present.
+  """
+  pdfUrl: String!
+}
+
 type Order {
   id: ID!
   displayNumber: String
@@ -1671,6 +1707,12 @@ type BusinessSettings {
 
   """Footer appended to a rendered purchase-order message."""
   poFooter: String
+
+  """Greeting prepended to a rendered customer-receipt message."""
+  receiptGreeting: String
+
+  """Footer appended to a rendered customer-receipt message."""
+  receiptFooter: String
   updatedAt: String
 }
 

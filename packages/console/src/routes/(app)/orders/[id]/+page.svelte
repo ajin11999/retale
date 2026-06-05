@@ -10,6 +10,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
+  import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -75,6 +76,29 @@
           priceMinor
           costMinor
         }
+      }
+    }
+  `);
+
+  // Fetched imperatively when the send composer opens / its channel changes —
+  // the API renders the receipt body and resolves the wa.me / mailto: deep link.
+  const SendDraftQuery = graphql(`
+    query ConsoleOrderSendDraft(
+      $orderId: ID!
+      $channel: OrderSendChannel!
+      $recipientOverride: String
+    ) {
+      orderSendDraft(
+        orderId: $orderId
+        channel: $channel
+        recipientOverride: $recipientOverride
+      ) {
+        channel
+        recipient
+        recipientAvailable
+        subject
+        body
+        deepLink
       }
     }
   `);
@@ -294,6 +318,7 @@
   const canVoid = $derived(has("order.void_item"));
   const canClose = $derived(has("order.close_customer_sale"));
   const canCancel = $derived(has("order.cancel_customer_sale"));
+  const canSend = $derived(has("order.send"));
 
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -672,6 +697,92 @@
   const paid = $derived(
     (order?.payments ?? []).reduce((acc, p) => acc + p.amountMinor, 0),
   );
+
+  // ---- Send to customer — deep-link composer -------------------------------
+  // Renders the order as a receipt and offers a WhatsApp / email deep link (or
+  // a shareable PDF). Composer-only: opening a link or sharing the PDF is the
+  // send — nothing is logged.
+  const CHANNELS = ["whatsapp", "email", "manual"];
+  interface Composer {
+    channel: string;
+    recipientOverride: string;
+    /** WhatsApp only: "text" = wa.me deep link, "pdf" = share the receipt PDF. */
+    format: "text" | "pdf";
+  }
+  let composer = $state<Composer | null>(null);
+  let previewing = $state(false);
+  let sharing = $state(false);
+
+  // The rendered draft (body + resolved recipient + deep link) for the current
+  // composer channel / recipient.
+  const sendDraft = $derived($SendDraftQuery.data?.orderSendDraft);
+  // The receipt PDF goes through the console's own cookie-authenticated proxy.
+  const pdfHref = $derived(order ? `/orders/${order.id}/receipt.pdf` : "#");
+
+  async function previewSend() {
+    const c = composer;
+    if (!c || !order) return;
+    previewing = true;
+    error = null;
+    try {
+      // NetworkOnly — the rendered body embeds the business name / greeting /
+      // footer and the customer's contact, none of which are query variables,
+      // so a cached draft would keep showing stale details. Always re-render.
+      await SendDraftQuery.fetch({
+        policy: "NetworkOnly",
+        variables: {
+          orderId: order.id,
+          channel: c.channel as never,
+          recipientOverride: c.recipientOverride.trim() || null,
+        },
+      });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      previewing = false;
+    }
+  }
+
+  function startCompose() {
+    composer = { channel: "whatsapp", recipientOverride: "", format: "text" };
+    previewSend();
+  }
+
+  /**
+   * Share the receipt PDF via the device's native share sheet (Web Share API)
+   * so the clerk can pick WhatsApp and the PDF goes as an attachment — a wa.me
+   * link can only carry text, never a file. The OS share sheet picks the
+   * recipient. A dismissed share sheet (AbortError) is a no-op, not a failure.
+   */
+  async function sharePdf() {
+    if (!order) return;
+    sharing = true;
+    error = null;
+    try {
+      const res = await fetch(pdfHref, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`PDF unavailable (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], `receipt-${order.id}.pdf`, {
+        type: "application/pdf",
+      });
+      if (!navigator.canShare?.({ files: [file] })) {
+        error =
+          "This device can't share files. Use Download PDF, then attach it in WhatsApp.";
+        return;
+      }
+      const caption = `${sendDraft?.subject ?? "Receipt"} — see the attached PDF.`;
+      await navigator.share({
+        files: [file],
+        title: sendDraft?.subject ?? "Receipt",
+        text: caption,
+      });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // dismissed
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      sharing = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -770,6 +881,7 @@
           <tr>
             <th class="px-4 py-2 font-medium">Item</th>
             <th class="px-4 py-2 text-right font-medium">Qty</th>
+            <th class="px-4 py-2 text-right font-medium">Cost</th>
             <th class="px-4 py-2 text-right font-medium">Price</th>
             <th class="px-4 py-2 text-right font-medium">Discount</th>
             <th class="px-4 py-2 text-right font-medium">Line total</th>
@@ -838,6 +950,9 @@
                   {i.qty}
                 {/if}
               </td>
+              <td class="px-4 py-2 text-right text-muted-foreground">
+                {formatMoney(i.snapshotCostMinor)}
+              </td>
               <td class="px-4 py-2 text-right">
                 {#if cellEdit?.id === i.id && cellEdit.field === "price"}
                   <MoneyInput
@@ -899,7 +1014,7 @@
           {#if visibleItems.length === 0}
             <tr>
               <td
-                colspan={isOpen ? 6 : 5}
+                colspan={isOpen ? 7 : 6}
                 class="px-4 py-8 text-center text-muted-foreground"
               >
                 No line items.
@@ -910,7 +1025,7 @@
         <tfoot class="bg-muted/30">
           <tr>
             <td
-              colspan={isOpen ? 5 : 4}
+              colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium"
             >
               Live lines total
@@ -921,7 +1036,7 @@
           </tr>
           <tr>
             <td
-              colspan={isOpen ? 5 : 4}
+              colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium"
             >
               Cached order total
@@ -1005,7 +1120,8 @@
                 </div>
                 <div class="truncate text-xs text-muted-foreground">
                   {draft.row.sku}{draft.row.label ? ` · ${draft.row.label}` : ""}
-                  · {draft.row.unit} · base {formatMoney(draft.row.priceMinor)}
+                  · {draft.row.unit} · cost {formatMoney(draft.row.costMinor)} · base
+                  {formatMoney(draft.row.priceMinor)}
                   {#if draft.productKind !== "physical"}
                     · {draft.productKind}
                   {/if}
@@ -1132,6 +1248,146 @@
         </table>
       </div>
     </div>
+
+    <!-- Send to customer -->
+    <section class="space-y-3 rounded-lg border bg-card p-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold">Send to customer</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !canSend || order.status === "cancelled"}
+          onclick={startCompose}>Compose</Button
+        >
+      </div>
+
+      {#if !composer}
+        <p class="text-sm text-muted-foreground">
+          Send {order.snapshotCustomerName ?? "the customer"} their receipt over
+          WhatsApp or email, or share it as a PDF.
+        </p>
+      {:else}
+        <div class="space-y-3 rounded-md border bg-background p-4">
+          <div class="grid grid-cols-2 gap-3">
+            <label class="space-y-1">
+              <span class="text-xs font-medium">Channel</span>
+              <Select bind:value={composer.channel} onchange={previewSend}>
+                {#each CHANNELS as c (c)}<option value={c}>{c}</option>{/each}
+              </Select>
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium">
+                Recipient override
+                <span class="text-muted-foreground">(optional)</span>
+              </span>
+              <Input
+                bind:value={composer.recipientOverride}
+                placeholder={composer.channel === "email"
+                  ? "Customer email"
+                  : "Customer phone"}
+                onblur={previewSend}
+              />
+            </label>
+          </div>
+
+          {#if composer.channel === "whatsapp"}
+            <label class="space-y-1">
+              <span class="text-xs font-medium">Format</span>
+              <Select bind:value={composer.format}>
+                <option value="text">Message text</option>
+                <option value="pdf">PDF attachment</option>
+              </Select>
+            </label>
+          {/if}
+
+          {#if previewing}
+            <p class="text-sm text-muted-foreground">Rendering preview…</p>
+          {:else if sendDraft}
+            <div class="space-y-2">
+              {#if composer.channel !== "manual"}
+                {@const pdfMode =
+                  composer.channel === "whatsapp" && composer.format === "pdf"}
+                <p class="text-xs">
+                  <span class="font-medium">Recipient:</span>
+                  {sendDraft.recipient ?? "—"}
+                  {#if pdfMode}
+                    <span class="text-muted-foreground"
+                      >— you'll pick the contact in the share sheet</span
+                    >
+                  {:else if !sendDraft.recipientAvailable}
+                    <Badge class="ml-1 bg-amber-100 text-amber-800">
+                      {sendDraft.recipient
+                        ? "unusable for this channel"
+                        : "none on file — add an override"}
+                    </Badge>
+                  {/if}
+                </p>
+              {/if}
+              {#if composer.channel === "email"}
+                <p class="text-xs">
+                  <span class="font-medium">Subject:</span>
+                  {sendDraft.subject}
+                </p>
+              {/if}
+              <Textarea
+                value={sendDraft.body}
+                readonly
+                class="h-56 resize-none font-mono text-xs"
+              />
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              {#if composer.channel === "manual"}
+                <span class="text-xs text-muted-foreground">
+                  Manual send — copy the message above and send it off-system.
+                </span>
+              {:else if composer.channel === "whatsapp" && composer.format === "pdf"}
+                <Button size="sm" disabled={busy || sharing} onclick={sharePdf}>
+                  {sharing ? "Preparing PDF…" : "Send PDF to WhatsApp"}
+                </Button>
+                <span class="text-xs text-muted-foreground">
+                  Attaches the receipt PDF — pick the customer in the share sheet.
+                </span>
+              {:else if sendDraft.deepLink}
+                <a
+                  href={sendDraft.deepLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Open in {composer.channel === "whatsapp" ? "WhatsApp" : "email"}
+                </a>
+              {:else}
+                <span class="text-xs text-muted-foreground">
+                  Add a usable recipient to enable the {composer.channel} link.
+                </span>
+              {/if}
+              <a
+                href={pdfHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent"
+              >
+                Download PDF
+              </a>
+            </div>
+          {/if}
+
+          <p class="text-xs text-muted-foreground">
+            Opening the link or sharing the PDF sends it directly — nothing is
+            logged.
+          </p>
+          <div class="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onclick={() => (composer = null)}>Close</Button
+            >
+          </div>
+        </div>
+      {/if}
+    </section>
 
     {#if isOpen}
       <!-- Payment / close / cancel -->

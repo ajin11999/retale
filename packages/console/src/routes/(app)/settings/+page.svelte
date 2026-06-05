@@ -16,6 +16,8 @@
         logoUrl
         poGreeting
         poFooter
+        receiptGreeting
+        receiptFooter
         updatedAt
       }
     }
@@ -37,6 +39,8 @@
       $email: String
       $poGreeting: String
       $poFooter: String
+      $receiptGreeting: String
+      $receiptFooter: String
     ) {
       updateBusinessSettings(
         name: $name
@@ -44,12 +48,16 @@
         email: $email
         poGreeting: $poGreeting
         poFooter: $poFooter
+        receiptGreeting: $receiptGreeting
+        receiptFooter: $receiptFooter
       ) {
         name
         phone
         email
         poGreeting
         poFooter
+        receiptGreeting
+        receiptFooter
         updatedAt
       }
     }
@@ -69,6 +77,8 @@
   let email = $state("");
   let poGreeting = $state("");
   let poFooter = $state("");
+  let receiptGreeting = $state("");
+  let receiptFooter = $state("");
   let loadedFor = $state<string | null>(null);
 
   $effect(() => {
@@ -82,6 +92,8 @@
       email = settings.email ?? "";
       poGreeting = settings.poGreeting ?? "";
       poFooter = settings.poFooter ?? "";
+      receiptGreeting = settings.receiptGreeting ?? "";
+      receiptFooter = settings.receiptFooter ?? "";
       loadedFor = key;
     }
   });
@@ -103,6 +115,8 @@
         email: email.trim(),
         poGreeting,
         poFooter,
+        receiptGreeting,
+        receiptFooter,
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -289,6 +303,34 @@
           bind:value={poFooter}
           disabled={!canManage}
           placeholder="e.g. Thanks! — {'{business}'}"
+          class="min-h-16"
+        />
+      </label>
+    </section>
+
+    <section class="space-y-3 rounded-lg border bg-card p-4">
+      <div>
+        <h2 class="text-sm font-semibold">Customer receipt template</h2>
+        <p class="text-xs text-muted-foreground">
+          Wrapped around the auto-generated receipt line items when sending a sale
+          to a customer over WhatsApp / email.
+        </p>
+      </div>
+      <label class="block space-y-1">
+        <span class="text-sm font-medium">Greeting</span>
+        <Textarea
+          bind:value={receiptGreeting}
+          disabled={!canManage}
+          placeholder="e.g. Terima kasih atas pembelian Anda:"
+          class="min-h-16"
+        />
+      </label>
+      <label class="block space-y-1">
+        <span class="text-sm font-medium">Footer</span>
+        <Textarea
+          bind:value={receiptFooter}
+          disabled={!canManage}
+          placeholder="e.g. Barang yang sudah dibeli tidak dapat dikembalikan."
           class="min-h-16"
         />
       </label>

@@ -49,6 +49,8 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
     logoUrl: null,
     poGreeting: null,
     poFooter: null,
+    receiptGreeting: null,
+    receiptFooter: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -61,6 +63,8 @@ export async function updateBusinessSettings(patch: {
   email?: string | null;
   poGreeting?: string | null;
   poFooter?: string | null;
+  receiptGreeting?: string | null;
+  receiptFooter?: string | null;
 }): Promise<BusinessSettings> {
   const existing = await db.query.businessSettings.findFirst({
     where: eq(businessSettings.id, SINGLETON_ID),
@@ -75,6 +79,12 @@ export async function updateBusinessSettings(patch: {
         ...(patch.email !== undefined && { email: patch.email }),
         ...(patch.poGreeting !== undefined && { poGreeting: patch.poGreeting }),
         ...(patch.poFooter !== undefined && { poFooter: patch.poFooter }),
+        ...(patch.receiptGreeting !== undefined && {
+          receiptGreeting: patch.receiptGreeting,
+        }),
+        ...(patch.receiptFooter !== undefined && {
+          receiptFooter: patch.receiptFooter,
+        }),
       })
       .where(eq(businessSettings.id, SINGLETON_ID));
   } else {
@@ -85,6 +95,8 @@ export async function updateBusinessSettings(patch: {
       email: patch.email ?? null,
       poGreeting: patch.poGreeting ?? null,
       poFooter: patch.poFooter ?? null,
+      receiptGreeting: patch.receiptGreeting ?? null,
+      receiptFooter: patch.receiptFooter ?? null,
     });
   }
   return getBusinessSettings();

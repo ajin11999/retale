@@ -146,7 +146,7 @@ export interface PurchaseSendDraft {
   pdfUrl: string;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Normalize an Indonesian phone number for `wa.me`: strip non-digits, turn a
