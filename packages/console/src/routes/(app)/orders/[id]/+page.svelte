@@ -265,14 +265,16 @@
   let draft = $state<{ row: PickRow; productKind: string } | null>(null);
 
   const pickMatches = $derived.by(() => {
-    const q = variantSearch.trim().toLowerCase();
-    const filtered = q
-      ? pickRows.filter(
-          (r) =>
-            r.productName.toLowerCase().includes(q) ||
-            r.sku.toLowerCase().includes(q) ||
-            (r.label?.toLowerCase().includes(q) ?? false),
-        )
+    // AND-match each whitespace-separated token against the row's combined
+    // name/SKU/label text. Tokens may match different parts, so a query like
+    // "nkn 6201" still finds "Bearing \ 6201 2RS \ NKN" even though that string
+    // never contains the two words contiguously.
+    const tokens = variantSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const filtered = tokens.length
+      ? pickRows.filter((r) => {
+          const hay = `${r.productName} ${r.sku} ${r.label ?? ""}`.toLowerCase();
+          return tokens.every((t) => hay.includes(t));
+        })
       : pickRows;
     return filtered.slice(0, 30);
   });

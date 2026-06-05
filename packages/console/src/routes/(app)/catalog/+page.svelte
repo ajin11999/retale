@@ -1,6 +1,7 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import { page } from "$app/state";
+  import { treePathMap } from "$lib/utils";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -24,6 +25,7 @@
       categories {
         id
         name
+        parentId
       }
       catalogPublishes(limit: 25) {
         id
@@ -61,8 +63,11 @@
   const Store = $derived(data.CatalogManage);
   const products = $derived($Store.data?.products ?? []);
   const categories = $derived($Store.data?.categories ?? []);
+  // Breadcrumb path per category ("Electronics › Phones › Cases") so same-named
+  // children under different parents are distinguishable.
+  const categoryPaths = $derived(treePathMap(categories));
   const categoryName = (id: string | null | undefined) =>
-    id ? (categories.find((c) => c.id === id)?.name ?? "—") : "—";
+    id ? (categoryPaths.get(id) ?? "—") : "—";
   const publishes = $derived($Store.data?.catalogPublishes ?? []);
 
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -75,18 +80,20 @@
   let visibilityFilter = $state<"all" | "visible" | "hidden">("all");
 
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
+    // AND-match whitespace-separated tokens so a query's words may match in any
+    // order across the breadcrumb-style name ("nkn 6201" finds "Bearing \ 6201
+    // 2RS \ NKN").
+    const tokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
     let list = products;
     if (visibilityFilter !== "all") {
       const want = visibilityFilter === "visible";
       list = list.filter((p) => p.onlineVisible === want);
     }
-    if (q) {
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.publicName ?? "").toLowerCase().includes(q),
-      );
+    if (tokens.length) {
+      list = list.filter((p) => {
+        const hay = `${p.name} ${p.publicName ?? ""}`.toLowerCase();
+        return tokens.every((t) => hay.includes(t));
+      });
     }
     // Hidden first then alpha — the manager's goal is usually to find
     // products that should be shown.

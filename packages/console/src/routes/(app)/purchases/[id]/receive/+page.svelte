@@ -4,8 +4,9 @@
   import type { Viewer } from "../../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
+  import { treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Bundled query: purchase header (for context + line metadata),
@@ -48,6 +49,7 @@
       locations(includeArchived: false) {
         id
         name
+        parentId
       }
       products(includeArchived: true) {
         id
@@ -107,6 +109,12 @@
   const draft = $derived($ReceivingCheck.data?.openReceivingCheck);
   const lines = $derived($ReceivingCheck.data?.receivingCheckLines ?? []);
   const locations = $derived($ReceivingCheck.data?.locations ?? []);
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
+  const locationOptions = $derived(
+    locations.map((l) => ({ value: l.id, label: locationPaths.get(l.id) ?? l.name })),
+  );
   const products = $derived($ReceivingCheck.data?.products ?? []);
 
   // Flat variant lookup so the lines grid can label by SKU / product name.
@@ -400,13 +408,13 @@
           commit.
         </p>
         <div class="flex items-end gap-2">
-          <label class="space-y-1">
+          <label class="space-y-1 w-56">
             <span class="text-xs font-medium">Target location</span>
-            <Select bind:value={startLocationId}>
-              {#each locations as l (l.id)}
-                <option value={l.id}>{l.name}</option>
-              {/each}
-            </Select>
+            <Combobox
+              options={locationOptions}
+              bind:value={startLocationId}
+              placeholder="Search location…"
+            />
           </label>
           <Button
             disabled={busy || !startLocationId || locations.length === 0}

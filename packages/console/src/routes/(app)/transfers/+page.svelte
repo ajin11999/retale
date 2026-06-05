@@ -6,9 +6,10 @@
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
+  import { treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -28,6 +29,7 @@
       locations {
         id
         name
+        parentId
       }
       products(includeArchived: true) {
         id
@@ -65,12 +67,19 @@
   const locations = $derived($TransferList.data?.locations ?? []);
   const products = $derived($TransferList.data?.products ?? []);
 
-  const locationName = (id: string) =>
-    locations.find((l) => l.id === id)?.name ?? "Unknown";
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
+  const locationName = (id: string) => locationPaths.get(id) ?? "Unknown";
+
+  // Searchable Combobox options ({ value, label }) for locations + variants.
+  const locationOptions = $derived(
+    locations.map((l) => ({ value: l.id, label: locationName(l.id) })),
+  );
 
   // Flat variant options for the item picker.
   interface VariantOption {
-    id: string;
+    value: string;
     label: string;
   }
   const variantOptions = $derived.by<VariantOption[]>(() => {
@@ -78,7 +87,7 @@
     for (const p of products) {
       for (const v of p.variants) {
         const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        out.push({ id: v.id, label: `${p.name} · ${suffix}` });
+        out.push({ value: v.id, label: `${p.name} · ${suffix}` });
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
@@ -195,21 +204,19 @@
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Source location</span>
-          <Select bind:value={draft.sourceLocationId}>
-            <option value="">— Pick —</option>
-            {#each locations as l (l.id)}
-              <option value={l.id}>{l.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={locationOptions}
+            bind:value={draft.sourceLocationId}
+            placeholder="Search location…"
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Target location</span>
-          <Select bind:value={draft.targetLocationId}>
-            <option value="">— Pick —</option>
-            {#each locations as l (l.id)}
-              <option value={l.id}>{l.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={locationOptions}
+            bind:value={draft.targetLocationId}
+            placeholder="Search location…"
+          />
         </label>
       </div>
 
@@ -217,12 +224,13 @@
         <span class="text-sm font-medium">Lines</span>
         {#each draft.items as row, i (i)}
           <div class="flex items-center gap-2">
-            <Select bind:value={row.variantId}>
-              <option value="">— Pick a variant —</option>
-              {#each variantOptions as v (v.id)}
-                <option value={v.id}>{v.label}</option>
-              {/each}
-            </Select>
+            <div class="flex-1">
+              <Combobox
+                options={variantOptions}
+                bind:value={row.variantId}
+                placeholder="Search variant…"
+              />
+            </div>
             <Input type="number" bind:value={row.qty} class="w-24" />
             <IconButton
               icon={Trash2}

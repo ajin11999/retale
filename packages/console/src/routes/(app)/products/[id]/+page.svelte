@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { marked } from "marked";
   import { Pencil, SlidersHorizontal, Trash2 } from "@lucide/svelte";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, treePathMap } from "$lib/utils";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
@@ -63,10 +64,12 @@
       categories {
         id
         name
+        parentId
       }
       locations {
         id
         name
+        parentId
       }
     }
   `);
@@ -91,6 +94,25 @@
 
   let { data }: { data: PageData } = $props();
   const ProductDetail = $derived(data.ProductDetail);
+
+  // A category created in another tab — e.g. the Categories screen — won't
+  // appear in the category picker here, since Houdini serves the cached query.
+  // Refetch when this tab regains visibility so returning here picks up
+  // categories created elsewhere. Edits in progress are plain component state,
+  // so the refetch doesn't disturb them.
+  $effect(() => {
+    const onVisible = () => {
+      const id = page.params.id;
+      if (id && document.visibilityState === "visible") {
+        ProductDetail.fetch({
+          variables: { id },
+          policy: CachePolicy.NetworkOnly,
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  });
 
   const UpdateProduct = graphql(`
     mutation ConsoleUpdateProduct(
@@ -240,9 +262,21 @@
 
   const product = $derived($ProductDetail.data?.product);
   const categories = $derived($ProductDetail.data?.categories ?? []);
+  // Breadcrumb path per category ("Electronics › Phones › Cases") so same-named
+  // children under different parents are distinguishable.
+  const categoryPaths = $derived(treePathMap(categories));
+  // Combobox options: a leading "Uncategorized" row (empty value) so the
+  // category can be cleared, then one row per category.
+  const categoryOptions = $derived([
+    { value: "", label: "Uncategorized" },
+    ...categories.map((c) => ({ value: c.id, label: categoryPaths.get(c.id) ?? c.name })),
+  ]);
   const locations = $derived($ProductDetail.data?.locations ?? []);
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
   const locationName = (id: string | null) =>
-    id ? (locations.find((l) => l.id === id)?.name ?? "Unknown") : "Unlocated";
+    id ? (locationPaths.get(id) ?? "Unknown") : "Unlocated";
 
   // ---- Viewer permissions --------------------------------------------------
   // The API gates product writes, with extra keys for tax / price / cost.
@@ -456,8 +490,160 @@
     if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
   }
 
+  // ---- Inline cell edit ----------------------------------------------------
+  // Click a variant's SKU / label / price / cost cell to edit just that field
+  // in place — the common quick tweak, without opening the full variant form.
+  // Unit stays in the form (structural); stock has its own adjustment flow.
+  type VariantCellField = "sku" | "label" | "price" | "cost";
+  let variantCellEdit = $state<{ id: string; field: VariantCellField } | null>(
+    null,
+  );
+  // SKU + label edit through a raw <input> (string); price + cost edit through
+  // MoneyInput (integer minor units), so they need separate bindings.
+  let variantCellStr = $state("");
+  let variantCellMoney = $state<number | null>(null);
+
+  // Focus + select the inline <input> the moment it mounts, so you can type or
+  // tab straight in. (MoneyInput does this itself via its `autofocus` prop.)
+  function selectOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  function startVariantCellEdit(
+    v: NonNullable<typeof product>["variants"][number],
+    field: VariantCellField,
+  ) {
+    if (!canEdit) return;
+    if (field === "price" && !canEditPrice) return;
+    if (field === "cost" && !canEditCost) return;
+    if (field === "price") variantCellMoney = v.priceMinor;
+    else if (field === "cost") variantCellMoney = v.costMinor;
+    else variantCellStr = field === "sku" ? v.sku : (v.label ?? "");
+    variantCellEdit = { id: v.id, field };
+  }
+
+  // Commit the in-flight cell edit. Quiet — no busy/banner churn for a
+  // one-field tweak; only surface failures. UpdateVariant returns the changed
+  // scalars, which Houdini normalizes, so the cell updates at once (no refetch).
+  async function commitVariantCell() {
+    const c = variantCellEdit;
+    if (!c || !product) return;
+    const v = product.variants.find((x) => x.id === c.id);
+    if (!v) {
+      variantCellEdit = null;
+      return;
+    }
+
+    const patch: {
+      id: string;
+      sku?: string;
+      label?: string | null;
+      priceMinor?: number;
+      costMinor?: number;
+    } = { id: c.id };
+
+    if (c.field === "sku") {
+      const s = variantCellStr.trim();
+      if (!s) {
+        feedback = { ok: false, text: "SKU can't be empty." };
+        return;
+      }
+      if (s === v.sku) {
+        variantCellEdit = null;
+        return;
+      }
+      patch.sku = s;
+    } else if (c.field === "label") {
+      const s = variantCellStr.trim();
+      if ((s || null) === (v.label ?? null)) {
+        variantCellEdit = null;
+        return;
+      }
+      patch.label = s || null;
+    } else if (c.field === "price") {
+      const n = variantCellMoney ?? 0;
+      if (n === v.priceMinor) {
+        variantCellEdit = null;
+        return;
+      }
+      patch.priceMinor = n;
+    } else {
+      const n = variantCellMoney ?? 0;
+      if (n === v.costMinor) {
+        variantCellEdit = null;
+        return;
+      }
+      patch.costMinor = n;
+    }
+
+    variantCellEdit = null;
+    try {
+      const res = await UpdateVariant.mutate(patch);
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      return;
+    }
+    // The loaded ProductDetail store serves its cached copy and won't reflect
+    // the mutation's normalized scalars without a network round-trip — refetch
+    // NetworkOnly so the edited cell shows the new value (no hard refresh).
+    await ProductDetail.fetch({
+      variables: { id: product.id },
+      policy: "NetworkOnly",
+    });
+  }
+
+  // Enter commits, Escape abandons. Escape nulls the edit first so the input
+  // unmounts and the resulting blur becomes a no-op (commitVariantCell guards).
+  function variantCellKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitVariantCell();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      variantCellEdit = null;
+    }
+  }
+
   const categoryName = (id: string | null | undefined) =>
-    id ? (categories.find((c) => c.id === id)?.name ?? "Unknown") : "—";
+    id ? (categoryPaths.get(id) ?? "Unknown") : "—";
+
+  // ---- Variant margin pill -------------------------------------------------
+  // Gross margin = (price − cost) / price, ignoring tax. Computed live: when a
+  // row's price or cost cell is being inline-edited, read the in-flight
+  // `variantCellMoney` so the pill moves as you type, before commit/refetch.
+  function variantMarginBps(
+    v: NonNullable<typeof product>["variants"][number],
+  ): number | null {
+    const editing = variantCellEdit?.id === v.id;
+    const price =
+      editing && variantCellEdit?.field === "price"
+        ? (variantCellMoney ?? 0)
+        : v.priceMinor;
+    const cost =
+      editing && variantCellEdit?.field === "cost"
+        ? (variantCellMoney ?? 0)
+        : v.costMinor;
+    if (price <= 0) return null; // undefined margin
+    return Math.round(((price - cost) / price) * 10000);
+  }
+
+  // Red below cost, orange below the product's own min-margin floor, green at
+  // or above it. With no floor set, any positive margin reads green.
+  function marginPillClass(bps: number | null): string {
+    if (bps == null) return "bg-muted text-muted-foreground";
+    if (bps < 0) return "bg-red-100 text-red-700";
+    const floor = form.minMarginBps ?? 0;
+    if (bps < floor) return "bg-orange-100 text-orange-700";
+    return "bg-emerald-100 text-emerald-700";
+  }
+
+  const formatMarginBps = (bps: number | null): string =>
+    bps == null ? "—" : `${(bps / 100).toFixed(1)}%`;
 
   // ---- Stock adjustment ----------------------------------------------------
   // A manual write-on / write-off against one variant at one location.
@@ -720,12 +906,12 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Category</span>
-          <Select bind:value={form.categoryId} disabled={!canEdit}>
-            <option value="">Uncategorized</option>
-            {#each categories as c (c.id)}
-              <option value={c.id}>{c.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={categoryOptions}
+            bind:value={form.categoryId}
+            placeholder="Search category…"
+            disabled={!canEdit}
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Price mode</span>
@@ -938,18 +1124,109 @@
             <th class="py-1.5 font-medium">Unit</th>
             <th class="py-1.5 text-right font-medium">Price</th>
             <th class="py-1.5 text-right font-medium">Cost</th>
+            <th class="py-1.5 text-right font-medium">Margin</th>
             <th class="py-1.5 text-right font-medium">Stock</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {#each product.variants as v (v.id)}
+            {@const m = variantMarginBps(v)}
             <tr class="border-b last:border-0">
-              <td class="py-1.5 font-mono text-xs">{v.sku}</td>
-              <td class="py-1.5">{v.label ?? "—"}</td>
+              <td class="py-1.5 font-mono text-xs">
+                {#if variantCellEdit?.id === v.id && variantCellEdit.field === "sku"}
+                  <input
+                    bind:value={variantCellStr}
+                    use:selectOnMount
+                    onkeydown={variantCellKeydown}
+                    onblur={commitVariantCell}
+                    class="h-7 w-full rounded-md border border-input bg-background px-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                {:else if canEdit}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 text-left hover:bg-accent"
+                    title="Edit SKU"
+                    onclick={() => startVariantCellEdit(v, "sku")}>{v.sku}</button
+                  >
+                {:else}
+                  {v.sku}
+                {/if}
+              </td>
+              <td class="py-1.5">
+                {#if variantCellEdit?.id === v.id && variantCellEdit.field === "label"}
+                  <input
+                    bind:value={variantCellStr}
+                    use:selectOnMount
+                    onkeydown={variantCellKeydown}
+                    onblur={commitVariantCell}
+                    class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                {:else if canEdit}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 text-left hover:bg-accent"
+                    title="Edit label"
+                    onclick={() => startVariantCellEdit(v, "label")}
+                    >{v.label ?? "—"}</button
+                  >
+                {:else}
+                  {v.label ?? "—"}
+                {/if}
+              </td>
               <td class="py-1.5">{v.unit}</td>
-              <td class="py-1.5 text-right">{formatMoney(v.priceMinor)}</td>
-              <td class="py-1.5 text-right">{formatMoney(v.costMinor)}</td>
+              <td class="py-1.5 text-right tabular-nums">
+                {#if variantCellEdit?.id === v.id && variantCellEdit.field === "price"}
+                  <MoneyInput
+                    autofocus
+                    bind:value={variantCellMoney}
+                    onkeydown={variantCellKeydown}
+                    onblur={commitVariantCell}
+                    class="ml-auto h-7 w-28 px-2 text-right tabular-nums"
+                  />
+                {:else if canEdit && canEditPrice}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit price"
+                    onclick={() => startVariantCellEdit(v, "price")}
+                    >{formatMoney(v.priceMinor)}</button
+                  >
+                {:else}
+                  {formatMoney(v.priceMinor)}
+                {/if}
+              </td>
+              <td class="py-1.5 text-right tabular-nums">
+                {#if variantCellEdit?.id === v.id && variantCellEdit.field === "cost"}
+                  <MoneyInput
+                    autofocus
+                    bind:value={variantCellMoney}
+                    onkeydown={variantCellKeydown}
+                    onblur={commitVariantCell}
+                    class="ml-auto h-7 w-28 px-2 text-right tabular-nums"
+                  />
+                {:else if canEdit && canEditCost}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit cost"
+                    onclick={() => startVariantCellEdit(v, "cost")}
+                    >{formatMoney(v.costMinor)}</button
+                  >
+                {:else}
+                  {formatMoney(v.costMinor)}
+                {/if}
+              </td>
+              <td class="py-1.5 text-right">
+                <span
+                  class="inline-block rounded-full px-2 py-0.5 text-xs font-medium tabular-nums {marginPillClass(
+                    m,
+                  )}"
+                  title="Gross margin (tax ignored)"
+                >
+                  {formatMarginBps(m)}
+                </span>
+              </td>
               <td class="py-1.5 text-right">{v.totalQty}</td>
               <td class="py-1.5 text-right">
                 <span class="inline-flex items-center gap-0.5">
@@ -973,7 +1250,7 @@
           {/each}
           {#if product.variants.length === 0}
             <tr>
-              <td colspan="7" class="py-6 text-center text-muted-foreground">
+              <td colspan="8" class="py-6 text-center text-muted-foreground">
                 No variants yet.
               </td>
             </tr>

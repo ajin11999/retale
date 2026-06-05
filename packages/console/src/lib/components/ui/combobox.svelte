@@ -60,11 +60,22 @@
     if (!open) text = selectedLabel;
   });
 
+  // Lowercased labels, recomputed only when `options` changes — not per
+  // keystroke — so each search pass skips re-lowercasing every label.
+  const haystacks = $derived(options.map((o) => o.label.toLowerCase()));
+
+  // AND-match each whitespace-separated token against the label. The label is
+  // often a breadcrumb path ("Electronics › Phones › Cases"), so token matching
+  // lets a query span levels ("electronics cases") even though the `›` separators
+  // break a single contiguous substring match. A single token is a plain
+  // substring search, unchanged from before.
   const filtered = $derived.by(() => {
     if (!dirty) return options;
-    const q = text.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.label.toLowerCase().includes(q));
+    const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return options;
+    return options.filter((_o, i) =>
+      tokens.every((t) => haystacks[i].includes(t)),
+    );
   });
 
   // The "+ Create …" row shows once the user has typed something and the parent

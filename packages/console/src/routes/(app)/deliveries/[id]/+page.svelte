@@ -2,9 +2,10 @@
   import { graphql, CachePolicy } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, treePathMap } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -46,6 +47,7 @@
       locations(includeArchived: false) {
         id
         name
+        parentId
       }
       couriers: vendors(kind: expedition) {
         id
@@ -175,6 +177,17 @@
   const delivery = $derived($Detail.data?.delivery ?? null);
   const locations = $derived($Detail.data?.locations ?? []);
   const couriers = $derived($Detail.data?.couriers ?? []);
+  // { value, label } shapes for the searchable Comboboxes (location + courier
+  // pickers). Each empty-row prompt is prepended at the call site.
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
+  const locationOptions = $derived(
+    locations.map((l) => ({ value: l.id, label: locationPaths.get(l.id) ?? l.name })),
+  );
+  const courierOptions = $derived(
+    couriers.map((c) => ({ value: c.id, label: c.name })),
+  );
   const openPurchases = $derived($Detail.data?.openPurchases ?? []);
   const productList = $derived($Detail.data?.products ?? []);
   const items = $derived(delivery?.items ?? []);
@@ -718,11 +731,11 @@
               </label>
               <label class="space-y-1">
                 <span class="text-sm font-medium">Target location</span>
-                <Select bind:value={hTargetLocationId}>
-                  {#each locations as l (l.id)}
-                    <option value={l.id}>{l.name}</option>
-                  {/each}
-                </Select>
+                <Combobox
+                  options={locationOptions}
+                  bind:value={hTargetLocationId}
+                  placeholder="Search location…"
+                />
               </label>
             </div>
             <div class="mt-3 flex gap-2">
@@ -739,7 +752,11 @@
               Delivery {fmtDate(delivery.date)}
             </h1>
             <p class="text-sm text-muted-foreground">
-              {delivery.biller ?? "No biller"} → {delivery.targetLocation?.name ?? "—"}
+              {delivery.biller ?? "No biller"} → {locationPaths.get(
+                delivery.targetLocationId,
+              ) ??
+                delivery.targetLocation?.name ??
+                "—"}
               {#if delivery.deliveredAt}
                 · delivered {fmtDate(delivery.deliveredAt)}
               {/if}
@@ -1025,12 +1042,13 @@
         {:else}
           <Input bind:value={eDesc} class="flex-1" />
           <MoneyInput bind:value={eCost} class="w-32" />
-          <Select bind:value={eVendorId} class="w-36">
-            <option value="">— No courier —</option>
-            {#each couriers as c (c.id)}
-              <option value={c.id}>{c.name}</option>
-            {/each}
-          </Select>
+          <div class="w-36">
+            <Combobox
+              options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
+              bind:value={eVendorId}
+              placeholder="Search courier…"
+            />
+          </div>
         {/if}
         <Select bind:value={eParentId} class="w-36" title="Nest this line under a cost line">
           <option value="">↳ Top level</option>
@@ -1174,12 +1192,11 @@
         </label>
         <label class="w-40 space-y-1">
           <span class="text-xs font-medium">Courier (AP)</span>
-          <Select bind:value={nVendorId}>
-            <option value="">— None —</option>
-            {#each couriers as c (c.id)}
-              <option value={c.id}>{c.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={[{ value: "", label: "— None —" }, ...courierOptions]}
+            bind:value={nVendorId}
+            placeholder="Search courier…"
+          />
         </label>
         <Button
           size="sm"

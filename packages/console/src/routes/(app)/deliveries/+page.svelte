@@ -3,9 +3,10 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, treePathMap } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
@@ -27,6 +28,7 @@
       locations(includeArchived: false) {
         id
         name
+        parentId
       }
     }
   `);
@@ -51,6 +53,13 @@
   const DeliveryList = $derived(data.DeliveryList);
   const deliveries = $derived($DeliveryList.data?.deliveries ?? []);
   const locations = $derived($DeliveryList.data?.locations ?? []);
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
+  const locationName = (id: string) => locationPaths.get(id) ?? "—";
+  const locationOptions = $derived(
+    locations.map((l) => ({ value: l.id, label: locationName(l.id) })),
+  );
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -157,12 +166,11 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Target location</span>
-          <Select bind:value={newTargetLocationId}>
-            <option value="" disabled>— Pick a location —</option>
-            {#each locations as l (l.id)}
-              <option value={l.id}>{l.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={locationOptions}
+            bind:value={newTargetLocationId}
+            placeholder="Search location…"
+          />
         </label>
         <Button
           size="sm"
@@ -206,7 +214,11 @@
                 </a>
               </td>
               <td class="px-4 py-2">{d.biller ?? "—"}</td>
-              <td class="px-4 py-2">{d.targetLocation?.name ?? "—"}</td>
+              <td class="px-4 py-2"
+                >{locationPaths.get(d.targetLocationId) ??
+                  d.targetLocation?.name ??
+                  "—"}</td
+              >
               <td class="px-4 py-2">
                 {#if d.purchaseId}
                   <a

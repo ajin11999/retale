@@ -6,6 +6,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -337,6 +338,13 @@
       a.productName.localeCompare(b.productName) || a.label.localeCompare(b.label),
     );
   });
+  // { value, label } shape for the searchable Combobox.
+  const availableVariantOptions = $derived(
+    availableVariants.map((v) => ({
+      value: v.id,
+      label: `${v.productName} — ${v.label}`,
+    })),
+  );
 
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
@@ -987,14 +995,11 @@
             <div class="grid grid-cols-[1fr_10rem_auto_auto] items-end gap-2">
               <label class="space-y-1">
                 <span class="text-xs font-medium">Variant</span>
-                <Select bind:value={codeVariantId}>
-                  <option value="" disabled>— Pick a variant —</option>
-                  {#each availableVariants as v (v.id)}
-                    <option value={v.id}>
-                      {v.productName} — {v.label}
-                    </option>
-                  {/each}
-                </Select>
+                <Combobox
+                  options={availableVariantOptions}
+                  bind:value={codeVariantId}
+                  placeholder="Search variant…"
+                />
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Vendor code</span>

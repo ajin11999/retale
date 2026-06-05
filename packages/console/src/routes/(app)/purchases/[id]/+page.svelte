@@ -313,6 +313,12 @@
 
   const purchase = $derived($PurchaseDetail.data?.purchase);
   const vendors = $derived($PurchaseDetail.data?.vendors ?? []);
+  // Searchable Combobox options for the header vendor; the leading empty row
+  // keeps the "ad-hoc vendor" (no vendor on file) choice.
+  const vendorOptions = $derived([
+    { value: "", label: "— Ad-hoc vendor —" },
+    ...vendors.map((v) => ({ value: v.id, label: v.name })),
+  ]);
   const products = $derived($PurchaseDetail.data?.products ?? []);
 
   // Flat variant options for the item editor — "Product · SKU (label)".
@@ -1229,12 +1235,12 @@
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Vendor</span>
-          <Select bind:value={form.vendorId} disabled={!editable}>
-            <option value="">— Ad-hoc vendor —</option>
-            {#each vendors as v (v.id)}
-              <option value={v.id}>{v.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={vendorOptions}
+            bind:value={form.vendorId}
+            placeholder="Search vendor…"
+            disabled={!editable}
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Ad-hoc vendor name</span>

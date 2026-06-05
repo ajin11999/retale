@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { formatMoney } from "$lib/utils";
+  import { Check, Pencil, X } from "@lucide/svelte";
+  import { formatMoney, treePathMap } from "$lib/utils";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -32,6 +35,7 @@
       categories {
         id
         name
+        parentId
       }
     }
   `);
@@ -56,13 +60,55 @@
     }
   `);
 
+  // Quick-edit mutations. List-scoped document names so they don't collide with
+  // the detail page's ConsoleUpdateProduct / ConsoleUpdateVariant.
+  const UpdateProductName = graphql(`
+    mutation ConsoleListUpdateProductName($id: ID!, $name: String!) {
+      updateProduct(id: $id, name: $name) {
+        id
+        name
+      }
+    }
+  `);
+
+  const UpdateVariantPrice = graphql(`
+    mutation ConsoleListUpdateVariantPrice($id: ID!, $priceMinor: Float!) {
+      updateVariant(id: $id, priceMinor: $priceMinor) {
+        id
+        priceMinor
+      }
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const ProductList = $derived(data.ProductList);
 
-  const viewer = $derived(page.data.user as Viewer | undefined);
-  const canCreate = $derived(
-    !!viewer && viewer.permissions.includes("product.create"),
+  // Breadcrumb path per category ("Electronics › Phones › Cases") so same-named
+  // children under different parents are distinguishable in pickers + columns.
+  const categoryPaths = $derived(
+    treePathMap($ProductList.data?.categories ?? []),
   );
+
+  // A category (or product) created in another tab — e.g. the Categories
+  // screen — won't appear here, since Houdini serves the cached query. Refetch
+  // when this tab regains visibility so the category picker and list pick up
+  // records created elsewhere. The in-progress new-product form is plain
+  // component state, so the refetch doesn't disturb it.
+  $effect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        ProductList.fetch({ policy: CachePolicy.NetworkOnly });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  });
+
+  const viewer = $derived(page.data.user as Viewer | undefined);
+  const has = (key: string) => !!viewer && viewer.permissions.includes(key);
+  const canCreate = $derived(has("product.create"));
+  const canEdit = $derived(has("product.edit"));
+  const canEditPrice = $derived(has("product.edit_price"));
 
   const KINDS = ["physical", "service", "bundle"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
@@ -134,6 +180,9 @@
     categoryId: string | null;
     category: string;
     variants: number;
+    // The lone variant's id when the product has exactly one — the quick-edit
+    // target. `null` for zero- or multi-variant products (not quick-editable).
+    variantId: string | null;
     minPrice: number;
     maxPrice: number;
     stock: number;
@@ -168,7 +217,7 @@
   const allRows = $derived.by<(Row & { haystack: string })[]>(() => {
     const result = $ProductList?.data;
     if (!result) return [];
-    const catName = new Map(result.categories.map((c) => [c.id, c.name]));
+    const catName = categoryPaths;
     return result.products.map((p) => {
       const prices = p.variants.map((v) => v.priceMinor);
       const category = p.categoryId
@@ -181,6 +230,7 @@
         categoryId: p.categoryId ?? null,
         category,
         variants: p.variants.length,
+        variantId: p.variants.length === 1 ? p.variants[0].id : null,
         minPrice: prices.length ? Math.min(...prices) : 0,
         maxPrice: prices.length ? Math.max(...prices) : 0,
         stock: p.variants.reduce((sum, v) => sum + v.totalQty, 0),
@@ -196,14 +246,23 @@
   const categoryFilter = $derived(page.url.searchParams.get("category"));
   const categoryFilterName = $derived(
     categoryFilter
-      ? ($ProductList?.data?.categories.find((c) => c.id === categoryFilter)
-          ?.name ?? "this category")
+      ? (categoryPaths.get(categoryFilter) ?? "this category")
       : null,
   );
 
   function clearCategoryFilter() {
     goto("/products", { keepFocus: true, noScroll: true });
   }
+
+  // Combobox options for the new-product Category picker: a leading
+  // "Uncategorized" row (empty value) then one row per category.
+  const categoryOptions = $derived([
+    { value: "", label: "Uncategorized" },
+    ...($ProductList.data?.categories ?? []).map((c) => ({
+      value: c.id,
+      label: categoryPaths.get(c.id) ?? c.name,
+    })),
+  ]);
 
   const rows = $derived.by<Row[]>(() => {
     let base = allRows;
@@ -273,6 +332,91 @@
 
   const sortGlyph = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  // ---- Inline quick edit (single-variant products only) --------------------
+  // Rename the product and retune its lone variant's price in place, without
+  // opening the detail page. Products with zero or multiple variants are
+  // skipped — there's no single price to edit — so use the detail page there.
+  let quick = $state<{
+    id: string;
+    variantId: string;
+    name: string;
+    priceMinor: number | null;
+    focus: "name" | "price";
+  } | null>(null);
+
+  function startQuick(row: Row, focus: "name" | "price") {
+    if (!canEdit || busy || row.variants !== 1 || !row.variantId) return;
+    quick = {
+      id: row.id,
+      variantId: row.variantId,
+      name: row.name,
+      priceMinor: row.minPrice,
+      focus,
+    };
+  }
+
+  async function saveQuick() {
+    const q = quick;
+    if (!q || !q.name.trim()) return;
+    const current = allRows.find((r) => r.id === q.id);
+    busy = true;
+    feedback = null;
+    try {
+      const name = q.name.trim();
+      if (name !== current?.name) {
+        const res = await UpdateProductName.mutate({ id: q.id, name });
+        if (res.errors?.length) {
+          feedback = { ok: false, text: res.errors[0].message };
+          return;
+        }
+      }
+      // Price is gated separately; skip it for staff without product.edit_price.
+      if (canEditPrice) {
+        const price = q.priceMinor ?? 0;
+        if (price !== (current?.minPrice ?? 0)) {
+          const res = await UpdateVariantPrice.mutate({
+            id: q.variantId,
+            priceMinor: price,
+          });
+          if (res.errors?.length) {
+            feedback = { ok: false, text: res.errors[0].message };
+            return;
+          }
+        }
+      }
+      quick = null;
+      // The cached list won't reflect the edit without a round-trip.
+      await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+  }
+
+  function quickKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveQuick();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      quick = null;
+    }
+  }
+
+  // Focus + select the name <input> on mount. MoneyInput self-focuses via its
+  // own `autofocus` prop, so this only drives the name field.
+  function autofocus(el: HTMLInputElement, enabled: boolean) {
+    if (enabled) {
+      el.focus();
+      el.select();
+    }
+  }
+
+  const quickInputClass =
+    "flex h-7 w-full rounded-md border border-input bg-background px-2 py-1 " +
+    "text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 </script>
 
 <svelte:head><title>Products · Retale Console</title></svelte:head>
@@ -331,12 +475,11 @@
         </label>
         <label class="space-y-1">
           <span class="text-xs font-medium">Category</span>
-          <Select bind:value={draft.categoryId}>
-            <option value="">Uncategorized</option>
-            {#each $ProductList.data?.categories ?? [] as c (c.id)}
-              <option value={c.id}>{c.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={categoryOptions}
+            bind:value={draft.categoryId}
+            placeholder="Search category…"
+          />
         </label>
         <label class="space-y-1">
           <span class="text-xs font-medium">Kind</span>
@@ -409,23 +552,58 @@
                 </button>
               </th>
             {/each}
+            <th class="px-4 py-2"></th>
           </tr>
         </thead>
         <tbody>
           {#each pageRows as row (row.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
-                <a
-                  href={`/products/${row.id}`}
-                  class="font-medium text-primary hover:underline"
-                >
-                  {row.name}
-                </a>
+                {#if quick?.id === row.id}
+                  <input
+                    class={quickInputClass}
+                    bind:value={quick.name}
+                    onkeydown={quickKeydown}
+                    use:autofocus={quick.focus === "name"}
+                  />
+                {:else}
+                  <a
+                    href={`/products/${row.id}`}
+                    class="font-medium text-primary hover:underline"
+                  >
+                    {row.name}
+                  </a>
+                {/if}
               </td>
               <td class="px-4 py-2">{row.category}</td>
               <td class="px-4 py-2">{row.kind}</td>
               <td class="px-4 py-2">{row.variants}</td>
-              <td class="px-4 py-2">{priceLabel(row)}</td>
+              <td class="px-4 py-2">
+                {#if quick?.id === row.id}
+                  {#if canEditPrice}
+                    <MoneyInput
+                      autofocus={quick.focus === "price"}
+                      bind:value={quick.priceMinor}
+                      onkeydown={quickKeydown}
+                      class="h-7 w-28 px-2"
+                    />
+                  {:else}
+                    {priceLabel(row)}
+                  {/if}
+                {:else if canEdit && canEditPrice && row.variants === 1}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit price"
+                    disabled={busy}
+                    onclick={() => startQuick(row, "price")}
+                  >
+                    {priceLabel(row)}
+                  </button>
+                {:else}
+                  {priceLabel(row)}
+                {/if}
+              </td>
               <td class="px-4 py-2">{row.stock}</td>
               <td class="px-4 py-2">
                 <Badge
@@ -436,12 +614,39 @@
                   {row.archived ? "Archived" : "Active"}
                 </Badge>
               </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                {#if quick?.id === row.id}
+                  <span class="inline-flex items-center gap-0.5">
+                    <IconButton
+                      icon={Check}
+                      label="Save"
+                      variant="primary"
+                      disabled={busy || !quick.name.trim()}
+                      onclick={saveQuick}
+                    />
+                    <IconButton
+                      icon={X}
+                      label="Cancel"
+                      disabled={busy}
+                      onclick={() => (quick = null)}
+                    />
+                  </span>
+                {:else if canEdit && row.variants === 1}
+                  <IconButton
+                    icon={Pencil}
+                    label="Quick edit"
+                    variant="primary"
+                    disabled={busy}
+                    onclick={() => startQuick(row, "name")}
+                  />
+                {/if}
+              </td>
             </tr>
           {/each}
           {#if pageRows.length === 0}
             <tr>
               <td
-                colspan={COLUMNS.length}
+                colspan={COLUMNS.length + 1}
                 class="px-4 py-10 text-center text-muted-foreground"
               >
                 No products match.

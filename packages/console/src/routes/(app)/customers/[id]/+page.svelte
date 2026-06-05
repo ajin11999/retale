@@ -8,9 +8,9 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -184,9 +184,10 @@
   const prices = $derived($CustomerDetail.data?.customerPrices ?? []);
   const products = $derived($CustomerDetail.data?.products ?? []);
 
-  // Flat variant options for the price-override picker.
+  // Flat variant options for the price-override picker ({ value, label } so
+  // they feed the searchable Combobox directly).
   interface VariantOption {
-    id: string;
+    value: string;
     label: string;
   }
   const variantOptions = $derived.by<VariantOption[]>(() => {
@@ -194,13 +195,13 @@
     for (const p of products) {
       for (const v of p.variants) {
         const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        out.push({ id: v.id, label: `${p.name} · ${suffix}` });
+        out.push({ value: v.id, label: `${p.name} · ${suffix}` });
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
   });
   const variantLabel = (id: string) =>
-    variantOptions.find((v) => v.id === id)?.label ?? "Unknown variant";
+    variantOptions.find((v) => v.value === id)?.label ?? "Unknown variant";
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -698,12 +699,12 @@
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
               <span class="text-xs font-medium">Variant</span>
-              <Select bind:value={priceDraft.variantId} disabled={!canEdit}>
-                <option value="">— Pick a variant —</option>
-                {#each variantOptions as v (v.id)}
-                  <option value={v.id}>{v.label}</option>
-                {/each}
-              </Select>
+              <Combobox
+                options={variantOptions}
+                bind:value={priceDraft.variantId}
+                placeholder="Search variant…"
+                disabled={!canEdit}
+              />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Price (Rp)</span>

@@ -4,6 +4,7 @@
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import { treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -30,6 +31,7 @@
       locations {
         id
         name
+        parentId
       }
       products(includeArchived: true) {
         id
@@ -76,8 +78,10 @@
   const locations = $derived($TransferDetail.data?.locations ?? []);
   const products = $derived($TransferDetail.data?.products ?? []);
 
-  const locationName = (id: string) =>
-    locations.find((l) => l.id === id)?.name ?? "Unknown";
+  // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
+  // under different parents are distinguishable.
+  const locationPaths = $derived(treePathMap(locations));
+  const locationName = (id: string) => locationPaths.get(id) ?? "Unknown";
 
   const variantLabel = (id: string) => {
     for (const p of products) {

@@ -1,14 +1,14 @@
 <script lang="ts">
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
-  import { Archive, ArchiveRestore, Pencil, Trash2 } from "@lucide/svelte";
+  import { Archive, ArchiveRestore, Check, Pencil, Trash2, X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -205,6 +205,28 @@
     return tree.filter((n) => !banned.has(n.id));
   });
 
+  // Full ancestry path per node ("Electronics › Phones › Cases"), so the parent
+  // Combobox shows hierarchy context in a flat, searchable list. `tree` is
+  // parent-before-child, so each node's parent path is already computed.
+  const pathById = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const n of tree) {
+      const parentPath = n.parentId ? m.get(n.parentId) : undefined;
+      m.set(n.id, parentPath ? `${parentPath} › ${n.name}` : n.name);
+    }
+    return m;
+  });
+
+  // { value, label } parent options: a leading "Top level" row, then each
+  // allowed parent (descendants of the edited node are excluded) by full path.
+  const parentComboOptions = $derived([
+    { value: "", label: "— Top level —" },
+    ...parentOptions.map((n) => ({
+      value: n.id,
+      label: pathById.get(n.id) ?? n.name,
+    })),
+  ]);
+
   function newCategory() {
     draft = {
       id: null,
@@ -224,6 +246,62 @@
       minMarginBps: n.minMarginBps,
     };
   }
+
+  // ---- Inline quick edit ---------------------------------------------------
+  // Edit just name + min qty in place, without opening the full editor panel.
+  // `focus` records which cell was clicked so that field grabs focus on mount.
+  let quick = $state<{
+    id: string;
+    name: string;
+    minQty: number | null;
+    focus: "name" | "minQty";
+  } | null>(null);
+
+  function startQuick(n: Node, focus: "name" | "minQty") {
+    if (!canEdit || busy) return;
+    quick = { id: n.id, name: n.name, minQty: n.minQty, focus };
+  }
+
+  async function saveQuick() {
+    const q = quick;
+    if (!q || !q.name.trim()) return;
+    const ok = await run("Category", () =>
+      UpdateCategory.mutate({
+        id: q.id,
+        name: q.name.trim(),
+        minQty: q.minQty === null || q.minQty === undefined ? null : Number(q.minQty),
+      }),
+    );
+    if (ok) {
+      quick = null;
+      await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
+    }
+  }
+
+  function quickKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveQuick();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      quick = null;
+    }
+  }
+
+  // Focus + select an input on mount when `enabled` — used so the clicked cell
+  // (name or min qty) is ready to type into immediately. Applied via `use:` so
+  // the quick-edit fields are raw <input>s (actions aren't valid on components).
+  function autofocus(el: HTMLInputElement, enabled: boolean) {
+    if (enabled) {
+      el.focus();
+      el.select();
+    }
+  }
+
+  // Mirrors the <Input> component's styling for the raw quick-edit inputs.
+  const quickInputClass =
+    "flex h-7 rounded-md border border-input bg-background px-2 py-1 text-sm " +
+    "shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   // Candidates for the new/edit-category duplicate hint. Selecting a match
   // switches the editor to that category.
@@ -363,14 +441,12 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Parent</span>
-          <Select bind:value={draft.parentId} disabled={!canEdit}>
-            <option value="">— Top level —</option>
-            {#each parentOptions as p (p.id)}
-              <option value={p.id}>
-                {"— ".repeat(p.depth)}{p.name}
-              </option>
-            {/each}
-          </Select>
+          <Combobox
+            options={parentComboOptions}
+            bind:value={draft.parentId}
+            placeholder="Search parent category…"
+            disabled={!canEdit}
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min qty</span>
@@ -430,10 +506,29 @@
           {#each visibleTree as n (n.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
-                <span style:padding-left={`${n.depth * 1.25}rem`}>
-                  {n.depth > 0 ? "└ " : ""}<span class="font-medium"
-                    >{n.name}</span
-                  >
+                <span
+                  class="inline-flex items-center"
+                  style:padding-left={`${n.depth * 1.25}rem`}
+                >
+                  {n.depth > 0 ? "└ " : ""}
+                  {#if quick?.id === n.id}
+                    <input
+                      class="{quickInputClass} w-48"
+                      bind:value={quick.name}
+                      onkeydown={quickKeydown}
+                      use:autofocus={quick.focus === "name"}
+                    />
+                  {:else if canEdit}
+                    <button
+                      type="button"
+                      class="rounded px-1 font-medium hover:bg-muted disabled:cursor-not-allowed"
+                      title="Click to rename"
+                      disabled={busy}
+                      onclick={() => startQuick(n, "name")}>{n.name}</button
+                    >
+                  {:else}
+                    <span class="font-medium">{n.name}</span>
+                  {/if}
                 </span>
               </td>
               <td class="px-4 py-2 text-right">
@@ -448,7 +543,28 @@
                   0
                 {/if}
               </td>
-              <td class="px-4 py-2 text-right">{n.minQty ?? "—"}</td>
+              <td class="px-4 py-2 text-right">
+                {#if quick?.id === n.id}
+                  <input
+                    type="number"
+                    class="{quickInputClass} ml-auto w-20 text-right"
+                    bind:value={quick.minQty}
+                    placeholder="—"
+                    onkeydown={quickKeydown}
+                    use:autofocus={quick.focus === "minQty"}
+                  />
+                {:else if canEdit}
+                  <button
+                    type="button"
+                    class="rounded px-1 hover:bg-muted disabled:cursor-not-allowed"
+                    title="Click to edit min qty"
+                    disabled={busy}
+                    onclick={() => startQuick(n, "minQty")}>{n.minQty ?? "—"}</button
+                  >
+                {:else}
+                  {n.minQty ?? "—"}
+                {/if}
+              </td>
               <td class="px-4 py-2 text-right">{n.minMarginBps ?? "—"}</td>
               <td class="px-4 py-2">
                 <Badge
@@ -461,26 +577,42 @@
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
                 <span class="inline-flex items-center gap-0.5">
-                  <IconButton
-                    icon={Pencil}
-                    label="Edit"
-                    variant="primary"
-                    disabled={busy || !canEdit}
-                    onclick={() => editCategory(n)}
-                  />
-                  <IconButton
-                    icon={n.archived ? ArchiveRestore : Archive}
-                    label={n.archived ? "Restore" : "Archive"}
-                    disabled={busy || !canArchive}
-                    onclick={() => toggleArchived(n)}
-                  />
-                  <IconButton
-                    icon={Trash2}
-                    label="Delete"
-                    variant="destructive"
-                    disabled={busy || !canEdit}
-                    onclick={() => deleteCategory(n)}
-                  />
+                  {#if quick?.id === n.id}
+                    <IconButton
+                      icon={Check}
+                      label="Save"
+                      variant="primary"
+                      disabled={busy || !quick.name.trim()}
+                      onclick={saveQuick}
+                    />
+                    <IconButton
+                      icon={X}
+                      label="Cancel"
+                      disabled={busy}
+                      onclick={() => (quick = null)}
+                    />
+                  {:else}
+                    <IconButton
+                      icon={Pencil}
+                      label="Edit"
+                      variant="primary"
+                      disabled={busy || !canEdit}
+                      onclick={() => editCategory(n)}
+                    />
+                    <IconButton
+                      icon={n.archived ? ArchiveRestore : Archive}
+                      label={n.archived ? "Restore" : "Archive"}
+                      disabled={busy || !canArchive}
+                      onclick={() => toggleArchived(n)}
+                    />
+                    <IconButton
+                      icon={Trash2}
+                      label="Delete"
+                      variant="destructive"
+                      disabled={busy || !canEdit}
+                      onclick={() => deleteCategory(n)}
+                    />
+                  {/if}
                 </span>
               </td>
             </tr>

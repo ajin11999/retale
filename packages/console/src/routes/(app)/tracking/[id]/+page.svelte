@@ -396,17 +396,17 @@
       });
   });
 
-  // Substring match on product name, SKU, or label. Cap the dropdown so a
-  // blank query doesn't render thousands of rows.
+  // AND-match each whitespace-separated token against the row's combined
+  // name/SKU/label text, so tokens may match different parts in any order
+  // ("nkn 6201" finds "Bearing \ 6201 2RS \ NKN"). Cap the dropdown so a blank
+  // query doesn't render thousands of rows.
   const pickableMatches = $derived.by(() => {
-    const q = variantSearch.trim().toLowerCase();
-    const haystack = q
-      ? pickable.filter(
-          (v) =>
-            v.productName.toLowerCase().includes(q) ||
-            v.sku.toLowerCase().includes(q) ||
-            (v.label?.toLowerCase().includes(q) ?? false),
-        )
+    const tokens = variantSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const haystack = tokens.length
+      ? pickable.filter((v) => {
+          const hay = `${v.productName} ${v.sku} ${v.label ?? ""}`.toLowerCase();
+          return tokens.every((t) => hay.includes(t));
+        })
       : pickable;
     return haystack.slice(0, 30);
   });

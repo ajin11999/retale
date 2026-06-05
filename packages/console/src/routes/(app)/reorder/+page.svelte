@@ -5,6 +5,7 @@
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
@@ -64,6 +65,12 @@
 
   const suggestions = $derived($ReorderSuggestions.data?.reorderSuggestions ?? []);
   const vendors = $derived($ReorderSuggestions.data?.vendors ?? []);
+  // Searchable Combobox options for the per-row vendor assignment; the leading
+  // empty row leaves a suggestion unassigned.
+  const vendorOptions = $derived([
+    { value: "", label: "— Unassigned —" },
+    ...vendors.map((v) => ({ value: v.id, label: v.name })),
+  ]);
 
   // ---- Viewer permissions --------------------------------------------------
   // Mirrors the API: reading the list needs report.sales.view; scan / convert /
@@ -285,15 +292,12 @@
               </td>
               <td class="px-4 py-2">
                 {#if statusFilter === "open" && review[s.id]}
-                  <Select
+                  <Combobox
+                    options={vendorOptions}
                     bind:value={review[s.id].vendorId}
+                    placeholder="Search vendor…"
                     disabled={!canAct}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {#each vendors as v (v.id)}
-                      <option value={v.id}>{v.name}</option>
-                    {/each}
-                  </Select>
+                  />
                 {:else}
                   {s.vendorName ?? "—"}
                 {/if}

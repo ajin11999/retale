@@ -6,8 +6,8 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -84,6 +84,29 @@
         children: build(acc.id),
       }));
     return build(null);
+  });
+
+  // Parent options for the new-account form, as a flat searchable list where
+  // each row carries its full ancestry path ("Liabilities › Staff › Bonus").
+  // Only non-archived accounts can be a parent; sorted by path so siblings
+  // group under their parent. (Create-only form, so no descendant-cycle guard.)
+  const parentComboOptions = $derived.by(() => {
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    const cache = new Map<string, string>();
+    const pathOf = (id: string): string => {
+      const hit = cache.get(id);
+      if (hit !== undefined) return hit;
+      const a = byId.get(id);
+      if (!a) return "";
+      const p = a.parentId ? `${pathOf(a.parentId)} › ${a.name}` : a.name;
+      cache.set(id, p);
+      return p;
+    };
+    const opts = accounts
+      .filter((a) => !a.archivedAt)
+      .map((a) => ({ value: a.id, label: pathOf(a.id) }))
+      .sort((x, y) => x.label.localeCompare(y.label));
+    return [{ value: "", label: "— Top level —" }, ...opts];
   });
 
   // ---- Search --------------------------------------------------------------
@@ -208,12 +231,11 @@
         </label>
         <label class="col-span-2 space-y-1">
           <span class="text-sm font-medium">Parent (optional)</span>
-          <Select bind:value={nParentId}>
-            <option value="">— Top level —</option>
-            {#each accounts.filter((a) => !a.archivedAt) as a (a.id)}
-              <option value={a.id}>{a.name}</option>
-            {/each}
-          </Select>
+          <Combobox
+            options={parentComboOptions}
+            bind:value={nParentId}
+            placeholder="Search parent account…"
+          />
         </label>
       </div>
       <div class="flex justify-end gap-2">
