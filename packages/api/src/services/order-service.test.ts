@@ -9,7 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { eq, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { users } from "../db/schema/auth.ts";
-import { customers } from "../db/schema/customers.ts";
+import { customerLedger, customers } from "../db/schema/customers.ts";
 import { locations } from "../db/schema/locations.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { stockLocations } from "../db/schema/stock.ts";
@@ -349,17 +349,28 @@ describe("service products", () => {
     expect(items[0]!.snapshotCostMinor).toBe(0);
   });
 
-  test("rejects a price override on a physical line", async () => {
+  test("a price override on a physical line charges the entered price, keeps the cost, moves stock", async () => {
     const sessionId = await seedSession("P1");
-    const variantId = await seedVariant({ kind: "physical", priceMinor: 1000 });
-    await expectError("PRICE_OVERRIDE_NOT_ALLOWED", () =>
-      createPosOrder({
-        posSessionId: sessionId,
-        items: [{ variantId, qty: 1, priceOverrideMinor: 800 }],
-        payments: [{ amountMinor: 800 }],
-        createdByUserId: userId,
-      }),
-    );
+    const variantId = await seedVariant({
+      kind: "physical",
+      priceMinor: 1000,
+      costMinor: 400,
+      stockQty: 100,
+    });
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1, priceOverrideMinor: 800 }],
+      payments: [{ amountMinor: 800 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(800);
+
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.snapshotPriceMinor).toBe(800);
+    // Override changes the price, not the cost — margin stays meaningful.
+    expect(items[0]!.snapshotCostMinor).toBe(400);
+    expect(await stockOf(variantId)).toBe(99);
   });
 });
 
@@ -431,6 +442,14 @@ async function balanceOf(customerId: string): Promise<number> {
   return row!.balanceMinor;
 }
 
+/** All customer_ledger rows for a customer. */
+async function ledgerOf(customerId: string) {
+  return db
+    .select()
+    .from(customerLedger)
+    .where(eq(customerLedger.customerId, customerId));
+}
+
 describe("console customer sales", () => {
   test("createCustomerSale opens an empty order", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
@@ -443,7 +462,7 @@ describe("console customer sales", () => {
     expect(order.totalMinor).toBe(0);
   });
 
-  test("adding an item grows the total, the balance, and decrements stock", async () => {
+  test("adding an item grows the total and stock, but not the balance (AR defers to close)", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
     const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
     const sale = await createCustomerSale({
@@ -456,11 +475,13 @@ describe("console customer sales", () => {
       createdByUserId: userId,
     });
     expect(updated.totalMinor).toBe(3000);
-    expect(await balanceOf(customer.id)).toBe(3000);
+    // Stock moves live; AR does not — nothing is posted to the ledger yet.
+    expect(await balanceOf(customer.id)).toBe(0);
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
     expect(await stockOf(variantId)).toBe(97);
   });
 
-  test("voiding an item reverses the total, balance, and stock", async () => {
+  test("voiding an item reverses the total and stock; balance stays zero", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
     const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
     const sale = await createCustomerSale({
@@ -480,10 +501,11 @@ describe("console customer sales", () => {
     });
     expect(after.totalMinor).toBe(0);
     expect(await balanceOf(customer.id)).toBe(0);
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
     expect(await stockOf(variantId)).toBe(100);
   });
 
-  test("a payment reduces the customer balance", async () => {
+  test("a payment on an open sale records order_payments but leaves the balance (AR defers)", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
     const variantId = await seedVariant({ priceMinor: 1000 });
     const sale = await createCustomerSale({
@@ -500,7 +522,61 @@ describe("console customer sales", () => {
       amountMinor: 2000,
       createdByUserId: userId,
     });
-    expect(await balanceOf(customer.id)).toBe(3000);
+    expect(await balanceOf(customer.id)).toBe(0);
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
+    const payments = await listOrderPayments(sale.id);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]!.amountMinor).toBe(2000);
+  });
+
+  test("closing posts one sale_on_account for the unpaid remainder", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 3 },
+      createdByUserId: userId,
+    });
+    await addCustomerSalePayment({
+      orderId: sale.id,
+      amountMinor: 1000,
+      createdByUserId: userId,
+    });
+    // Nothing posted to AR while open.
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
+
+    await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+    const rows = await ledgerOf(customer.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("sale_on_account");
+    expect(rows[0]!.amountMinor).toBe(2000);
+    expect(await balanceOf(customer.id)).toBe(2000);
+  });
+
+  test("closing a fully-paid sale posts no AR row", async () => {
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 2 },
+      createdByUserId: userId,
+    });
+    await addCustomerSalePayment({
+      orderId: sale.id,
+      amountMinor: 2000,
+      createdByUserId: userId,
+    });
+    await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
+    expect(await balanceOf(customer.id)).toBe(0);
   });
 
   test("closing assigns a C-prefixed display number and locks the order", async () => {
@@ -518,6 +594,8 @@ describe("console customer sales", () => {
     const closed = await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
     expect(closed.closedAt).not.toBeNull();
     expect(closed.displayNumber!.startsWith("C-")).toBe(true);
+    // Unpaid at close → the remainder posts as debt.
+    expect(await balanceOf(customer.id)).toBe(1000);
 
     await expectError("ORDER_CLOSED", () =>
       addCustomerSaleItem({
@@ -528,7 +606,7 @@ describe("console customer sales", () => {
     );
   });
 
-  test("an item add breaching the credit limit is rejected", async () => {
+  test("closing a sale that breaches the credit limit is rejected", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
     await setCustomerCreditLimit(customer.id, 1000);
     const variantId = await seedVariant({ priceMinor: 1000 });
@@ -536,16 +614,18 @@ describe("console customer sales", () => {
       customerId: customer.id,
       createdByUserId: userId,
     });
+    // Drafting beyond the limit is allowed; the limit only bites at close.
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId, qty: 3 },
+      createdByUserId: userId,
+    });
     await expectError("CREDIT_LIMIT_EXCEEDED", () =>
-      addCustomerSaleItem({
-        orderId: sale.id,
-        item: { variantId, qty: 3 },
-        createdByUserId: userId,
-      }),
+      closeCustomerSale({ orderId: sale.id, closedByUserId: userId }),
     );
   });
 
-  test("cancelling voids every line and zeroes the balance", async () => {
+  test("cancelling voids every line and returns stock; balance stays zero", async () => {
     const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
     const variantId = await seedVariant({ priceMinor: 1000, stockQty: 100 });
     const sale = await createCustomerSale({
@@ -564,11 +644,13 @@ describe("console customer sales", () => {
     });
     expect(cancelled.cancelledAt).not.toBeNull();
     expect(cancelled.totalMinor).toBe(0);
+    // An open sale never posted AR, so there is nothing to reverse.
     expect(await balanceOf(customer.id)).toBe(0);
+    expect(await ledgerOf(customer.id)).toHaveLength(0);
     expect(await stockOf(variantId)).toBe(100);
   });
 
-  test("changing the customer moves the open sale's debt", async () => {
+  test("changing the customer on an open sale relabels it; no balance moves (AR defers)", async () => {
     const a = await createCustomer({ name: "Customer A", createdByUserId: userId });
     const b = await createCustomer({ name: "Customer B", createdByUserId: userId });
     const variantId = await seedVariant({ priceMinor: 1000 });
@@ -578,7 +660,7 @@ describe("console customer sales", () => {
       item: { variantId, qty: 3 },
       createdByUserId: userId,
     });
-    expect(await balanceOf(a.id)).toBe(3000);
+    expect(await balanceOf(a.id)).toBe(0);
 
     const moved = await changeCustomerSaleCustomer({
       orderId: sale.id,
@@ -586,8 +668,12 @@ describe("console customer sales", () => {
       changedByUserId: userId,
     });
     expect(moved.customerId).toBe(b.id);
+    expect(moved.snapshotCustomerName).toBe("Customer B");
+    // Neither customer has any ledger movement — the sale relabels only.
     expect(await balanceOf(a.id)).toBe(0);
-    expect(await balanceOf(b.id)).toBe(3000);
+    expect(await balanceOf(b.id)).toBe(0);
+    expect(await ledgerOf(a.id)).toHaveLength(0);
+    expect(await ledgerOf(b.id)).toHaveLength(0);
   });
 });
 

@@ -5,7 +5,7 @@
 // See docs/design-decisions.md → "Order lifecycle" and "Payments & customer
 // debt".
 
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { customerLedger, customerPrices, customers } from "../db/schema/customers.ts";
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
@@ -469,19 +469,12 @@ async function buildLines(
     });
   }
 
-  // Service and open-price lines both take a cashier-entered price. Open-price
-  // items (loose hardware sold by guess) have no base price, so an entered
-  // price is mandatory rather than optional.
+  // A cashier-entered price overrides the catalog/customer price on any line
+  // (bundles excepted — handled above). Open-price items (loose hardware sold
+  // by guess) have no base price, so an entered price is mandatory there.
   const isOpenPrice = product.kind === "open_price";
-  const acceptsPriceEntry = product.kind === "service" || isOpenPrice;
-  if (item.priceOverrideMinor != null && !acceptsPriceEntry) {
-    throw new OrderError(
-      "PRICE_OVERRIDE_NOT_ALLOWED",
-      "price overrides are allowed only on service and open-price products",
-    );
-  }
   let price: number;
-  if (acceptsPriceEntry && item.priceOverrideMinor != null) {
+  if (item.priceOverrideMinor != null) {
     if (!Number.isInteger(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
       throw new OrderError("INVALID_INPUT", "price override must be a non-negative integer");
     }
@@ -758,9 +751,9 @@ export async function updateCustomerSaleNote(input: {
 }
 
 /**
- * Add a line to an open Console sale. Decrements stock (physical lines) and
- * posts a `sale_on_account` ledger row for the line total, rejecting it if
- * that would breach the customer's credit limit.
+ * Add a line to an open Console sale. Decrements stock for physical lines.
+ * AR is deferred: nothing is posted to `customer_ledger` while the sale is
+ * open — the credit limit is checked and the debt posted once, at close.
  */
 export async function addCustomerSaleItem(input: {
   orderId: string;
@@ -771,49 +764,25 @@ export async function addCustomerSaleItem(input: {
     const order = await loadOpenOrder(tx, input.orderId);
     const customerId = order.customerId;
     if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
-    const customer = await tx.query.customers.findFirst({
-      where: eq(customers.id, customerId),
-    });
-    if (!customer) throw new OrderError("CUSTOMER_NOT_FOUND");
 
     // One input item may explode into several lines (a bundle).
     const lines = await buildLines(tx, order.id, input.item, customerId);
-    const addedTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
-
-    if (
-      customer.creditLimitMinor != null &&
-      customer.balanceMinor + addedTotal > customer.creditLimitMinor
-    ) {
-      throw new OrderError("CREDIT_LIMIT_EXCEEDED");
-    }
-
     await tx.insert(orderItems).values(lines.map((l) => l.row));
 
     for (const line of lines) {
-      if (line.isPhysical) {
-        await modifyStock(
-          {
-            variantId: line.row.variantId as string,
-            type: "sale",
-            qtyDelta: -(line.row.qty as number),
-            refType: "order",
-            refId: order.id,
-            createdByUserId: input.createdByUserId,
-          },
-          tx,
-        );
-      }
-      await tx.insert(customerLedger).values({
-        id: ulid(),
-        customerId,
-        type: "sale_on_account",
-        amountMinor: line.lineTotal,
-        refType: "order_item",
-        refId: line.row.id as string,
-        createdByUserId: input.createdByUserId,
-      });
+      if (!line.isPhysical) continue;
+      await modifyStock(
+        {
+          variantId: line.row.variantId as string,
+          type: "sale",
+          qtyDelta: -(line.row.qty as number),
+          refType: "order",
+          refId: order.id,
+          createdByUserId: input.createdByUserId,
+        },
+        tx,
+      );
     }
-    await syncCustomerBalance(tx, customerId);
     await recomputeOrderTotal(tx, order.id);
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
@@ -822,8 +791,9 @@ export async function addCustomerSaleItem(input: {
 }
 
 /**
- * Void a line on an open Console sale. Marks the row voided (kept for audit),
- * returns its stock, and posts a reversing `sale_on_account` ledger row.
+ * Void a line on an open Console sale. Marks the row voided (kept for audit)
+ * and returns its stock. No AR is reversed — an open sale has posted nothing to
+ * `customer_ledger` yet; `recomputeOrderTotal` keeps the close-time debt right.
  */
 export async function voidCustomerSaleItem(input: {
   orderItemId: string;
@@ -841,8 +811,6 @@ export async function voidCustomerSaleItem(input: {
     if (item.voidedAt) throw new OrderError("ITEM_ALREADY_VOIDED");
 
     const order = await loadOpenOrder(tx, item.orderId);
-    const customerId = order.customerId;
-    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
 
     await tx
       .update(orderItems)
@@ -853,7 +821,7 @@ export async function voidCustomerSaleItem(input: {
       })
       .where(eq(orderItems.id, item.id));
 
-    // Return stock for physical lines (services never moved the ledger).
+    // Return stock for physical lines (stock moves live even though AR doesn't).
     const product = item.productId
       ? await tx.query.products.findFirst({ where: eq(products.id, item.productId) })
       : null;
@@ -872,17 +840,6 @@ export async function voidCustomerSaleItem(input: {
       );
     }
 
-    await tx.insert(customerLedger).values({
-      id: ulid(),
-      customerId,
-      type: "sale_on_account",
-      amountMinor: -lineTotalOf(item),
-      refType: "order_item",
-      refId: item.id,
-      note: `void: ${input.reason.trim()}`,
-      createdByUserId: input.voidedByUserId,
-    });
-    await syncCustomerBalance(tx, customerId);
     await recomputeOrderTotal(tx, order.id);
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
@@ -892,9 +849,9 @@ export async function voidCustomerSaleItem(input: {
 
 /**
  * Edit a non-voided line on an open Console sale. Each provided field is
- * applied; omitted fields are left untouched. Adjusts stock by the qty delta,
- * recomputes the attribution snapshot, posts a customer-ledger delta for the
- * net change, and re-checks the credit limit when the total grows.
+ * applied; omitted fields are left untouched. Adjusts stock by the qty delta
+ * and recomputes the attribution snapshot. AR is deferred: no customer_ledger
+ * write here and no credit check — both happen once, at close.
  *
  * Bundle component lines cannot be edited — re-add the bundle instead.
  * `displayNameOverride` writes `snapshotPublicName`, which the receipt /
@@ -922,13 +879,10 @@ export async function updateCustomerSaleItem(input: {
       );
     }
     const order = await loadOpenOrder(tx, item.orderId);
-    const customerId = order.customerId;
-    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
 
     const oldQty = item.qty;
     const oldPrice = item.snapshotPriceMinor;
     const oldDiscount = item.discountMinor;
-    const oldTotal = lineTotalOf(item);
 
     let newQty = oldQty;
     if (input.qty != null) {
@@ -949,7 +903,8 @@ export async function updateCustomerSaleItem(input: {
       newDiscount = input.discountMinor;
     }
 
-    // Price overrides need the product kind; the schema gates them to services.
+    // Product kind drives the stock movement below; a price override may apply
+    // to any line (bundle component lines were already rejected above).
     const product = item.productId
       ? await tx.query.products.findFirst({
           where: eq(products.id, item.productId),
@@ -958,12 +913,6 @@ export async function updateCustomerSaleItem(input: {
 
     let newPrice = oldPrice;
     if (input.priceOverrideMinor != null) {
-      if (!product || (product.kind !== "service" && product.kind !== "open_price")) {
-        throw new OrderError(
-          "PRICE_OVERRIDE_NOT_ALLOWED",
-          "price overrides are allowed only on service and open-price products",
-        );
-      }
       if (
         !Number.isInteger(input.priceOverrideMinor) ||
         input.priceOverrideMinor < 0
@@ -979,19 +928,6 @@ export async function updateCustomerSaleItem(input: {
     const newTotal = newQty * newPrice - newDiscount;
     if (newTotal < 0) {
       throw new OrderError("INVALID_INPUT", "discount exceeds the line subtotal");
-    }
-
-    const delta = newTotal - oldTotal;
-    if (delta > 0) {
-      const customer = await tx.query.customers.findFirst({
-        where: eq(customers.id, customerId),
-      });
-      if (
-        customer?.creditLimitMinor != null &&
-        customer.balanceMinor + delta > customer.creditLimitMinor
-      ) {
-        throw new OrderError("CREDIT_LIMIT_EXCEEDED");
-      }
     }
 
     // Physical stock moves with qty. Positive line-qty delta → stock decreases.
@@ -1052,20 +988,6 @@ export async function updateCustomerSaleItem(input: {
     }
     await tx.update(orderItems).set(patch).where(eq(orderItems.id, item.id));
 
-    if (delta !== 0) {
-      await tx.insert(customerLedger).values({
-        id: ulid(),
-        customerId,
-        type: "sale_on_account",
-        amountMinor: delta,
-        refType: "order_item",
-        refId: item.id,
-        note: "edit",
-        createdByUserId: input.updatedByUserId,
-      });
-      await syncCustomerBalance(tx, customerId);
-    }
-
     await recomputeOrderTotal(tx, order.id);
     const row = await tx.query.orders.findFirst({
       where: eq(orders.id, order.id),
@@ -1075,8 +997,10 @@ export async function updateCustomerSaleItem(input: {
 }
 
 /**
- * Record a payment against an open Console sale. Writes the `order_payments`
- * row and a `payment` customer_ledger row that reduces the balance.
+ * Record a payment against an open Console sale. Writes only the
+ * `order_payments` row (the cash/drawer record). No `customer_ledger` row is
+ * written while open — payments net into the single remainder posted at close,
+ * so writing one here would double-count.
  */
 export async function addCustomerSalePayment(input: {
   orderId: string;
@@ -1089,29 +1013,16 @@ export async function addCustomerSalePayment(input: {
   }
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);
-    const customerId = order.customerId;
-    if (!customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
+    if (!order.customerId) throw new OrderError("CUSTOMER_NOT_FOUND");
 
-    const paymentId = ulid();
     await tx.insert(orderPayments).values({
-      id: paymentId,
+      id: ulid(),
       orderId: order.id,
       method: "cash",
       amountMinor: input.amountMinor,
       posSessionId: input.posSessionId ?? null,
       createdByUserId: input.createdByUserId,
     });
-    await tx.insert(customerLedger).values({
-      id: ulid(),
-      customerId,
-      type: "payment",
-      amountMinor: -input.amountMinor,
-      refType: "payment",
-      refId: paymentId,
-      posSessionId: input.posSessionId ?? null,
-      createdByUserId: input.createdByUserId,
-    });
-    await syncCustomerBalance(tx, customerId);
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, order.id) });
     return row as Order;
@@ -1120,10 +1031,12 @@ export async function addCustomerSalePayment(input: {
 
 /**
  * Close a Console sale: assigns a `C-<date>-<seq>` display number; immutable
- * after. Tracking attribution fires here only when the sale is fully paid at
- * close — an order that closes on account never credits the mechanic (the
- * design's all-or-nothing bad-debt rule). A debt later settled via
- * `recordDebtPayment` does not retro-fire attribution.
+ * after. AR posts here, once — a single `customer_ledger` row for the unpaid
+ * remainder (`sale_on_account`, or `refund_credit` if overpaid), with the
+ * credit limit enforced at this point. Tracking attribution fires here only
+ * when the sale is fully paid at close — an order that closes on account never
+ * credits the mechanic (the design's all-or-nothing bad-debt rule). A debt
+ * later settled via `recordDebtPayment` does not retro-fire attribution.
  */
 export async function closeCustomerSale(input: {
   orderId: string;
@@ -1131,7 +1044,43 @@ export async function closeCustomerSale(input: {
 }): Promise<Order> {
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);
+    const customerId = order.customerId;
     const total = await recomputeOrderTotal(tx, order.id);
+
+    const payRows = await tx
+      .select({ amt: orderPayments.amountMinor })
+      .from(orderPayments)
+      .where(eq(orderPayments.orderId, order.id));
+    const paid = payRows.reduce((sum, p) => sum + p.amt, 0);
+    const remainder = total - paid;
+
+    // AR posts once, here at close — mirroring createPosOrder. An unpaid
+    // remainder is a `sale_on_account`; an overpaid sale (cash already in the
+    // drawer) becomes `refund_credit` so close never fails on collected money.
+    if (remainder !== 0 && customerId) {
+      if (remainder > 0) {
+        const customer = await tx.query.customers.findFirst({
+          where: eq(customers.id, customerId),
+        });
+        if (
+          customer?.creditLimitMinor != null &&
+          customer.balanceMinor + remainder > customer.creditLimitMinor
+        ) {
+          throw new OrderError("CREDIT_LIMIT_EXCEEDED");
+        }
+      }
+      await tx.insert(customerLedger).values({
+        id: ulid(),
+        customerId,
+        type: remainder > 0 ? "sale_on_account" : "refund_credit",
+        amountMinor: remainder,
+        refType: "order",
+        refId: order.id,
+        createdByUserId: input.closedByUserId,
+      });
+      await syncCustomerBalance(tx, customerId);
+    }
+
     await tx
       .update(orders)
       .set({
@@ -1141,11 +1090,6 @@ export async function closeCustomerSale(input: {
       })
       .where(eq(orders.id, order.id));
 
-    const payRows = await tx
-      .select({ amt: orderPayments.amountMinor })
-      .from(orderPayments)
-      .where(eq(orderPayments.orderId, order.id));
-    const paid = payRows.reduce((sum, p) => sum + p.amt, 0);
     if (paid >= total) {
       await postAttribution(tx, order.id, input.closedByUserId);
     }
@@ -1156,9 +1100,10 @@ export async function closeCustomerSale(input: {
 }
 
 /**
- * Cancel an open Console sale: voids every live line (returning stock and
- * reversing ledger rows) and stamps `cancelled_at`. Distinct from closing
- * empty — intent matters for reports. `reason` is required.
+ * Cancel an open Console sale: voids every live line (returning stock) and
+ * stamps `cancelled_at`. No AR is reversed — an open sale has posted nothing to
+ * `customer_ledger` yet. Distinct from closing empty — intent matters for
+ * reports. `reason` is required.
  */
 export async function cancelCustomerSale(input: {
   orderId: string;
@@ -1170,7 +1115,6 @@ export async function cancelCustomerSale(input: {
   }
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);
-    const customerId = order.customerId;
 
     const items = await tx
       .select()
@@ -1204,20 +1148,7 @@ export async function cancelCustomerSale(input: {
           tx,
         );
       }
-      if (customerId) {
-        await tx.insert(customerLedger).values({
-          id: ulid(),
-          customerId,
-          type: "sale_on_account",
-          amountMinor: -lineTotalOf(item),
-          refType: "order_item",
-          refId: item.id,
-          note: `cancelled: ${input.reason.trim()}`,
-          createdByUserId: input.cancelledByUserId,
-        });
-      }
     }
-    if (customerId) await syncCustomerBalance(tx, customerId);
 
     await tx
       .update(orders)
@@ -1234,9 +1165,10 @@ export async function cancelCustomerSale(input: {
 }
 
 /**
- * Reassign an open Console sale to a different customer (root-only). Moves the
- * sale's net ledger contribution off the old customer and onto the new one as
- * a paired `adjustment`, then re-checks the new customer's credit limit.
+ * Reassign an open Console sale to a different customer (root-only). An open
+ * sale has posted nothing to `customer_ledger` yet (AR commits at close), so
+ * this is just a relabel — there is no balance to move and no limit to check
+ * here (the credit limit is enforced when the sale is closed).
  */
 export async function changeCustomerSaleCustomer(input: {
   orderId: string;
@@ -1245,63 +1177,13 @@ export async function changeCustomerSaleCustomer(input: {
 }): Promise<Order> {
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);
-    const oldCustomerId = order.customerId;
-    if (oldCustomerId === input.newCustomerId) {
+    if (order.customerId === input.newCustomerId) {
       throw new OrderError("INVALID_INPUT", "order already belongs to that customer");
     }
     const newCustomer = await tx.query.customers.findFirst({
       where: eq(customers.id, input.newCustomerId),
     });
     if (!newCustomer) throw new OrderError("CUSTOMER_NOT_FOUND");
-
-    // Net ledger contribution of this order = its item rows minus payments.
-    const itemRows = await tx
-      .select({ id: orderItems.id })
-      .from(orderItems)
-      .where(eq(orderItems.orderId, order.id));
-    const payRows = await tx
-      .select({ id: orderPayments.id })
-      .from(orderPayments)
-      .where(eq(orderPayments.orderId, order.id));
-    const refIds = [...itemRows, ...payRows].map((r) => r.id);
-    const ledgerRows = refIds.length
-      ? await tx
-          .select()
-          .from(customerLedger)
-          .where(inArray(customerLedger.refId, refIds))
-      : [];
-    const net = ledgerRows.reduce((sum, r) => sum + r.amountMinor, 0);
-
-    if (
-      net > 0 &&
-      newCustomer.creditLimitMinor != null &&
-      newCustomer.balanceMinor + net > newCustomer.creditLimitMinor
-    ) {
-      throw new OrderError("CREDIT_LIMIT_EXCEEDED");
-    }
-
-    if (net !== 0 && oldCustomerId) {
-      await tx.insert(customerLedger).values({
-        id: ulid(),
-        customerId: oldCustomerId,
-        type: "adjustment",
-        amountMinor: -net,
-        note: `open sale ${order.id} reassigned to customer ${input.newCustomerId}`,
-        createdByUserId: input.changedByUserId,
-      });
-      await syncCustomerBalance(tx, oldCustomerId);
-    }
-    if (net !== 0) {
-      await tx.insert(customerLedger).values({
-        id: ulid(),
-        customerId: input.newCustomerId,
-        type: "adjustment",
-        amountMinor: net,
-        note: `open sale ${order.id} reassigned from customer ${oldCustomerId ?? "none"}`,
-        createdByUserId: input.changedByUserId,
-      });
-      await syncCustomerBalance(tx, input.newCustomerId);
-    }
 
     await tx
       .update(orders)

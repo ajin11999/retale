@@ -1393,17 +1393,29 @@ Invariant: `customers.balance_minor == SUM(customer_ledger.amount_minor)` per cu
 - `closeCustomerSale(orderId)` — sets `closed_at`; immutable after.
 - `changeCustomerSaleCustomer(orderId, newCustomerId)` — **root only**.
 
+### AR write timing — deferred to close (console sales)
+
+Mirrors the tracking-account rule (see **Tracking accounts → Ledger write timing**): an open
+console sale accumulates **without any `customer_ledger` writes**. Item adds, edits, voids, and
+payments touch only `order_items`, `stock_movements`, and `order_payments`. At close, the service
+posts **one** `customer_ledger` row for the unpaid remainder (`total − payments`):
+`sale_on_account` when positive, `refund_credit` when overpaid (cash already collected). A
+fully-paid sale posts nothing. This keeps AR consistent with attribution, matches
+`createPosOrder` (one remainder row), and keeps the journal export / AR aging free of churn rows
+that net to a single number. **Stock still moves live** per line — `stock_movements` is a
+movement ledger, not a financial one, and live decrement preserves oversell protection.
+
 ### Item-level operations (open console sales)
 
-- **Voiding** marks the row `voided_at`/`voided_by_user_id`/`void_reason` (not hard delete). Reverses the stock movement and customer_ledger entry in the same transaction. Audit preserved.
-- **Edits** = void + re-add. No direct row updates on `order_items`. Keeps snapshot rule intact.
+- **Voiding** marks the row `voided_at`/`voided_by_user_id`/`void_reason` (not hard delete). Reverses the **stock movement** in the same transaction (no `customer_ledger` to reverse — AR is deferred). Audit preserved.
+- **Edits** apply in place via `updateCustomerSaleItem` (qty/discount/price/display-name), adjusting stock by the qty delta and recomputing the attribution snapshot; the snapshot rule is preserved by keeping the original snapshot fields. Bundle component lines are not editable (void and re-add the bundle).
 - **Closed sales** are fully immutable — no item adds, no voids, no payment changes.
 
 ### Behavior rules
 
 | Rule | Notes |
 |---|---|
-| Credit limit | If `credit_limit_minor` set, any operation pushing balance past it (sale_on_account, item add to open sale) is rejected. NULL = no limit. |
+| Credit limit | If `credit_limit_minor` set, a charge pushing balance past it is rejected. For **POS orders** this is checked on create; for **console sales** AR posts only at close, so the limit is enforced **at close** (drafting beyond it is allowed). NULL = no limit. |
 | Auto-apply store credit | **No.** Negative balance is never auto-deducted. Clerk explicitly records a payment from credit. |
 | Adjustments (write-offs) | **Root only.** Note required. |
 | Customer required for `on_account` (unpaid balance) | Walk-in orders must be fully paid. |
