@@ -30,6 +30,7 @@
         priceMode
         minQty
         minMarginBps
+        costRatioBps
         replenishMonitored
         archivedAt
         createdAt
@@ -126,6 +127,7 @@
       $priceMode: PriceMode
       $minQty: Int
       $minMarginBps: Int
+      $costRatioBps: Int
       $replenishMonitored: Boolean
     ) {
       updateProduct(
@@ -139,6 +141,7 @@
         priceMode: $priceMode
         minQty: $minQty
         minMarginBps: $minMarginBps
+        costRatioBps: $costRatioBps
         replenishMonitored: $replenishMonitored
       ) {
         id
@@ -151,6 +154,7 @@
         priceMode
         minQty
         minMarginBps
+        costRatioBps
         replenishMonitored
         archivedAt
       }
@@ -256,7 +260,7 @@
     }
   `);
 
-  const KINDS = ["physical", "service", "bundle"];
+  const KINDS = ["physical", "service", "bundle", "open_price"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
   const UNITS = ["piece", "g", "ml", "mm"];
 
@@ -306,6 +310,7 @@
     taxRateBps: number | null;
     minQty: number | null;
     minMarginBps: number | null;
+    costRatioBps: number | null;
     replenishMonitored: boolean;
   }
 
@@ -319,6 +324,7 @@
     taxRateBps: 0,
     minQty: null,
     minMarginBps: null,
+    costRatioBps: null,
     replenishMonitored: false,
   });
 
@@ -339,6 +345,7 @@
         taxRateBps: p.taxRateBps,
         minQty: p.minQty ?? null,
         minMarginBps: p.minMarginBps ?? null,
+        costRatioBps: p.costRatioBps ?? null,
         replenishMonitored: p.replenishMonitored,
       };
     }
@@ -386,6 +393,9 @@
         taxRateBps: canEditTax ? form.taxRateBps : undefined,
         minQty: form.minQty,
         minMarginBps: form.minMarginBps,
+        // Cost ratio is meaningful only for open-price products; clear it
+        // otherwise so a kind change doesn't leave a stale ratio behind.
+        costRatioBps: form.kind === "open_price" ? form.costRatioBps : null,
         replenishMonitored: form.replenishMonitored,
       }),
     );
@@ -956,6 +966,22 @@
             disabled={!canEdit}
           />
         </label>
+        {#if form.kind === "open_price"}
+          <label class="space-y-1">
+            <span class="text-sm font-medium">Cost ratio (%)</span>
+            <Input
+              type="number"
+              step="0.1"
+              value={bpsToPct(form.costRatioBps)}
+              oninput={(e) =>
+                (form.costRatioBps = pctToBps(e.currentTarget.value))}
+              disabled={!canEdit}
+            />
+            <span class="text-xs text-muted-foreground"
+              >Assumed cost as % of the entered sale price.</span
+            >
+          </label>
+        {/if}
       </div>
 
       <label class="flex items-center gap-2">

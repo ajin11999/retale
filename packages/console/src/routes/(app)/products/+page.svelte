@@ -46,6 +46,7 @@
       $kind: ProductKind
       $categoryId: ID
       $priceMode: PriceMode!
+      $costRatioBps: Int
       $variants: [VariantInput!]!
     ) {
       createProduct(
@@ -53,6 +54,7 @@
         kind: $kind
         categoryId: $categoryId
         priceMode: $priceMode
+        costRatioBps: $costRatioBps
         variants: $variants
       ) {
         id
@@ -110,7 +112,7 @@
   const canEdit = $derived(has("product.edit"));
   const canEditPrice = $derived(has("product.edit_price"));
 
-  const KINDS = ["physical", "service", "bundle"];
+  const KINDS = ["physical", "service", "bundle", "open_price"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
 
   interface ProductDraft {
@@ -121,6 +123,7 @@
     sku: string;
     priceMinor: number | null;
     costMinor: number | null;
+    costRatioBps: number | null;
   }
 
   let draft = $state<ProductDraft | null>(null);
@@ -136,6 +139,7 @@
       sku: "",
       priceMinor: 0,
       costMinor: 0,
+      costRatioBps: null,
     };
     feedback = null;
   }
@@ -151,6 +155,7 @@
         kind: d.kind as never,
         categoryId: d.categoryId || null,
         priceMode: d.priceMode as never,
+        costRatioBps: d.kind === "open_price" ? d.costRatioBps : null,
         variants: [
           {
             sku: d.sku.trim() || undefined,
@@ -487,6 +492,23 @@
             {#each KINDS as k (k)}<option value={k}>{k}</option>{/each}
           </Select>
         </label>
+        {#if draft.kind === "open_price"}
+          <label class="space-y-1">
+            <span class="text-xs font-medium">Cost ratio (%)</span>
+            <Input
+              type="number"
+              step="0.1"
+              value={draft.costRatioBps == null ? null : draft.costRatioBps / 100}
+              oninput={(e) => {
+                const n = Number.parseFloat(e.currentTarget.value);
+                draft!.costRatioBps = Number.isFinite(n) ? Math.round(n * 100) : null;
+              }}
+            />
+            <span class="text-xs text-muted-foreground"
+              >Assumed cost as % of the entered sale price.</span
+            >
+          </label>
+        {/if}
         <label class="space-y-1">
           <span class="text-xs font-medium">Price mode</span>
           <Select bind:value={draft.priceMode}>
