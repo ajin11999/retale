@@ -652,8 +652,11 @@
   }
 
   // Combobox quick-create: spin up a product named after the typed query, then
-  // select its auto-created variant on the open line draft. refetch() pulls the
-  // new product into `products` so variantOptions can resolve its label.
+  // select its auto-created variant on the open line draft. The new product
+  // lives in the ref-data query (not the purchase row), so we re-pull that —
+  // refetch() only re-fetches PurchaseDetail and would never surface it. The
+  // ref-data refetch is what lets variantOptions resolve the new variant's
+  // label so the combobox shows it selected (and lists it without a hard reload).
   async function createProductForLine(name: string) {
     const d = itemDraft;
     if (!d) return;
@@ -672,8 +675,8 @@
       }
       const variantId = res.data?.createProduct.variants[0]?.id;
       if (variantId) {
+        await RefData.fetch({ policy: "NetworkOnly" });
         d.variantId = variantId;
-        await refetch();
         feedback = { ok: true, text: `Created “${name}”.` };
         focusLineField("line-qty");
       }

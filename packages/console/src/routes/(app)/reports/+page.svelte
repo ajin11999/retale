@@ -10,8 +10,11 @@
   // Each report is its own query store, fetched on demand — a viewer may hold
   // only some report.* keys, so querying them together would error on the
   // fields they cannot see. +page.ts is omitted; these fetch client-side.
+  // Reports are point-in-time snapshots — always re-query so a sale/payment made
+  // elsewhere (e.g. an order just closed in the POS) shows up, instead of serving
+  // Houdini's cached copy from the previous fetch.
   const SalesReport = graphql(`
-    query SalesReport($periodStart: String!, $periodEnd: String!) {
+    query SalesReport($periodStart: String!, $periodEnd: String!) @cache(policy: NetworkOnly) {
       salesReport(periodStart: $periodStart, periodEnd: $periodEnd) {
         periodStart
         periodEnd
@@ -28,7 +31,7 @@
   `);
 
   const ProfitReport = graphql(`
-    query ProfitReport($periodStart: String!, $periodEnd: String!) {
+    query ProfitReport($periodStart: String!, $periodEnd: String!) @cache(policy: NetworkOnly) {
       profitReport(periodStart: $periodStart, periodEnd: $periodEnd) {
         revenueMinor
         cogsMinor
@@ -39,7 +42,7 @@
   `);
 
   const ArAgingReport = graphql(`
-    query ArAgingReport {
+    query ArAgingReport @cache(policy: NetworkOnly) {
       arAgingReport {
         asOf
         totalBalanceMinor
@@ -57,7 +60,7 @@
   `);
 
   const ApAgingReport = graphql(`
-    query ApAgingReport {
+    query ApAgingReport @cache(policy: NetworkOnly) {
       apAgingReport {
         asOf
         totalBalanceMinor
@@ -75,7 +78,7 @@
   `);
 
   const SessionVarianceReport = graphql(`
-    query SessionVarianceReport($periodStart: String!, $periodEnd: String!) {
+    query SessionVarianceReport($periodStart: String!, $periodEnd: String!) @cache(policy: NetworkOnly) {
       sessionVarianceReport(periodStart: $periodStart, periodEnd: $periodEnd) {
         totalVarianceMinor
         unreconciledCount
@@ -96,7 +99,7 @@
   // Current tracking-account balances — read-only mirror of /tracking, shown as
   // a Reports tab. Not period-driven; reuses the existing trackingAccounts field.
   const TrackingBalances = graphql(`
-    query TrackingBalances {
+    query TrackingBalances @cache(policy: NetworkOnly) {
       trackingAccounts {
         id
         parentId
@@ -113,7 +116,7 @@
   // GnuCash inventory-valuation entry. Both reuse the existing list queries and
   // are summed client-side (retail volumes are small).
   const ReportPurchases = graphql(`
-    query ReportPurchases {
+    query ReportPurchases @cache(policy: NetworkOnly) {
       purchases(includeCancelled: true) {
         id
         snapshotVendorName
@@ -124,7 +127,7 @@
     }
   `);
   const ReportDeliveries = graphql(`
-    query ReportDeliveries {
+    query ReportDeliveries @cache(policy: NetworkOnly) {
       deliveries {
         id
         date
