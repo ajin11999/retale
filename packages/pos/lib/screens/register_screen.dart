@@ -658,7 +658,7 @@ class _CartRail extends StatelessWidget {
                         ? PopupMenuButton<String>(
                             padding: EdgeInsets.zero,
                             iconSize: 18,
-                            tooltip: 'Cart actions',
+                            tooltip: '',
                             icon: const Icon(Icons.more_vert),
                             onSelected: (choice) {
                               if (choice == 'rename') onRename(i);
