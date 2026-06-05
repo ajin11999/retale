@@ -24,8 +24,11 @@ dependencies:
   # Decode JWT exp claim for proactive token refresh.
   jwt_decoder: ^2.0.1
 
-  # Open WhatsApp (wa.me deep link) to send a receipt.
+  # Open WhatsApp (wa.me deep link) to send a receipt. On native we hand off to
+  # url_launcher; on web/PWA we click a synthesised <a target="_blank"> via the
+  # `web` package, since window.open is silently no-op'd in a standalone PWA.
   url_launcher: ^6.3.0
+  web: ^1.1.0
 
   # Render the receipt to a PDF and open the OS/browser print dialog. Works on
   # Windows/Linux desktop and web alike.
