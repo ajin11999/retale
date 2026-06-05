@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'receipt.dart';
 import 'receipt_service.dart';
+import 'share_launcher.dart' show ShareResult;
 
 /// Show a sheet that previews [receipt] and lets the cashier confirm or edit
 /// the WhatsApp number, then opens WhatsApp with the receipt text. [phone] is
@@ -33,6 +34,7 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
   late final TextEditingController _phone =
       TextEditingController(text: widget.phone ?? '');
   bool _busy = false;
+  bool _sharing = false;
   String? _error;
 
   @override
@@ -59,6 +61,33 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Share the receipt as a PDF via the platform share sheet — the user picks
+  /// WhatsApp there and the PDF goes as an attachment. No phone number needed.
+  Future<void> _sharePdf() async {
+    setState(() {
+      _sharing = true;
+      _error = null;
+    });
+    try {
+      final result =
+          await ReceiptService.instance.shareReceiptPdf(widget.receipt);
+      switch (result) {
+        case ShareResult.shared:
+          if (mounted) Navigator.pop(context);
+        case ShareResult.dismissed:
+          break; // user backed out — leave the sheet open, no error
+        case ShareResult.unsupported:
+          setState(() => _error =
+              "This device can't share files. Use Print, or Open WhatsApp to "
+              'send the text.');
+        case ShareResult.failed:
+          setState(() => _error = "Couldn't share the receipt PDF.");
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
     }
   }
 
@@ -114,7 +143,25 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
           FilledButton.icon(
             icon: const Icon(Icons.send),
             label: const Text('Open WhatsApp'),
-            onPressed: _busy ? null : _send,
+            onPressed: (_busy || _sharing) ? null : _send,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: _sharing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.picture_as_pdf_outlined),
+            label: Text(_sharing ? 'Preparing PDF…' : 'Send as PDF'),
+            onPressed: (_busy || _sharing) ? null : _sharePdf,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Text uses the number above. “Send as PDF” opens your share sheet — '
+            'pick WhatsApp to attach the receipt.',
+            style: TextStyle(fontSize: 11, color: scheme.outline),
           ),
         ],
       ),

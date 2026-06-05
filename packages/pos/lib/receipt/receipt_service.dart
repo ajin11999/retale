@@ -7,6 +7,7 @@ import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import 'receipt.dart';
 import 'receipt_pdf.dart';
+import 'share_launcher.dart';
 import 'wa_launcher.dart';
 
 /// Fetches the receipt header once, normalises phone numbers, and opens
@@ -88,6 +89,29 @@ class ReceiptService {
     final uri = Uri.parse(
         'https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
     return openExternal(uri);
+  }
+
+  /// Render [receipt] to a PDF and offer it through the platform share sheet,
+  /// so the user can pick WhatsApp and the receipt rides along as an attachment
+  /// (a `wa.me` link can only carry text). The recipient is chosen in the share
+  /// sheet, so no phone number is needed here.
+  ///
+  /// On web this uses the Web Share API; it needs a secure context (https or
+  /// localhost) and returns [ShareResult.unsupported] where files can't be
+  /// shared, so the caller can fall back to printing.
+  Future<ShareResult> shareReceiptPdf(Receipt receipt) async {
+    final logo = await _logoImage(receipt.store);
+    final bytes = await buildReceiptPdf(receipt, PdfPageFormat.roll80, logo: logo);
+    final label = receipt.displayNumber == null
+        ? 'Receipt'
+        : 'Receipt ${receipt.displayNumber}';
+    return shareReceiptFile(
+      bytes: bytes,
+      filename: '${label.replaceAll(' ', '-')}.pdf',
+      mimeType: 'application/pdf',
+      title: label,
+      text: '$label — see the attached PDF.',
+    );
   }
 
   /// Open the OS/browser print dialog with [receipt] rendered to PDF. The
