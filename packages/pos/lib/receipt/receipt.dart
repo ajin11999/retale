@@ -4,10 +4,13 @@ import '../models/money.dart';
 
 /// Business identity printed at the top of a receipt.
 class StoreInfo {
-  const StoreInfo({required this.name, this.phone});
+  const StoreInfo({required this.name, this.logoUrl});
 
   final String name;
-  final String? phone;
+
+  /// Absolute URL of the business logo (PNG), or null when none is set. When
+  /// present, a printed receipt shows the logo in place of the store name.
+  final String? logoUrl;
 }
 
 /// One line on a receipt: a name, a quantity, the unit price and the total.
@@ -72,13 +75,15 @@ class Receipt {
         .cast<Map<String, dynamic>>()
         .fold<int>(0, (sum, p) => sum + (p['amountMinor'] as num).toInt());
     final customer = order['customer'] as Map<String, dynamic>?;
+    final total = (order['totalMinor'] as num).toInt();
     return Receipt(
       store: store,
       lines: lines,
-      totalMinor: (order['totalMinor'] as num).toInt(),
+      totalMinor: total,
       displayNumber: order['displayNumber'] as String?,
       createdAt: DateTime.tryParse(order['createdAt'] as String? ?? ''),
       paidMinor: paid > 0 ? paid : null,
+      changeMinor: paid > total ? paid - total : null,
       customerName: customer?['name'] as String? ??
           order['snapshotCustomerName'] as String?,
     );
@@ -88,9 +93,6 @@ class Receipt {
   /// `*bold*` for the store name and header.
   String toMessage() {
     final b = StringBuffer()..writeln('*${store.name}*');
-    if (store.phone != null && store.phone!.trim().isNotEmpty) {
-      b.writeln(store.phone);
-    }
     b.writeln();
     if (displayNumber != null) b.writeln('Receipt $displayNumber');
     if (createdAt != null) b.writeln(formatDate(createdAt!));
@@ -105,7 +107,7 @@ class Receipt {
     }
     b.writeln('--------------------------------');
     b.writeln('*Total: ${Money.format(totalMinor)}*');
-    if (paidMinor != null) b.writeln('Paid: ${Money.format(paidMinor!)}');
+    if (paidMinor != null) b.writeln('Cash: ${Money.format(paidMinor!)}');
     if (changeMinor != null && changeMinor! > 0) {
       b.writeln('Change: ${Money.format(changeMinor!)}');
     }

@@ -140,10 +140,10 @@ class Ops {
     }
   ''';
 
-  /// Business name + phone for the receipt header.
+  /// Business name + logo for the receipt header.
   static const businessReceiptInfo = '''
     query BusinessReceiptInfo {
-      businessReceiptInfo { name phone }
+      businessReceiptInfo { name logoUrl }
     }
   ''';
 

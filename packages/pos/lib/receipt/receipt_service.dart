@@ -1,6 +1,8 @@
 import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import 'receipt.dart';
@@ -14,9 +16,11 @@ class ReceiptService {
   static final ReceiptService instance = ReceiptService._();
 
   StoreInfo? _cached;
+  pw.ImageProvider? _logo;
+  bool _logoFetched = false;
 
-  /// The business name/phone for receipt headers, cached for the session. Falls
-  /// back to a generic header when the API can't be reached.
+  /// The business name/phone/logo for receipt headers, cached for the session.
+  /// Falls back to a generic header when the API can't be reached.
   Future<StoreInfo> storeInfo() async {
     final cached = _cached;
     if (cached != null) return cached;
@@ -25,13 +29,44 @@ class ReceiptService {
       final info = data['businessReceiptInfo'] as Map<String, dynamic>;
       final store = StoreInfo(
         name: info['name'] as String,
-        phone: info['phone'] as String?,
+        logoUrl: _absoluteLogoUrl(info['logoUrl'] as String?),
       );
       _cached = store;
       return store;
     } on GraphQLAppException {
       return const StoreInfo(name: 'Receipt');
     }
+  }
+
+  /// Resolve the API-relative logo path (e.g. `/business-logo`) against the
+  /// configured API base. Returns null when no logo is set or no API URL is
+  /// configured; passes through values that are already absolute.
+  static String? _absoluteLogoUrl(String? logoUrl) {
+    if (logoUrl == null || logoUrl.isEmpty) return null;
+    if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+      return logoUrl;
+    }
+    final base = AppConfig.instance.apiUrl;
+    if (base == null || base.isEmpty) return null;
+    final trimmed = base.replaceAll(RegExp(r'/+$'), '');
+    final path = logoUrl.startsWith('/') ? logoUrl : '/$logoUrl';
+    return '$trimmed$path';
+  }
+
+  /// Download the business logo for embedding in a printed receipt, cached for
+  /// the session. Best-effort: returns null (so the receipt falls back to the
+  /// store name) when no logo is set or the fetch fails.
+  Future<pw.ImageProvider?> _logoImage(StoreInfo store) async {
+    if (_logoFetched) return _logo;
+    _logoFetched = true;
+    final url = store.logoUrl;
+    if (url == null) return null;
+    try {
+      _logo = await networkImage(url);
+    } catch (_) {
+      _logo = null;
+    }
+    return _logo;
   }
 
   /// Reduce a phone number to the digits `wa.me` expects (no `+`, spaces or
@@ -67,12 +102,14 @@ class ReceiptService {
     final name = receipt.displayNumber == null
         ? 'Receipt'
         : 'Receipt ${receipt.displayNumber}';
+    final logo = await _logoImage(receipt.store);
     final printed = await Printing.layoutPdf(
       name: name,
-      onLayout: (format) => buildReceiptPdf(receipt, format),
+      onLayout: (format) => buildReceiptPdf(receipt, format, logo: logo),
     );
     if (!printed) {
-      final bytes = await buildReceiptPdf(receipt, PdfPageFormat.roll80);
+      final bytes =
+          await buildReceiptPdf(receipt, PdfPageFormat.roll80, logo: logo);
       await Printing.sharePdf(bytes: bytes, filename: '$name.pdf');
     }
     return printed;
