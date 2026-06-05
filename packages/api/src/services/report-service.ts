@@ -213,7 +213,14 @@ function ageLedger(
     else if (ageDays <= 90) row.bucket61_90 += charge.remaining;
     else row.bucket90plus += charge.remaining;
   }
-  return row.balanceMinor > 0 ? row : null;
+  // Credit left after settling every charge is an unapplied credit — the party
+  // overpaid or holds store credit. Surface it as a negative current-bucket
+  // balance so these accounts aren't silently dropped from the report.
+  if (credit > 0) {
+    row.balanceMinor -= credit;
+    row.bucket0_30 -= credit;
+  }
+  return row.balanceMinor !== 0 ? row : null;
 }
 
 /** Build an aging report from a party-keyed set of ledger entries. */

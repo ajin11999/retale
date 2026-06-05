@@ -148,6 +148,22 @@ describe("arAgingReport", () => {
     ]);
     expect((await arAgingReport()).rows).toHaveLength(0);
   });
+
+  test("surfaces an overpaid customer as a negative current-bucket balance", async () => {
+    const customerId = ulid();
+    await db.insert(customers).values({ id: customerId, name: "Overpaid" });
+    await db.insert(customerLedger).values([
+      { id: ulid(), customerId, type: "sale_on_account", amountMinor: 5000, createdAt: daysAgo(10) },
+      { id: ulid(), customerId, type: "payment", amountMinor: -8000, createdAt: daysAgo(1) },
+    ]);
+    const report = await arAgingReport();
+    expect(report.rows).toHaveLength(1);
+    const row = report.rows[0]!;
+    expect(row.balanceMinor).toBe(-3000); // 5k charge - 8k paid
+    expect(row.bucket0_30).toBe(-3000);
+    expect(row.bucket31_60).toBe(0);
+    expect(report.totalBalanceMinor).toBe(-3000);
+  });
 });
 
 describe("apAgingReport", () => {
