@@ -9,9 +9,9 @@
   import { treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
-  // Bundled query: purchase header (for context + line metadata),
-  // openReceivingCheck (draft existence), receivingCheckLines (the working
-  // grid), and locations (for the target picker when starting a new check).
+  // The receiving state that changes as the check is worked: purchase header
+  // (context + line metadata), openReceivingCheck (draft existence) and
+  // receivingCheckLines (the working grid). This is all refetch() re-pulls.
   graphql(`
     query ReceivingCheck($purchaseId: ID!) {
       purchase(id: $purchaseId) {
@@ -46,6 +46,14 @@
         status
         provisionalStatus
       }
+    }
+  `);
+
+  // Static lookups: locations (target picker) + catalog (line labels). Neither
+  // depends on the receiving state, so they live in their own query and load
+  // once — keeping them out of the per-line-save refetch().
+  graphql(`
+    query ReceivingRefData {
       locations(includeArchived: false) {
         id
         name
@@ -105,17 +113,18 @@
 
   let { data }: { data: PageData } = $props();
   const ReceivingCheck = $derived(data.ReceivingCheck);
+  const RefData = $derived(data.ReceivingRefData);
   const purchase = $derived($ReceivingCheck.data?.purchase);
   const draft = $derived($ReceivingCheck.data?.openReceivingCheck);
   const lines = $derived($ReceivingCheck.data?.receivingCheckLines ?? []);
-  const locations = $derived($ReceivingCheck.data?.locations ?? []);
+  const locations = $derived($RefData.data?.locations ?? []);
   // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
   // under different parents are distinguishable.
   const locationPaths = $derived(treePathMap(locations));
   const locationOptions = $derived(
     locations.map((l) => ({ value: l.id, label: locationPaths.get(l.id) ?? l.name })),
   );
-  const products = $derived($ReceivingCheck.data?.products ?? []);
+  const products = $derived($RefData.data?.products ?? []);
 
   // Flat variant lookup so the lines grid can label by SKU / product name.
   const variantLabel = $derived.by(() => {

@@ -72,6 +72,14 @@
           id
         }
       }
+    }
+  `);
+
+  // Vendor + catalog lookups for the header picker and line variant combobox.
+  // Split out of PurchaseDetail so refetch() (after every line/section edit) only
+  // re-pulls the small purchase row — never the whole catalog. Loaded once.
+  graphql(`
+    query PurchaseEditorRefData {
       vendors {
         id
         name
@@ -310,16 +318,17 @@
 
   let { data }: { data: PageData } = $props();
   const PurchaseDetail = $derived(data.PurchaseDetail);
+  const RefData = $derived(data.PurchaseEditorRefData);
 
   const purchase = $derived($PurchaseDetail.data?.purchase);
-  const vendors = $derived($PurchaseDetail.data?.vendors ?? []);
+  const vendors = $derived($RefData.data?.vendors ?? []);
   // Searchable Combobox options for the header vendor; the leading empty row
   // keeps the "ad-hoc vendor" (no vendor on file) choice.
   const vendorOptions = $derived([
     { value: "", label: "— Ad-hoc vendor —" },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
-  const products = $derived($PurchaseDetail.data?.products ?? []);
+  const products = $derived($RefData.data?.products ?? []);
 
   // Flat variant options for the item editor — "Product · SKU (label)".
   // `value`/`label` shape feeds the searchable Combobox directly.
@@ -420,8 +429,10 @@
 
   // Force a network round-trip: the line / section / send mutations return only
   // `{ id }`, so Houdini's normalized cache never learns the new or changed
-  // rows. The default CacheOrNetwork policy would then re-serve the stale
-  // cached list — NetworkOnly guarantees the refetched list reflects the edit.
+  // rows (and the server-computed header total/revision must be recomputed).
+  // The default CacheOrNetwork policy would then re-serve the stale cached list
+  // — NetworkOnly guarantees the refetched list reflects the edit. This re-pulls
+  // only the purchase row; the vendor/catalog lookups live in their own query.
   const refetch = () => {
     // The network result becomes the new truth — drop any optimistic reorder.
     itemOrder = null;

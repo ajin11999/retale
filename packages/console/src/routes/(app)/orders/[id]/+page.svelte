@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CachePolicy, graphql } from "$houdini";
+  import { graphql } from "$houdini";
   import { page } from "$app/state";
   import { Ban, Pencil } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
@@ -69,9 +69,12 @@
     }
   `);
 
-  // Each mutation re-selects the affected line's live variant totalQty so
-  // Houdini normalizes the ProductVariant in its cache — keeping the products
-  // screen's stock in sync without a manual refresh.
+  // Each item-mutating mutation re-selects the FULL item shape the OrderDetail
+  // query reads (plus the live variant totalQty for the products screen's stock).
+  // Returning the complete shape keeps Houdini's normalized cache complete, so
+  // the view updates instantly from the cache — no manual refetch needed. A
+  // partial selection here would leave new lines missing required fields, which
+  // makes the OrderDetail query resolve to null until a full refetch lands.
   const AddItem = graphql(`
     mutation ConsoleAddCustomerSaleItem(
       $orderId: ID!
@@ -79,8 +82,26 @@
     ) {
       addCustomerSaleItem(orderId: $orderId, item: $item) {
         id
+        status
+        totalMinor
         items {
           id
+          productId
+          qty
+          discountMinor
+          displayName
+          snapshotProductName
+          snapshotPublicName
+          snapshotBundleName
+          snapshotProductSku
+          snapshotVariantLabel
+          snapshotUnit
+          snapshotCategoryName
+          snapshotPriceMinor
+          snapshotCostMinor
+          lineTotalMinor
+          voidedAt
+          voidReason
           variant {
             id
             totalQty
@@ -106,8 +127,26 @@
         displayNameOverride: $displayNameOverride
       ) {
         id
+        status
+        totalMinor
         items {
           id
+          productId
+          qty
+          discountMinor
+          displayName
+          snapshotProductName
+          snapshotPublicName
+          snapshotBundleName
+          snapshotProductSku
+          snapshotVariantLabel
+          snapshotUnit
+          snapshotCategoryName
+          snapshotPriceMinor
+          snapshotCostMinor
+          lineTotalMinor
+          voidedAt
+          voidReason
           variant {
             id
             totalQty
@@ -121,8 +160,26 @@
     mutation ConsoleVoidCustomerSaleItem($orderItemId: ID!, $reason: String!) {
       voidCustomerSaleItem(orderItemId: $orderItemId, reason: $reason) {
         id
+        status
+        totalMinor
         items {
           id
+          productId
+          qty
+          discountMinor
+          displayName
+          snapshotProductName
+          snapshotPublicName
+          snapshotBundleName
+          snapshotProductSku
+          snapshotVariantLabel
+          snapshotUnit
+          snapshotCategoryName
+          snapshotPriceMinor
+          snapshotCostMinor
+          lineTotalMinor
+          voidedAt
+          voidReason
           variant {
             id
             totalQty
@@ -139,6 +196,14 @@
     ) {
       addCustomerSalePayment(orderId: $orderId, amountMinor: $amountMinor) {
         id
+        status
+        totalMinor
+        payments {
+          id
+          method
+          amountMinor
+          createdAt
+        }
       }
     }
   `);
@@ -158,6 +223,7 @@
         id
         status
         displayNumber
+        closedAt
       }
     }
   `);
@@ -167,8 +233,27 @@
       cancelCustomerSale(orderId: $orderId, reason: $reason) {
         id
         status
+        totalMinor
+        cancelledAt
+        cancellationReason
         items {
           id
+          productId
+          qty
+          discountMinor
+          displayName
+          snapshotProductName
+          snapshotPublicName
+          snapshotBundleName
+          snapshotProductSku
+          snapshotVariantLabel
+          snapshotUnit
+          snapshotCategoryName
+          snapshotPriceMinor
+          snapshotCostMinor
+          lineTotalMinor
+          voidedAt
+          voidReason
           variant {
             id
             totalQty
@@ -211,14 +296,6 @@
     } finally {
       busy = false;
     }
-  }
-
-  async function refresh() {
-    if (!order) return;
-    await OrderDetail.fetch({
-      variables: { id: order.id },
-      policy: CachePolicy.NetworkOnly,
-    });
   }
 
   // ---- Variant picker ------------------------------------------------------
@@ -328,10 +405,7 @@
         },
       }),
     );
-    if (ok) {
-      clearDraft();
-      await refresh();
-    }
+    if (ok) clearDraft();
   }
 
   function onPickerKey(e: KeyboardEvent) {
@@ -359,10 +433,7 @@
   async function voidLine(itemId: string) {
     const reason = prompt("Void reason?")?.trim();
     if (!reason) return;
-    const ok = await run(() =>
-      VoidItem.mutate({ orderItemId: itemId, reason }),
-    );
-    if (ok) await refresh();
+    await run(() => VoidItem.mutate({ orderItemId: itemId, reason }));
   }
 
   // ---- Per-line edit -------------------------------------------------------
@@ -428,15 +499,13 @@
         displayNameOverride: d.displayName.trim(),
       }),
     );
-    if (ok) {
-      lineDraft = null;
-      await refresh();
-    }
+    if (ok) lineDraft = null;
   }
 
   // ---- Order note ----------------------------------------------------------
-  // Editable only while open. Synced from the order when a different order
-  // loads, so an in-progress edit survives a plain refetch.
+  // Editable only while open. Synced from the order only when a different order
+  // loads (guarded by noteSyncedId), so an in-progress edit isn't clobbered when
+  // the cache re-emits the same order after an unrelated mutation.
   let noteDraft = $state("");
   let noteSyncedId = $state("");
   $effect(() => {
@@ -449,10 +518,9 @@
 
   async function saveNote() {
     if (!order) return;
-    const ok = await run(() =>
+    await run(() =>
       UpdateNote.mutate({ orderId: order.id, note: noteDraft.trim() }),
     );
-    if (ok) await refresh();
   }
 
   // ---- Payment entry -------------------------------------------------------
@@ -468,26 +536,19 @@
     const ok = await run(() =>
       AddPayment.mutate({ orderId: order.id, amountMinor: amt }),
     );
-    if (ok) {
-      payAmount = null;
-      await refresh();
-    }
+    if (ok) payAmount = null;
   }
 
   async function closeSale() {
     if (!order) return;
-    const ok = await run(() => CloseSale.mutate({ orderId: order.id }));
-    if (ok) await refresh();
+    await run(() => CloseSale.mutate({ orderId: order.id }));
   }
 
   async function cancelSale() {
     if (!order) return;
     const reason = prompt("Reason for cancelling this sale?")?.trim();
     if (!reason) return;
-    const ok = await run(() =>
-      CancelSale.mutate({ orderId: order.id, reason }),
-    );
-    if (ok) await refresh();
+    await run(() => CancelSale.mutate({ orderId: order.id, reason }));
   }
 
   const fmt = (iso: string | null | undefined) =>
