@@ -993,7 +993,7 @@
         <span class="text-sm font-medium">Monitored by the reorder forecast</span>
       </label>
 
-      <div class="flex justify-end">
+      <div class="flex justify-end pt-2">
         <Button disabled={busy || !canEdit} onclick={saveProduct}>
           Save details
         </Button>

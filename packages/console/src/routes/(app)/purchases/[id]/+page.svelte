@@ -1340,7 +1340,7 @@
           class="h-20 resize-none"
         />
       </label>
-      <div class="flex justify-end">
+      <div class="flex justify-end pt-2">
         <Button disabled={busy || !editable} onclick={saveHeader}>
           Save details
         </Button>

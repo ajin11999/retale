@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
@@ -286,6 +286,20 @@
   });
   const ledger = $derived($CustomerLedger.data?.customerLedger ?? []);
 
+  // Each ledger row's running AR balance immediately after that entry. The
+  // ledger comes newest-first, so we anchor at the customer's current balance
+  // (the balance after the newest entry) and walk backwards, subtracting each
+  // newer entry's delta. Anchoring at the live balance keeps this correct even
+  // when the ledger is truncated to its 100-row limit.
+  const ledgerRows = $derived.by(() => {
+    let balance = customer?.balanceMinor ?? 0;
+    return ledger.map((e) => {
+      const balanceAfter = balance;
+      balance -= e.amountMinor;
+      return { ...e, balanceAfter };
+    });
+  });
+
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
@@ -314,9 +328,17 @@
 
   const refetch = async () => {
     if (!customer) return;
-    await CustomerDetail.fetch({ variables: { id: customer.id } });
+    // NetworkOnly: a payment/adjustment adds a ledger row the cache doesn't
+    // know about, so CacheOrNetwork would replay the stale ledger and balance.
+    await CustomerDetail.fetch({
+      variables: { id: customer.id },
+      policy: CachePolicy.NetworkOnly,
+    });
     if (canViewLedger) {
-      await CustomerLedger.fetch({ variables: { customerId: customer.id } });
+      await CustomerLedger.fetch({
+        variables: { customerId: customer.id },
+        policy: CachePolicy.NetworkOnly,
+      });
     }
   };
 
@@ -553,7 +575,7 @@
           class="h-20 resize-none"
         />
       </label>
-      <div class="flex justify-end">
+      <div class="flex justify-end pt-2">
         <Button disabled={busy || !canEdit} onclick={saveCustomer}>
           Save details
         </Button>
@@ -738,30 +760,41 @@
           <table class="w-full text-sm">
             <thead class="border-b text-left text-muted-foreground">
               <tr>
-                <th class="py-1.5 font-medium">When</th>
-                <th class="py-1.5 font-medium">Type</th>
-                <th class="py-1.5 text-right font-medium">Amount</th>
-                <th class="py-1.5 font-medium">Note</th>
+                <th class="py-1.5 pr-4 font-medium">When</th>
+                <th class="py-1.5 pr-4 font-medium">Type</th>
+                <th class="py-1.5 pl-4 text-right font-medium">Amount</th>
+                <th class="py-1.5 pl-4 text-right font-medium">Balance</th>
+                <th class="py-1.5 pl-6 font-medium">Note</th>
               </tr>
             </thead>
             <tbody>
-              {#each ledger as e (e.id)}
+              {#each ledgerRows as e (e.id)}
                 <tr class="border-b last:border-0">
-                  <td class="py-1.5">{fmtDateTime(e.createdAt)}</td>
-                  <td class="py-1.5">{e.type}</td>
+                  <td class="whitespace-nowrap py-1.5 pr-4">
+                    {fmtDateTime(e.createdAt)}
+                  </td>
+                  <td class="py-1.5 pr-4">{e.type}</td>
                   <td
-                    class="py-1.5 text-right {e.amountMinor < 0
+                    class="whitespace-nowrap py-1.5 pl-4 text-right tabular-nums {e.amountMinor <
+                    0
                       ? 'text-emerald-700'
                       : ''}"
                   >
                     {formatMoney(e.amountMinor)}
                   </td>
-                  <td class="py-1.5 text-muted-foreground">{e.note ?? "—"}</td>
+                  <td
+                    class="whitespace-nowrap py-1.5 pl-4 text-right tabular-nums font-medium"
+                  >
+                    {formatMoney(e.balanceAfter)}
+                  </td>
+                  <td class="py-1.5 pl-6 text-muted-foreground">
+                    {e.note ?? "—"}
+                  </td>
                 </tr>
               {/each}
-              {#if ledger.length === 0}
+              {#if ledgerRows.length === 0}
                 <tr>
-                  <td colspan="4" class="py-6 text-center text-muted-foreground">
+                  <td colspan="5" class="py-6 text-center text-muted-foreground">
                     No ledger entries.
                   </td>
                 </tr>
