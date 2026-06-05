@@ -1249,6 +1249,56 @@
       </div>
     </div>
 
+    {#if isOpen}
+      <!-- Payment / close / cancel -->
+      <div class="space-y-3 rounded-lg border bg-card p-4">
+        <h2 class="text-sm font-semibold">Record payment</h2>
+        <div class="flex items-end gap-2">
+          <label class="flex-1 space-y-1">
+            <span class="text-xs font-medium">Amount (Rp)</span>
+            <MoneyInput
+              bind:value={payAmount}
+              placeholder={String(Math.max(computed - paid, 0))}
+              disabled={busy || !canEdit}
+            />
+          </label>
+          <Button
+            size="sm"
+            disabled={busy || !canEdit || !payAmount}
+            onclick={recordPayment}
+          >
+            Add payment
+          </Button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Console payments are recorded as cash. Outstanding above suggests the
+          remaining amount.
+        </p>
+
+        <div class="flex flex-wrap gap-2 border-t pt-3">
+          <Button
+            size="sm"
+            disabled={busy || !canClose}
+            onclick={closeSale}
+          >
+            Close sale
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busy || !canCancel}
+            onclick={cancelSale}
+          >
+            Cancel sale
+          </Button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Closing assigns a display number; the sale becomes immutable.
+          Cancelling voids every line and is permanent.
+        </p>
+      </div>
+    {/if}
+
     <!-- Send to customer -->
     <section class="space-y-3 rounded-lg border bg-card p-4">
       <div class="flex items-center justify-between">
@@ -1388,55 +1438,5 @@
         </div>
       {/if}
     </section>
-
-    {#if isOpen}
-      <!-- Payment / close / cancel -->
-      <div class="space-y-3 rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold">Record payment</h2>
-        <div class="flex items-end gap-2">
-          <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Amount (Rp)</span>
-            <MoneyInput
-              bind:value={payAmount}
-              placeholder={String(Math.max(computed - paid, 0))}
-              disabled={busy || !canEdit}
-            />
-          </label>
-          <Button
-            size="sm"
-            disabled={busy || !canEdit || !payAmount}
-            onclick={recordPayment}
-          >
-            Add payment
-          </Button>
-        </div>
-        <p class="text-xs text-muted-foreground">
-          Console payments are recorded as cash. Outstanding above suggests the
-          remaining amount.
-        </p>
-
-        <div class="flex flex-wrap gap-2 border-t pt-3">
-          <Button
-            size="sm"
-            disabled={busy || !canClose}
-            onclick={closeSale}
-          >
-            Close sale
-          </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            disabled={busy || !canCancel}
-            onclick={cancelSale}
-          >
-            Cancel sale
-          </Button>
-        </div>
-        <p class="text-xs text-muted-foreground">
-          Closing assigns a display number; the sale becomes immutable.
-          Cancelling voids every line and is permanent.
-        </p>
-      </div>
-    {/if}
   {/if}
 </div>
