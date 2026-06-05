@@ -521,7 +521,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               title: const Text('Print receipt'),
               onTap: () {
                 Navigator.pop(ctx);
-                ReceiptService.instance.printReceipt(receipt);
+                _print(receipt);
               },
             ),
             ListTile(
@@ -548,7 +548,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     final receipt = await _receiptFor(sale);
     if (!mounted) return;
-    await ReceiptService.instance.printReceipt(receipt);
+    await _print(receipt);
+  }
+
+  /// Print [receipt], surfacing whatever goes wrong instead of failing
+  /// silently (the browser print path can no-op or throw on web).
+  Future<void> _print(Receipt receipt) async {
+    try {
+      final printed = await ReceiptService.instance.printReceipt(receipt);
+      if (!printed) _toast('Opened the receipt PDF — print it from there');
+    } catch (e) {
+      _toast('Could not print the receipt: $e');
+    }
   }
 
   /// Show per-line and cart-wide margins for the active cart.
@@ -614,71 +625,74 @@ class _CartRail extends StatelessWidget {
     return Container(
       width: 76,
       color: scheme.surfaceContainerHighest,
-      child: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              padding: EdgeInsets.zero,
-              itemCount: register.count,
-              itemBuilder: (context, i) {
-                final cart = register.carts[i];
-                final selected = i == register.activeIndex;
-                final n = cart.lines.length;
-                return InkWell(
-                  onTap: () => register.select(i),
-                  onLongPress: () => _showMenu(context, i),
-                  child: Container(
-                    color: selected ? scheme.primaryContainer : null,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                    child: Column(
-                      children: [
-                        Text(
-                          register.labelFor(i),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontWeight: selected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal),
-                        ),
-                        if (n > 0)
-                          Text('$n item${n == 1 ? '' : 's'}',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: scheme.onSurfaceVariant)),
-                      ],
-                    ),
+      // The "+" rides as the last item just below the final cart, instead of
+      // being pinned to the rail's bottom edge.
+      child: ListView.builder(
+        padding: EdgeInsets.zero,
+        itemCount: register.count + 1,
+        itemBuilder: (context, i) {
+          if (i == register.count) {
+            return IconButton(
+              tooltip: 'New cart',
+              icon: const Icon(Icons.add),
+              onPressed: register.addCart,
+            );
+          }
+          final cart = register.carts[i];
+          final selected = i == register.activeIndex;
+          final n = cart.lines.length;
+          return InkWell(
+            onTap: () => register.select(i),
+            onLongPress: () => onRename(i), // touch shortcut to rename
+            child: Container(
+              color: selected ? scheme.primaryContainer : null,
+              padding: const EdgeInsets.only(
+                  top: 8, bottom: 12, left: 4, right: 4),
+              child: Column(
+                children: [
+                  // The ⋮ menu lives only on the active cart — left-click works
+                  // everywhere (touch, mouse), unlike right-click/long-press.
+                  SizedBox(
+                    height: 24,
+                    child: selected
+                        ? PopupMenuButton<String>(
+                            padding: EdgeInsets.zero,
+                            iconSize: 18,
+                            tooltip: 'Cart actions',
+                            icon: const Icon(Icons.more_vert),
+                            onSelected: (choice) {
+                              if (choice == 'rename') onRename(i);
+                              if (choice == 'close') onClose(i);
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                  value: 'rename', child: Text('Rename')),
+                              PopupMenuItem(
+                                  value: 'close', child: Text('Close')),
+                            ],
+                          )
+                        : null,
                   ),
-                );
-              },
+                  Text(
+                    register.labelFor(i),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontWeight:
+                            selected ? FontWeight.bold : FontWeight.normal),
+                  ),
+                  if (n > 0)
+                    Text('$n item${n == 1 ? '' : 's'}',
+                        style: TextStyle(
+                            fontSize: 10, color: scheme.onSurfaceVariant)),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            tooltip: 'New cart',
-            icon: const Icon(Icons.add),
-            onPressed: register.addCart,
-          ),
-        ],
+          );
+        },
       ),
     );
-  }
-
-  Future<void> _showMenu(BuildContext context, int index) async {
-    final box = context.findRenderObject() as RenderBox;
-    final origin = box.localToGlobal(Offset.zero);
-    final overlay = Offset.zero & MediaQuery.of(context).size;
-    final choice = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(origin & box.size, overlay),
-      items: const [
-        PopupMenuItem(value: 'rename', child: Text('Rename')),
-        PopupMenuItem(value: 'close', child: Text('Close')),
-      ],
-    );
-    if (choice == 'rename') onRename(index);
-    if (choice == 'close') onClose(index);
   }
 }
 
@@ -734,8 +748,8 @@ class _CartLineTile extends StatelessWidget {
   /// an exact quantity. Prefilled with plain (non-grouped) numbers so they
   /// parse back cleanly.
   Future<void> _edit(BuildContext context) async {
-    final priceController = TextEditingController(
-        text: (line.unitPriceMinor / Money.minorPerMajor).toStringAsFixed(2));
+    final priceController =
+        TextEditingController(text: Money.editText(line.unitPriceMinor));
     final qtyController = TextEditingController(text: '${line.qty}');
     final saved = await showDialog<bool>(
       context: context,

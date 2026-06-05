@@ -1,3 +1,4 @@
+import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -56,7 +57,24 @@ class ReceiptService {
 
   /// Open the OS/browser print dialog with [receipt] rendered to PDF. The
   /// layout adapts to the paper the dialog picks (min 80mm — a thermal roll).
-  Future<void> printReceipt(Receipt receipt) {
-    return Printing.layoutPdf(onLayout: (format) => buildReceiptPdf(receipt, format));
+  ///
+  /// Returns true when the print dialog was invoked. On web the in-place print
+  /// (a hidden iframe) can silently no-op — e.g. in an installed PWA or when
+  /// the browser blocks it — in which case we fall back to opening the rendered
+  /// PDF so the cashier can still print it, and return false so the caller can
+  /// tell the user what happened. Throws if the PDF itself can't be built.
+  Future<bool> printReceipt(Receipt receipt) async {
+    final name = receipt.displayNumber == null
+        ? 'Receipt'
+        : 'Receipt ${receipt.displayNumber}';
+    final printed = await Printing.layoutPdf(
+      name: name,
+      onLayout: (format) => buildReceiptPdf(receipt, format),
+    );
+    if (!printed) {
+      final bytes = await buildReceiptPdf(receipt, PdfPageFormat.roll80);
+      await Printing.sharePdf(bytes: bytes, filename: '$name.pdf');
+    }
+    return printed;
   }
 }

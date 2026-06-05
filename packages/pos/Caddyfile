@@ -14,7 +14,7 @@
 # Replace the IP with this machine's LAN address. Caddy's internal CA issues a
 # cert whose SAN matches it, so the POS devices reach the app at https://<ip>/.
 # If you have local DNS/mDNS, a hostname (e.g. pos.local) works here too.
-https://192.168.1.50 {
+https://192.168.0.29 {
 	root * build/web
 	encode zstd gzip
 
