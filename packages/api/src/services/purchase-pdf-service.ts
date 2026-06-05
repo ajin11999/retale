@@ -11,6 +11,7 @@ import { eq, inArray } from "drizzle-orm";
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib";
 import { products, productVariants } from "../db/schema/products.ts";
 import { db } from "../lib/db.ts";
+import { BUSINESS_LOGO_PATH } from "../lib/uploads.ts";
 import { resolveShipTo } from "./address-service.ts";
 import { getBusinessSettings } from "./business-service.ts";
 import {
@@ -94,8 +95,18 @@ const SIZE_SECTION = 9.5;
 
 const BLACK = rgb(0, 0, 0);
 const GREY = rgb(0.45, 0.45, 0.45);
-/** Zebra-stripe fill behind every other line row, for readability. */
-const STRIPE = rgb(0.95, 0.95, 0.95);
+/** Zebra-stripe behind every other line row, for readability. Drawn as
+ *  translucent black (not an opaque grey) so the column rules underneath show
+ *  through it — an opaque fill would hide them on every striped row. Over white
+ *  this composites to ~rgb(0.94), matching the old flat stripe. */
+const STRIPE_OPACITY = 0.06;
+/** Hairline vertical column rules — lighter than the box border, so the
+ *  columns read as separated without competing with the table outline. Drawn
+ *  beneath the frame and row rules, so the black lines always cross on top. */
+const COL_RULE = rgb(0.8, 0.8, 0.8);
+/** Paper white — used to erase column rules where a section row spans the
+ *  full table width like a merged cell. */
+const WHITE = rgb(1, 1, 1);
 
 /** Map characters the standard PDF fonts cannot encode to safe ASCII. */
 function sanitize(text: string): string {
@@ -290,13 +301,14 @@ export async function renderPurchaseOrderPdf(
     page.drawLine({ start: a, end: b, thickness: lw, color: BLACK });
   };
 
-  // -- Letterhead: logo box + business identity --
-  rect(LOGO_BOX);
-  // Embed the uploaded logo (PNG), scaled to fit inside the box with a small
-  // inset, preserving aspect ratio. Falls back to the business name centred in
-  // the box when there is no logo or the fetch/decode fails.
+  // -- Letterhead: logo + business identity --
+  // Embed the uploaded logo (PNG), scaled to fit inside LOGO_BOX with a small
+  // inset, preserving aspect ratio. When there is no logo (or it fails to
+  // read/decode) we draw the bordered box with the business name centred — the
+  // border frames the text placeholder, but is redundant around a real logo.
   const logoEmbedded = await drawLogo(doc, page, business.logoUrl);
   if (!logoEmbedded) {
+    rect(LOGO_BOX);
     const logoText = business.name.trim() || "Company Logo";
     const size = 11;
     const w = bold.widthOfTextAtSize(sanitize(logoText), size) / MM;
@@ -363,6 +375,8 @@ export async function renderPurchaseOrderPdf(
   textRight(RIGHT_EDGE, 76.85, "Purchase Order", SIZE_TITLE, bold);
 
   // -- Items table --
+  // Column rules first, so the black frame and row rules cross on top of them.
+  drawColumnRules(page, cols);
   drawTableFrameAndHeader(page, cols, { font, bold, text, textRight, rect, hline });
 
   // Cursor for body rows; first row sits below the header band.
@@ -371,9 +385,20 @@ export async function renderPurchaseOrderPdf(
 
   let lineNo = 0;
   for (const block of blocks) {
-    // Section subheader row.
+    // Section subheader row — a full-width "merged" cell. The column rules run
+    // the table's whole height; paint white over the segments crossing this
+    // band so the section reads as one cell, not split into columns. Inset
+    // vertically so the horizontal rules above/below stay crisp.
     if (rowTop + ROW_H > tableBottom) {
       ({ page, rowTop } = newTablePage(doc, cols, { font, bold }));
+    }
+    for (const xMm of columnDividers(cols)) {
+      page.drawLine({
+        start: at(xMm, rowTop + 0.4),
+        end: at(xMm, rowTop + ROW_H - 0.4),
+        thickness: 1,
+        color: WHITE,
+      });
     }
     text(cols.no + PAD, rowTop + ROW_H / 2 + 1.4, block.name, SIZE_SECTION, bold);
     hline(TABLE_BOX.x, RIGHT_EDGE, rowTop + ROW_H, 0.4);
@@ -390,10 +415,10 @@ export async function renderPurchaseOrderPdf(
         ({ page, rowTop } = newTablePage(doc, cols, { font, bold }));
       }
 
-      // Zebra stripe behind every other line (drawn first, under the text).
-      // Inset horizontally so the fill never covers the box's left / right
-      // borders, and redraw the top separator on top of it (the previous row
-      // drew that line at this boundary and the fill would otherwise hide it).
+      // Zebra stripe behind every other line (drawn under the text, over the
+      // column rules). Translucent so those rules show through; inset
+      // horizontally so the fill never covers the box's left / right borders,
+      // and redraw the top separator on top so it stays crisp through the fill.
       if (lineNo % 2 === 0) {
         const inset = 0.35; // mm — keeps the vertical borders visible
         const tl = at(TABLE_BOX.x + inset, rowTop);
@@ -402,7 +427,8 @@ export async function renderPurchaseOrderPdf(
           y: tl.y - rowH * MM,
           width: (TABLE_BOX.w - inset * 2) * MM,
           height: rowH * MM,
-          color: STRIPE,
+          color: BLACK,
+          opacity: STRIPE_OPACITY,
         });
         hline(TABLE_BOX.x, RIGHT_EDGE, rowTop, 0.25);
       }
@@ -490,9 +516,9 @@ function drawTableFrameAndHeader(
 }
 
 /**
- * Fetch and embed the logo PNG inside LOGO_BOX (aspect-fit, small inset).
- * Returns false — so the caller can fall back to a text placeholder — when
- * there is no URL or anything goes wrong (network, non-PNG, decode error).
+ * Read the on-disk logo PNG and embed it inside LOGO_BOX (aspect-fit, small
+ * inset). Returns false — so the caller can fall back to a text placeholder —
+ * when no logo is set or anything goes wrong (missing file, decode error).
  */
 async function drawLogo(
   doc: PDFDocument,
@@ -501,14 +527,14 @@ async function drawLogo(
 ): Promise<boolean> {
   if (!logoUrl) return false;
   try {
-    const res = await fetch(logoUrl);
-    if (!res.ok) return false;
-    const bytes = new Uint8Array(await res.arrayBuffer());
+    const file = Bun.file(BUSINESS_LOGO_PATH);
+    if (!(await file.exists())) return false;
+    const bytes = new Uint8Array(await file.arrayBuffer());
     const img = await doc.embedPng(bytes);
 
-    const inset = 2; // mm
-    const boxW = (LOGO_BOX.w - inset * 2) * MM;
-    const boxH = (LOGO_BOX.h - inset * 2) * MM;
+    // No inset — the logo fills the box (there is no border to clear).
+    const boxW = LOGO_BOX.w * MM;
+    const boxH = LOGO_BOX.h * MM;
     const scale = Math.min(boxW / img.width, boxH / img.height);
     const w = img.width * scale;
     const h = img.height * scale;
@@ -520,6 +546,40 @@ async function drawLogo(
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Inner column-boundary x positions (mm), derived from the cell geometry so
+ * each rule lands exactly between two columns. Always: No|Item and Item|Qty.
+ * With prices, also Qty|Unit Cost and Unit Cost|Amount. The outer Amount/Qty
+ * edge is the box border (RIGHT_EDGE), so it is not repeated here.
+ */
+function columnDividers(cols: Cols): number[] {
+  // Item text wraps up to itemWrapMm; start the next column just past it.
+  const itemQty = cols.item + cols.itemWrapMm + 1;
+  const xs = [cols.item, itemQty];
+  if (cols.showPrices && cols.unitRight != null) {
+    xs.push(cols.qtyRight, cols.unitRight);
+  }
+  return xs;
+}
+
+/**
+ * Draw the vertical column rules across the full table box on `page`. Called
+ * BEFORE the frame and rows so the black box border and horizontal rules cross
+ * on top; the zebra stripes are translucent, so the rules show through them.
+ */
+function drawColumnRules(page: PDFPage, cols: Cols): void {
+  const top = TABLE_BOX.y;
+  const bottom = TABLE_BOX.y + TABLE_BOX.h;
+  for (const xMm of columnDividers(cols)) {
+    page.drawLine({
+      start: { x: xMm * MM, y: PAGE_H - top * MM },
+      end: { x: xMm * MM, y: PAGE_H - bottom * MM },
+      thickness: 0.3,
+      color: COL_RULE,
+    });
   }
 }
 
@@ -583,6 +643,8 @@ function newTablePage(
       color: BLACK,
     });
   };
+  // Column rules first, so the black frame and row rules cross on top of them.
+  drawColumnRules(page, cols);
   drawTableFrameAndHeader(page, cols, { font, bold, text, textRight, rect, hline });
   return { page, rowTop: TABLE_BOX.y + HEADER_ROW_H };
 }
