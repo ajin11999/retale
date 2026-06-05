@@ -4,7 +4,11 @@
 // scheduler via scripts/run-scheduled-jobs.ts; every job is idempotent, so an
 // extra run is harmless.
 
-import { CatalogError, publishCatalog } from "./catalog-service.ts";
+import {
+  CatalogError,
+  publishCatalog,
+  purgeOldCatalogPublishes,
+} from "./catalog-service.ts";
 import {
   purgeAcknowledgedProductAlerts,
   scanProductAlerts,
@@ -14,7 +18,7 @@ import {
   raiseDeliveryOverdueAlerts,
   raiseSendDueAlerts,
 } from "./purchase-alert-service.ts";
-import { runReorderScan } from "./reorder-service.ts";
+import { purgeResolvedSuggestions, runReorderScan } from "./reorder-service.ts";
 
 export type JobStatus = "ok" | "skipped" | "failed";
 
@@ -53,8 +57,9 @@ async function runJob(
 
 /**
  * Run the daily maintenance jobs: rebuild reorder suggestions, raise
- * no-delivery alerts, publish the catalog snapshot, and purge old acknowledged
- * alerts. Never throws — inspect the returned summary for per-job outcomes.
+ * no-delivery alerts, publish the catalog snapshot, and purge stale rows
+ * (acknowledged alerts, old publish-log rows, resolved suggestions). Never
+ * throws — inspect the returned summary for per-job outcomes.
  */
 export async function runScheduledJobs(): Promise<JobsSummary> {
   const startedAt = new Date().toISOString();
@@ -91,11 +96,13 @@ export async function runScheduledJobs(): Promise<JobsSummary> {
     }),
   );
   results.push(
-    await runJob("alert-retention-purge", async () => {
-      const purged =
+    await runJob("retention-purge", async () => {
+      const alerts =
         (await purgeAcknowledgedAlerts()) +
         (await purgeAcknowledgedProductAlerts());
-      return `${purged} acknowledged alert(s) purged`;
+      const publishes = await purgeOldCatalogPublishes();
+      const suggestions = await purgeResolvedSuggestions();
+      return `${alerts} alert(s), ${publishes} publish-log row(s), ${suggestions} resolved suggestion(s) purged`;
     }),
   );
 

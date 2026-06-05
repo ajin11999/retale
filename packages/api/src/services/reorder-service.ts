@@ -6,7 +6,7 @@
 // member confirms a conversion. See docs/future-features.md →
 // "Reorder-point → suggested reorders".
 
-import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
@@ -325,4 +325,30 @@ export async function convertSuggestions(
       );
     return created;
   });
+}
+
+// --- Retention ---
+
+/** Resolved (converted/dismissed) suggestions older than this are purged. */
+export const RESOLVED_RETENTION_DAYS = 90;
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Hard-delete `converted` / `dismissed` suggestions older than `olderThanDays`
+ * — table-bloat control. These rows are a light audit of what was acted on, so
+ * they accumulate with usage; `open` rows are left alone (the scan rebuilds
+ * them every run). Returns the count removed.
+ */
+export async function purgeResolvedSuggestions(
+  olderThanDays: number = RESOLVED_RETENTION_DAYS,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanDays * MS_PER_DAY);
+  const res = await db.delete(reorderSuggestions).where(
+    and(
+      inArray(reorderSuggestions.status, ["converted", "dismissed"]),
+      lt(reorderSuggestions.generatedAt, cutoff),
+    ),
+  );
+  return res[0].affectedRows;
 }

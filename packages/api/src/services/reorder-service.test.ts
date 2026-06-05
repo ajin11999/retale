@@ -19,6 +19,7 @@ import {
   convertSuggestions,
   dismissSuggestion,
   listSuggestions,
+  purgeResolvedSuggestions,
   ReorderError,
   type ReorderErrorCode,
   runReorderScan,
@@ -396,5 +397,48 @@ describe("convertSuggestions", () => {
       () => convertSuggestions([{ suggestionId: s!.id, vendorId: ulid() }], userId),
       "VENDOR_NOT_FOUND",
     );
+  });
+});
+
+describe("purgeResolvedSuggestions", () => {
+  /** Insert a suggestion row directly, with a chosen status and generatedAt. */
+  async function seedSuggestion(
+    status: "open" | "converted" | "dismissed",
+    generatedAt: Date,
+  ): Promise<string> {
+    const variantId = await seedVariant({ totalQty: 0, reorderPoint: 10 });
+    const id = ulid();
+    await db.insert(reorderSuggestions).values({
+      id,
+      variantId,
+      currentStock: 0,
+      reorderPoint: 10,
+      suggestedQty: 10,
+      status,
+      generatedAt,
+    });
+    return id;
+  }
+
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+  test("purges old converted / dismissed rows, keeps recent and open ones", async () => {
+    const oldConverted = await seedSuggestion("converted", daysAgo(100));
+    const oldDismissed = await seedSuggestion("dismissed", daysAgo(120));
+    const recentConverted = await seedSuggestion("converted", daysAgo(10));
+    const oldOpen = await seedSuggestion("open", daysAgo(200));
+
+    expect(await purgeResolvedSuggestions()).toBe(2);
+
+    const remaining = (await db.select().from(reorderSuggestions)).map((r) => r.id);
+    expect(remaining).toContain(recentConverted);
+    expect(remaining).toContain(oldOpen); // open is never purged, however old
+    expect(remaining).not.toContain(oldConverted);
+    expect(remaining).not.toContain(oldDismissed);
+  });
+
+  test("removes nothing when there are no stale resolved rows", async () => {
+    await seedSuggestion("converted", daysAgo(10));
+    expect(await purgeResolvedSuggestions()).toBe(0);
   });
 });

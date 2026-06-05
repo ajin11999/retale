@@ -21,6 +21,7 @@ import {
   maskPricePeek,
   maskStockPeek,
   publishCatalog,
+  purgeOldCatalogPublishes,
   setProductCatalogSettings,
   setProductsOnlineVisible,
 } from "./catalog-service.ts";
@@ -212,5 +213,35 @@ describe("publishCatalog", () => {
     expect(log[0]?.status).toBe("error");
     expect(log[0]?.productCount).toBe(1);
     expect(log[0]?.trigger).toBe("manual");
+  });
+});
+
+describe("purgeOldCatalogPublishes", () => {
+  /** Insert `n` publish-log rows with staggered createdAt (newest last). */
+  async function seedPublishes(n: number): Promise<void> {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: ulid(),
+      trigger: "scheduled" as const,
+      status: "success" as const,
+      productCount: 0,
+      createdAt: new Date(Date.now() - (n - i) * 86_400_000),
+    }));
+    await db.insert(catalogPublishes).values(rows);
+  }
+
+  test("keeps the most recent `keep` rows and removes the rest", async () => {
+    await seedPublishes(5);
+    expect(await purgeOldCatalogPublishes(3)).toBe(2);
+
+    const remaining = await listCatalogPublishes();
+    expect(remaining).toHaveLength(3);
+    // The survivors are the three newest, still newest-first.
+    expect(remaining[0]!.createdAt >= remaining[2]!.createdAt).toBe(true);
+  });
+
+  test("removes nothing while at or under the cap", async () => {
+    await seedPublishes(3);
+    expect(await purgeOldCatalogPublishes(3)).toBe(0);
+    expect(await listCatalogPublishes()).toHaveLength(3);
   });
 });

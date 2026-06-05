@@ -7,7 +7,7 @@
 // docs/future-features.md → "Online catalog website".
 
 import { put } from "@vercel/blob";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { catalogPublishes } from "../db/schema/catalog.ts";
 import {
@@ -351,4 +351,29 @@ export function listCatalogPublishes(limit = 50): Promise<CatalogPublish[]> {
     .from(catalogPublishes)
     .orderBy(desc(catalogPublishes.createdAt))
     .limit(limit);
+}
+
+/** Publish-log rows to retain — the nightly job appends one row every day. */
+export const PUBLISH_LOG_RETENTION = 100;
+
+/**
+ * Hard-delete catalog publish-log rows beyond the most recent `keep` —
+ * table-bloat control for the nightly publish, which appends a row daily and
+ * is only ever read back as a short recent history. A hard row-cap bounds the
+ * table regardless of how often publishing runs. Returns the count removed.
+ */
+export async function purgeOldCatalogPublishes(
+  keep: number = PUBLISH_LOG_RETENTION,
+): Promise<number> {
+  const recent = await db
+    .select({ id: catalogPublishes.id })
+    .from(catalogPublishes)
+    .orderBy(desc(catalogPublishes.createdAt), desc(catalogPublishes.id))
+    .limit(keep);
+  if (recent.length < keep) return 0; // not yet over the cap
+  const keepIds = recent.map((r) => r.id);
+  const res = await db
+    .delete(catalogPublishes)
+    .where(notInArray(catalogPublishes.id, keepIds));
+  return res[0].affectedRows;
 }
