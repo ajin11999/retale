@@ -3,12 +3,13 @@
 // back blank defaults before anything is saved, so callers never deal with a
 // missing row.
 
-import { del, put } from "@vercel/blob";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import sharp from "sharp";
-import { ulid } from "ulid";
 import { businessSettings } from "../db/schema/business.ts";
 import { db } from "../lib/db.ts";
+import { BUSINESS_LOGO_PATH, ensureDir } from "../lib/uploads.ts";
 
 /** The fixed primary key of the one business-settings row. */
 const SINGLETON_ID = "00000000000000000000000000";
@@ -17,9 +18,8 @@ type BusinessSettings = typeof businessSettings.$inferSelect;
 
 export type BusinessLogoErrorCode =
   | "INVALID_INPUT"
-  | "NOT_CONFIGURED"
   | "PROCESSING_FAILED"
-  | "UPLOAD_FAILED";
+  | "WRITE_FAILED";
 
 export class BusinessLogoError extends Error {
   constructor(
@@ -118,27 +118,40 @@ async function persistLogoUrl(logoUrl: string | null): Promise<void> {
 }
 
 /**
+ * The stable URL stored for the logo. It is an API-relative path served by the
+ * GET /business-logo route; the actual bytes live on local disk at
+ * BUSINESS_LOGO_PATH. Callers append a `?v=<updatedAt>` cache-buster.
+ */
+const LOGO_URL = "/business-logo";
+
+/**
  * Process and store the business logo: orient by EXIF, fit within LOGO_MAX,
- * re-encode to PNG (preserving transparency), upload to Blob, and save the
- * URL. The previous logo's blob is removed best-effort. Requires
- * `BLOB_READ_WRITE_TOKEN`. Throws BusinessLogoError on bad input / missing
- * config / processing or upload failure.
+ * re-encode to PNG (preserving transparency), write it to local disk, and save
+ * the URL. Throws BusinessLogoError on bad input / processing or write failure.
  */
 export async function setBusinessLogo(data: Uint8Array): Promise<BusinessSettings> {
   if (data.byteLength === 0) {
     throw new BusinessLogoError("INVALID_INPUT", "image data is empty");
   }
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new BusinessLogoError(
-      "NOT_CONFIGURED",
-      "BLOB_READ_WRITE_TOKEN is not set — cannot store the logo",
-    );
-  }
 
   let png: Buffer;
   try {
-    png = await sharp(data)
+    // SVG (and other vector) inputs rasterise at their intrinsic size by
+    // default, which is usually far smaller than LOGO_MAX — and we never
+    // enlarge a raster. Bump the render density so a vector logo fills the
+    // target box crisply; bitmaps are read as-is. Re-encoding to PNG means we
+    // never store or serve the SVG itself (no SVG-borne script reaches a
+    // browser).
+    let pipeline = sharp(data);
+    const meta = await pipeline.metadata();
+    if (meta.format === "svg") {
+      const intrinsic = Math.max(meta.width ?? 0, meta.height ?? 0);
+      if (intrinsic > 0) {
+        const density = Math.min(2400, Math.max(72, Math.ceil((72 * LOGO_MAX) / intrinsic)));
+        pipeline = sharp(data, { density });
+      }
+    }
+    png = await pipeline
       .rotate()
       .resize({ width: LOGO_MAX, height: LOGO_MAX, fit: "inside", withoutEnlargement: true })
       .png()
@@ -150,42 +163,27 @@ export async function setBusinessLogo(data: Uint8Array): Promise<BusinessSetting
     );
   }
 
-  let url: string;
   try {
-    const res = await put(`business/logo-${ulid()}.png`, png, {
-      access: "public",
-      token,
-      contentType: "image/png",
-      addRandomSuffix: true,
-      cacheControlMaxAge: 31_536_000,
-    });
-    url = res.url;
+    await ensureDir(path.dirname(BUSINESS_LOGO_PATH));
+    await Bun.write(BUSINESS_LOGO_PATH, png);
   } catch (e) {
     throw new BusinessLogoError(
-      "UPLOAD_FAILED",
-      `logo upload to blob failed: ${(e as Error).message}`,
+      "WRITE_FAILED",
+      `could not write logo file: ${(e as Error).message}`,
     );
   }
 
-  const previous = (await getBusinessSettings()).logoUrl;
-  await persistLogoUrl(url);
-  if (previous) await delBlobBestEffort(previous, token);
+  await persistLogoUrl(LOGO_URL);
   return getBusinessSettings();
 }
 
-/** Remove the business logo: clear the URL and delete its blob best-effort. */
+/** Remove the business logo: clear the URL and delete the file best-effort. */
 export async function clearBusinessLogo(): Promise<BusinessSettings> {
-  const previous = (await getBusinessSettings()).logoUrl;
   await persistLogoUrl(null);
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (previous && token) await delBlobBestEffort(previous, token);
-  return getBusinessSettings();
-}
-
-async function delBlobBestEffort(url: string, token: string): Promise<void> {
   try {
-    await del(url, { token });
+    await rm(BUSINESS_LOGO_PATH, { force: true });
   } catch (e) {
-    console.warn(`[business] logo blob delete failed: ${(e as Error).message}`);
+    console.warn(`[business] logo file delete failed: ${(e as Error).message}`);
   }
+  return getBusinessSettings();
 }

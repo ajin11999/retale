@@ -242,7 +242,8 @@
       <div class="space-y-2">
         <span class="text-sm font-medium">Logo</span>
         <p class="text-xs text-muted-foreground">
-          Shown on purchase orders. PNG or JPG; transparent PNG looks best.
+          Shown on purchase orders. PNG, JPG, or SVG; transparent PNG or SVG
+          looks best.
         </p>
         <div class="flex items-center gap-4">
           <div
@@ -250,7 +251,7 @@
           >
             {#if settings.logoUrl}
               <img
-                src={settings.logoUrl}
+                src={`/settings/logo?v=${encodeURIComponent(settings.updatedAt ?? "")}`}
                 alt="Business logo"
                 class="max-h-full max-w-full object-contain"
               />
@@ -262,7 +263,7 @@
             <input
               bind:this={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
               disabled={!canManage || logoBusy}
               onchange={uploadLogo}
               class="text-sm"

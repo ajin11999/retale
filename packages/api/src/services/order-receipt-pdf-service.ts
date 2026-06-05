@@ -11,6 +11,7 @@
 // the PO PDF there is no price-visibility toggle.
 
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { BUSINESS_LOGO_PATH } from "../lib/uploads.ts";
 import { getBusinessSettings } from "./business-service.ts";
 import { getCustomer } from "./customer-service.ts";
 import {
@@ -206,10 +207,12 @@ export async function renderOrderReceiptPdf(orderId: string): Promise<Uint8Array
     page.drawLine({ start: a, end: b, thickness: lw, color: BLACK });
   };
 
-  // -- Letterhead: logo box + business identity --
-  rect(LOGO_BOX);
+  // -- Letterhead: logo + business identity --
+  // A real logo stands on its own; the bordered box is only drawn to frame the
+  // business-name text placeholder shown when no logo is set.
   const logoEmbedded = await drawLogo(doc, page, business.logoUrl);
   if (!logoEmbedded) {
+    rect(LOGO_BOX);
     const logoText = business.name.trim() || "Company Logo";
     const size = 11;
     const w = bold.widthOfTextAtSize(sanitize(logoText), size) / MM;
@@ -354,9 +357,9 @@ function drawTableFrameAndHeader(
 }
 
 /**
- * Fetch and embed the logo PNG inside LOGO_BOX (aspect-fit, small inset).
- * Returns false — so the caller can fall back to a text placeholder — when
- * there is no URL or anything goes wrong (network, non-PNG, decode error).
+ * Read the on-disk logo PNG and embed it inside LOGO_BOX (aspect-fit, small
+ * inset). Returns false — so the caller can fall back to a text placeholder —
+ * when no logo is set or anything goes wrong (missing file, decode error).
  */
 async function drawLogo(
   doc: PDFDocument,
@@ -365,13 +368,14 @@ async function drawLogo(
 ): Promise<boolean> {
   if (!logoUrl) return false;
   try {
-    const res = await fetch(logoUrl);
-    if (!res.ok) return false;
-    const bytes = new Uint8Array(await res.arrayBuffer());
+    const file = Bun.file(BUSINESS_LOGO_PATH);
+    if (!(await file.exists())) return false;
+    const bytes = new Uint8Array(await file.arrayBuffer());
     const img = await doc.embedPng(bytes);
 
-    const boxW = (LOGO_BOX.w - 2 * 2) * MM;
-    const boxH = (LOGO_BOX.h - 2 * 2) * MM;
+    // No inset — the logo fills the box (there is no border to clear).
+    const boxW = LOGO_BOX.w * MM;
+    const boxH = LOGO_BOX.h * MM;
     const scale = Math.min(boxW / img.width, boxH / img.height);
     const w = img.width * scale;
     const h = img.height * scale;

@@ -8,6 +8,7 @@ import { Elysia } from "elysia";
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import { buildContext } from "../lib/context.ts";
+import { BUSINESS_LOGO_PATH } from "../lib/uploads.ts";
 import { BusinessLogoError, setBusinessLogo } from "../services/business-service.ts";
 
 /** HTTP status for a BusinessLogoError code. */
@@ -17,11 +18,27 @@ function statusFor(code: BusinessLogoError["code"]): number {
     case "PROCESSING_FAILED":
       return 400;
     default:
-      return 500; // NOT_CONFIGURED / UPLOAD_FAILED
+      return 500; // WRITE_FAILED
   }
 }
 
-export const businessLogoRoute = new Elysia().post(
+export const businessLogoRoute = new Elysia()
+  // Serve the stored logo bytes. Reads only — no auth; the logo is a low-value
+  // public-ish asset (it is printed on POs sent to vendors) and the API is
+  // LAN-only. Returns 404 when no logo has been set.
+  .get("/business-logo", async ({ set }) => {
+    const file = Bun.file(BUSINESS_LOGO_PATH);
+    if (!(await file.exists())) {
+      set.status = 404;
+      return { error: "no logo set" };
+    }
+    set.headers["content-type"] = "image/png";
+    // Fixed filename, mutable content — let the browser revalidate so a
+    // replaced logo shows up. Callers also append ?v=<updatedAt>.
+    set.headers["cache-control"] = "no-cache";
+    return file;
+  })
+  .post(
   "/business-logo",
   async ({ body, request, set }) => {
     const ctx = await buildContext({ request });

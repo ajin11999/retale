@@ -12,6 +12,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Locally-stored uploads (business logo, etc.)
+uploads/
+
 # Environment & secrets
 .env
 .env.*
