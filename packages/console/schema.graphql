@@ -41,6 +41,13 @@ type Query {
   customer(id: ID!): Customer
   customerLedger(customerId: ID!, limit: Int): [CustomerLedgerEntry!]!
   customerPrices(customerId: ID!): [CustomerPrice!]!
+
+  """
+  Lightweight customer search for the POS register — matches name or phone,
+  excludes archived. Gated on order.create_pos so any cashier can attach a
+  customer to a sale (the broader customers query needs customer.edit).
+  """
+  posCustomerSearch(search: String, limit: Int): [Customer!]!
   pointsOfSale(includeArchived: Boolean): [PointOfSale!]!
   pointOfSale(id: ID!): PointOfSale
   posSessions(posId: ID, limit: Int): [PosSession!]!
@@ -99,6 +106,13 @@ type Query {
   """
   productAlerts(acknowledged: Boolean): [ProductAlert!]!
   businessSettings: BusinessSettings!
+
+  """
+  Business name and phone for a receipt header. Readable by any authenticated
+  user (the full businessSettings query is admin-gated), so POS clerks can
+  build receipts.
+  """
+  businessReceiptInfo: BusinessReceiptInfo!
   addresses(includeArchived: Boolean): [Address!]!
   address(id: ID!): Address
 
@@ -371,9 +385,9 @@ type Mutation {
   updateCustomerSaleItem(orderItemId: ID!, qty: Int, discountMinor: Float, priceOverrideMinor: Float, displayNameOverride: String): Order!
 
   """
-  Void a line on an open Console sale — returns stock, reverses the ledger.
+  Void (delete) a line on an open Console sale — returns stock. Reason is optional.
   """
-  voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
+  voidCustomerSaleItem(orderItemId: ID!, reason: String): Order!
 
   """Record a payment against an open Console sale."""
   addCustomerSalePayment(orderId: ID!, amountMinor: Float!, posSessionId: ID): Order!
@@ -1188,6 +1202,20 @@ type Order {
   createdAt: String!
   items: [OrderItem!]!
   payments: [OrderPayment!]!
+
+  """
+  Live contact details of the attached customer, for sending a receipt. Null when no customer is attached or the customer was deleted.
+  """
+  customer: OrderCustomer
+}
+
+"""
+The subset of customer fields a receipt needs. Readable wherever the order is.
+"""
+type OrderCustomer {
+  id: ID!
+  name: String!
+  phone: String
 }
 
 type OrderItem {
@@ -1249,7 +1277,7 @@ input PosOrderItemInput {
   discountMinor: Float
 
   """
-  Cashier-entered price. Allowed on service products; required on open-price products.
+  Cashier-entered price override. Optional on any line; required on open-price products.
   """
   priceOverrideMinor: Float
 
@@ -1644,6 +1672,12 @@ type BusinessSettings {
   """Footer appended to a rendered purchase-order message."""
   poFooter: String
   updatedAt: String
+}
+
+"""Business identity safe to print on a customer receipt."""
+type BusinessReceiptInfo {
+  name: String!
+  phone: String
 }
 
 """One of the business's ship-to addresses (store, warehouse, ...)."""

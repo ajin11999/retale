@@ -144,8 +144,8 @@ export const typeDefs = /* GraphQL */ `
       priceOverrideMinor: Float
       displayNameOverride: String
     ): Order!
-    "Void a line on an open Console sale — returns stock, reverses the ledger."
-    voidCustomerSaleItem(orderItemId: ID!, reason: String!): Order!
+    "Void (delete) a line on an open Console sale — returns stock. Reason is optional."
+    voidCustomerSaleItem(orderItemId: ID!, reason: String): Order!
     "Record a payment against an open Console sale."
     addCustomerSalePayment(orderId: ID!, amountMinor: Float!, posSessionId: ID): Order!
     "Close a Console sale — assigns its display number; immutable after."
@@ -343,14 +343,14 @@ export const resolvers = {
     },
     voidCustomerSaleItem: async (
       _: unknown,
-      args: { orderItemId: string; reason: string },
+      args: { orderItemId: string; reason?: string | null },
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "order.void_item");
       try {
         return await orders.voidCustomerSaleItem({
           orderItemId: args.orderItemId,
-          reason: args.reason,
+          reason: args.reason ?? null,
           voidedByUserId: viewer.userId,
         });
       } catch (e) {

@@ -794,15 +794,15 @@ export async function addCustomerSaleItem(input: {
  * Void a line on an open Console sale. Marks the row voided (kept for audit)
  * and returns its stock. No AR is reversed — an open sale has posted nothing to
  * `customer_ledger` yet; `recomputeOrderTotal` keeps the close-time debt right.
+ * The reason is optional: deleting a line from an in-progress draft needs no
+ * justification (the console surfaces this as a one-click "delete").
  */
 export async function voidCustomerSaleItem(input: {
   orderItemId: string;
-  reason: string;
+  reason?: string | null;
   voidedByUserId: string;
 }): Promise<Order> {
-  if (!input.reason.trim()) {
-    throw new OrderError("INVALID_INPUT", "void reason is required");
-  }
+  const reason = input.reason?.trim() || null;
   return db.transaction(async (tx) => {
     const item = await tx.query.orderItems.findFirst({
       where: eq(orderItems.id, input.orderItemId),
@@ -817,7 +817,7 @@ export async function voidCustomerSaleItem(input: {
       .set({
         voidedAt: new Date(),
         voidedByUserId: input.voidedByUserId,
-        voidReason: input.reason.trim(),
+        voidReason: reason,
       })
       .where(eq(orderItems.id, item.id));
 
@@ -833,7 +833,7 @@ export async function voidCustomerSaleItem(input: {
           qtyDelta: item.qty,
           refType: "order",
           refId: order.id,
-          reason: `void: ${input.reason.trim()}`,
+          reason: reason ? `void: ${reason}` : "void",
           createdByUserId: input.voidedByUserId,
         },
         tx,

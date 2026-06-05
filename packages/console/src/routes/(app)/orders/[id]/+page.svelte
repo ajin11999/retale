@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { graphql } from "$houdini";
   import { page } from "$app/state";
-  import { Ban, Pencil } from "@lucide/svelte";
+  import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -54,6 +55,14 @@
           createdAt
         }
       }
+    }
+  `);
+
+  // Catalog for the variant picker. Split out of OrderDetail so refetch() (run
+  // after adding a line or payment) only re-pulls the order rows, never the
+  // whole product catalog. Loaded once in +page.ts.
+  graphql(`
+    query OrderEditorProducts {
       products(includeArchived: false) {
         id
         name
@@ -64,17 +73,17 @@
           label
           unit
           priceMinor
+          costMinor
         }
       }
     }
   `);
 
   // Each item-mutating mutation re-selects the FULL item shape the OrderDetail
-  // query reads (plus the live variant totalQty for the products screen's stock).
-  // Returning the complete shape keeps Houdini's normalized cache complete, so
-  // the view updates instantly from the cache — no manual refetch needed. A
-  // partial selection here would leave new lines missing required fields, which
-  // makes the OrderDetail query resolve to null until a full refetch lands.
+  // query reads (plus the live variant totalQty for the products screen's stock)
+  // so the cache stays internally consistent. The store itself isn't live from
+  // the cache (the queries are loaded manually in +page.ts), so every handler
+  // refetch()s the order after a successful mutation to surface the new data.
   const AddItem = graphql(`
     mutation ConsoleAddCustomerSaleItem(
       $orderId: ID!
@@ -157,8 +166,8 @@
   `);
 
   const VoidItem = graphql(`
-    mutation ConsoleVoidCustomerSaleItem($orderItemId: ID!, $reason: String!) {
-      voidCustomerSaleItem(orderItemId: $orderItemId, reason: $reason) {
+    mutation ConsoleVoidCustomerSaleItem($orderItemId: ID!) {
+      voidCustomerSaleItem(orderItemId: $orderItemId) {
         id
         status
         totalMinor
@@ -265,9 +274,18 @@
 
   let { data }: { data: PageData } = $props();
   const OrderDetail = $derived(data.OrderDetail);
+  const OrderEditorProducts = $derived(data.OrderEditorProducts);
   const order = $derived($OrderDetail.data?.order ?? null);
-  const products = $derived($OrderDetail.data?.products ?? []);
+  const products = $derived($OrderEditorProducts.data?.products ?? []);
   const isOpen = $derived(order?.status === "open");
+
+  // Adding a line or payment changes a list's membership, which Houdini's cache
+  // does not surface from a mutation result the way it does scalar edits to an
+  // existing row — so re-pull the (catalog-free) order after those operations.
+  const refetch = () => {
+    if (!order) return Promise.resolve();
+    return OrderDetail.fetch({ variables: { id: order.id }, policy: "NetworkOnly" });
+  };
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -307,6 +325,7 @@
     sku: string;
     label: string | null;
     priceMinor: number;
+    costMinor: number;
     unit: string;
   }
 
@@ -322,6 +341,7 @@
           sku: v.sku,
           label: v.label ?? null,
           priceMinor: v.priceMinor,
+          costMinor: v.costMinor,
           unit: v.unit,
         });
       }
@@ -340,6 +360,9 @@
   let addPriceOverride = $state<number | null>(null); // null → use variant price
   // Selected draft (after picking from the list, before pressing Add).
   let draft = $state<{ row: PickRow; productKind: string } | null>(null);
+  // Qty field of the draft — focused right after a product is picked so the
+  // cashier can type the quantity without reaching for the mouse or tabbing.
+  let qtyInput = $state<HTMLInputElement | null>(null);
 
   const pickMatches = $derived.by(() => {
     // AND-match each whitespace-separated token against the row's combined
@@ -361,13 +384,27 @@
     highlight = 0;
   });
 
-  function selectVariant(row: PickRow) {
+  async function selectVariant(row: PickRow) {
     draft = { row, productKind: row.productKind };
     addQty = 1;
     addDiscount = 0;
     addPriceOverride = null;
     pickerOpen = false;
     variantSearch = `${row.productName} · ${row.sku}`;
+    // Jump straight to Qty once the draft block has rendered.
+    await tick();
+    qtyInput?.focus();
+    qtyInput?.select();
+  }
+
+  // Enter anywhere in the draft fields adds the line — saves tabbing to the
+  // button. commitDraft re-validates (busy / qty / price-kind), so a stray
+  // Enter on an incomplete draft is a no-op.
+  function onDraftKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitDraft();
+    }
   }
 
   function clearDraft() {
@@ -384,15 +421,7 @@
     // mutation callback below would otherwise see them widened back to null.
     const o = order;
     const d = draft;
-    const isService = d.productKind === "service";
-    let priceOverrideMinor: number | undefined;
-    if (addPriceOverride != null) {
-      if (!isService) {
-        error = "Price overrides are allowed only on service products.";
-        return;
-      }
-      priceOverrideMinor = addPriceOverride;
-    }
+    const priceOverrideMinor = addPriceOverride ?? undefined;
     const discount = addDiscount ?? 0;
     const ok = await run(() =>
       AddItem.mutate({
@@ -405,7 +434,10 @@
         },
       }),
     );
-    if (ok) clearDraft();
+    if (ok) {
+      clearDraft();
+      await refetch();
+    }
   }
 
   function onPickerKey(e: KeyboardEvent) {
@@ -430,76 +462,140 @@
     }
   }
 
-  async function voidLine(itemId: string) {
-    const reason = prompt("Void reason?")?.trim();
-    if (!reason) return;
-    await run(() => VoidItem.mutate({ orderItemId: itemId, reason }));
+  async function deleteLine(itemId: string) {
+    const ok = await run(() => VoidItem.mutate({ orderItemId: itemId }));
+    if (ok) await refetch();
   }
 
-  // ---- Per-line edit -------------------------------------------------------
-  // The line keeps its own product kind on `productId`; we cross-reference the
-  // products query (already loaded for the variant picker) to know whether a
-  // price override is allowed (services only).
-  interface LineDraft {
-    itemId: string;
-    qty: number;
-    discountMinor: number | null;
-    priceMinor: number | null;
-    costMinor: number;
-    displayName: string;
-    productKind: string;
-    isBundleLine: boolean;
-  }
-  let lineDraft = $state<LineDraft | null>(null);
+  // ---- Inline per-line quick edit ------------------------------------------
+  // Click a cell to edit it in place. Each commit sends just the one changed
+  // field, then refetch()s the order so the line + server-computed totals
+  // reflect the change (these queries are loaded manually in +page.ts, so the
+  // store isn't live from the cache). Bundle component lines and voided lines
+  // aren't editable.
+  type CellField = "qty" | "name" | "price" | "discount";
+  let cellEdit = $state<{ id: string; field: CellField } | null>(null);
+  // qty + name edit through a raw <input> (string); price + discount through
+  // MoneyInput (integer minor units), so they need separate bindings.
+  let cellStr = $state("");
+  let cellMoney = $state<number | null>(null);
 
-  // Margin % off the net line price (price − per-unit discount) vs. snapshot cost.
-  function marginPct(priceMinor: number | null, costMinor: number, discountMinor: number | null, qty: number): number | null {
-    const price = priceMinor ?? 0;
-    if (price <= 0 || qty <= 0) return null;
-    const perUnitDiscount = qty > 0 ? (discountMinor ?? 0) / qty : 0;
-    const net = price - perUnitDiscount;
+  type LineItem = NonNullable<typeof order>["items"][number];
+  const lineEditable = (i: LineItem) =>
+    isOpen && canEdit && !i.voidedAt && !i.snapshotBundleName;
+
+  // Margin % off the net line price (price − per-unit discount) vs. the snapshot
+  // cost — handy for judging an override or discount at a glance. Null when
+  // there's no meaningful margin to show (free line, zero/negative net).
+  function marginPct(i: LineItem): number | null {
+    const price = i.snapshotPriceMinor;
+    if (price <= 0 || i.qty <= 0) return null;
+    const net = price - i.discountMinor / i.qty;
     if (net <= 0) return null;
-    return ((net - costMinor) / net) * 100;
+    return ((net - i.snapshotCostMinor) / net) * 100;
   }
 
-  function productKindOf(productId: string | null | undefined): string {
-    if (!productId) return "physical";
-    return products.find((p) => p.id === productId)?.kind ?? "physical";
+  // Live margin for the add-line draft, off the same net-price-vs-cost basis as
+  // the per-line pill — so an override or discount can be judged before adding.
+  const draftMargin = $derived.by<number | null>(() => {
+    if (!draft || addQty < 1) return null;
+    const price = addPriceOverride ?? draft.row.priceMinor;
+    if (price <= 0) return null;
+    const net = price - (addDiscount ?? 0) / addQty;
+    if (net <= 0) return null;
+    return ((net - draft.row.costMinor) / net) * 100;
+  });
+
+  const marginBadgeClass = (m: number) =>
+    m < 0
+      ? "bg-destructive/10 text-destructive"
+      : m < 10
+        ? "bg-amber-100 text-amber-800"
+        : "bg-emerald-100 text-emerald-700";
+
+  // Focus + select the inline <input> the moment it mounts, so you can type or
+  // tab straight in. (MoneyInput does this itself via its `autofocus` prop.)
+  function selectOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
   }
 
-  function startLineEdit(item: NonNullable<typeof order>["items"][number]) {
-    lineDraft = {
-      itemId: item.id,
-      qty: item.qty,
-      discountMinor: item.discountMinor,
-      priceMinor: item.snapshotPriceMinor,
-      costMinor: item.snapshotCostMinor,
-      displayName: item.snapshotPublicName ?? item.snapshotProductName,
-      productKind: productKindOf(item.productId),
-      isBundleLine: item.snapshotBundleName != null,
-    };
+  function startCellEdit(i: LineItem, field: CellField) {
+    if (!lineEditable(i)) return;
+    if (field === "price") cellMoney = i.snapshotPriceMinor;
+    else if (field === "discount") cellMoney = i.discountMinor;
+    else if (field === "qty") cellStr = String(i.qty);
+    else cellStr = i.displayName;
+    cellEdit = { id: i.id, field };
   }
 
-  async function saveLineEdit() {
-    const d = lineDraft;
-    if (!d) return;
-    if (d.qty < 1) {
-      error = "Qty must be at least 1.";
+  async function commitCell() {
+    const c = cellEdit;
+    if (!c) return;
+    const i = (order?.items ?? []).find((x) => x.id === c.id);
+    if (!i) {
+      cellEdit = null;
       return;
     }
-    const isService = d.productKind === "service";
-    const ok = await run(() =>
-      UpdateItem.mutate({
-        orderItemId: d.itemId,
-        qty: d.qty,
-        discountMinor: d.discountMinor ?? 0,
-        // Only send price override for service products; ignored otherwise.
-        priceOverrideMinor: isService ? (d.priceMinor ?? 0) : undefined,
-        // Empty string clears back to default; otherwise overrides.
-        displayNameOverride: d.displayName.trim(),
-      }),
-    );
-    if (ok) lineDraft = null;
+
+    const patch: {
+      orderItemId: string;
+      qty?: number;
+      priceOverrideMinor?: number;
+      discountMinor?: number;
+      displayNameOverride?: string;
+    } = { orderItemId: c.id };
+
+    if (c.field === "qty") {
+      const n = Number(cellStr);
+      if (!Number.isInteger(n) || n < 1) {
+        error = "Qty must be a positive integer.";
+        return;
+      }
+      if (n === i.qty) {
+        cellEdit = null;
+        return;
+      }
+      patch.qty = n;
+    } else if (c.field === "price") {
+      const n = cellMoney ?? 0;
+      if (n === i.snapshotPriceMinor) {
+        cellEdit = null;
+        return;
+      }
+      patch.priceOverrideMinor = n;
+    } else if (c.field === "discount") {
+      const n = cellMoney ?? 0;
+      if (n === i.discountMinor) {
+        cellEdit = null;
+        return;
+      }
+      patch.discountMinor = n;
+    } else {
+      // Empty string clears the override back to the product's default name.
+      const d = cellStr.trim();
+      if (d === i.displayName) {
+        cellEdit = null;
+        return;
+      }
+      patch.displayNameOverride = d;
+    }
+
+    cellEdit = null;
+    const ok = await run(() => UpdateItem.mutate(patch));
+    if (ok) await refetch();
+  }
+
+  // Enter commits, Escape abandons. Escape nulls the edit first so the input
+  // unmounts and the resulting blur becomes a no-op (commitCell guards null).
+  function cellKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitCell();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cellEdit = null;
+    }
   }
 
   // ---- Order note ----------------------------------------------------------
@@ -518,9 +614,10 @@
 
   async function saveNote() {
     if (!order) return;
-    await run(() =>
+    const ok = await run(() =>
       UpdateNote.mutate({ orderId: order.id, note: noteDraft.trim() }),
     );
+    if (ok) await refetch();
   }
 
   // ---- Payment entry -------------------------------------------------------
@@ -536,19 +633,24 @@
     const ok = await run(() =>
       AddPayment.mutate({ orderId: order.id, amountMinor: amt }),
     );
-    if (ok) payAmount = null;
+    if (ok) {
+      payAmount = null;
+      await refetch();
+    }
   }
 
   async function closeSale() {
     if (!order) return;
-    await run(() => CloseSale.mutate({ orderId: order.id }));
+    const ok = await run(() => CloseSale.mutate({ orderId: order.id }));
+    if (ok) await refetch();
   }
 
   async function cancelSale() {
     if (!order) return;
     const reason = prompt("Reason for cancelling this sale?")?.trim();
     if (!reason) return;
-    await run(() => CancelSale.mutate({ orderId: order.id, reason }));
+    const ok = await run(() => CancelSale.mutate({ orderId: order.id, reason }));
+    if (ok) await refetch();
   }
 
   const fmt = (iso: string | null | undefined) =>
@@ -560,11 +662,12 @@
     return "bg-amber-100 text-amber-800";
   }
 
+  // Voided lines are hidden from the list; only live lines are shown/totalled.
+  const visibleItems = $derived((order?.items ?? []).filter((i) => !i.voidedAt));
+
   // Sum of live (non-voided) lines — sanity check against the cached total.
   const computed = $derived(
-    (order?.items ?? [])
-      .filter((i) => !i.voidedAt)
-      .reduce((acc, i) => acc + i.lineTotalMinor, 0),
+    visibleItems.reduce((acc, i) => acc + i.lineTotalMinor, 0),
   );
   const paid = $derived(
     (order?.payments ?? []).reduce((acc, p) => acc + p.amountMinor, 0),
@@ -659,149 +762,10 @@
       </div>
     {/if}
 
-    {#if isOpen}
-      <!-- Add line -->
-      <div class="space-y-3 rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold">Add line</h2>
-        <div class="space-y-1">
-          <span class="text-xs font-medium">Search product or SKU</span>
-          <div class="relative">
-            <Input
-              type="search"
-              placeholder="Type to search…"
-              bind:value={variantSearch}
-              onfocus={() => (pickerOpen = true)}
-              onblur={() => setTimeout(() => (pickerOpen = false), 150)}
-              onkeydown={onPickerKey}
-              autocomplete="off"
-              disabled={busy || !canEdit}
-            />
-            {#if pickerOpen && pickMatches.length > 0}
-              <ul
-                class="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover shadow-md"
-              >
-                {#each pickMatches as v, i (v.variantId)}
-                  <li>
-                    <button
-                      type="button"
-                      class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/60 {i ===
-                      highlight
-                        ? 'bg-muted/60'
-                        : ''}"
-                      onmousedown={(e) => e.preventDefault()}
-                      onmouseenter={() => (highlight = i)}
-                      onclick={() => selectVariant(v)}
-                    >
-                      <span>
-                        <span class="font-medium">{v.productName}</span>
-                        <span class="ml-2 font-mono text-xs text-muted-foreground">
-                          {v.sku}{v.label ? ` · ${v.label}` : ""}
-                        </span>
-                        {#if v.productKind !== "physical"}
-                          <span class="ml-2 text-xs text-muted-foreground">
-                            ({v.productKind})
-                          </span>
-                        {/if}
-                      </span>
-                      <span class="text-xs text-muted-foreground">
-                        {formatMoney(v.priceMinor)}
-                      </span>
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {:else if pickerOpen && variantSearch.trim()}
-              <div
-                class="absolute z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
-              >
-                No matches.
-              </div>
-            {/if}
-          </div>
-        </div>
-
-        {#if draft}
-          <div class="space-y-3 rounded-md border bg-background p-3">
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <div class="text-sm font-medium">{draft.row.productName}</div>
-                <div class="text-xs text-muted-foreground">
-                  {draft.row.sku}{draft.row.label ? ` · ${draft.row.label}` : ""}
-                  · {draft.row.unit} · base {formatMoney(draft.row.priceMinor)}
-                  {#if draft.productKind !== "physical"}
-                    · {draft.productKind}
-                  {/if}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="text-xs text-muted-foreground hover:text-foreground"
-                disabled={busy}
-                onclick={clearDraft}
-              >
-                Clear
-              </button>
-            </div>
-            <div class="grid grid-cols-3 gap-3">
-              <label class="space-y-1">
-                <span class="text-xs font-medium">Qty</span>
-                <Input
-                  type="number"
-                  min={1}
-                  bind:value={addQty}
-                  disabled={busy || !canEdit}
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium">Discount (Rp)</span>
-                <MoneyInput bind:value={addDiscount} disabled={busy || !canEdit} />
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium">Price override (Rp)</span>
-                <MoneyInput
-                  placeholder={draft.productKind === "service"
-                    ? "Leave blank to use base price"
-                    : "Service products only"}
-                  bind:value={addPriceOverride}
-                  disabled={busy || !canEdit || draft.productKind !== "service"}
-                />
-                {#if draft.productKind !== "service"}
-                  <span class="text-xs text-muted-foreground">
-                    API only allows price overrides on service products.
-                  </span>
-                {/if}
-              </label>
-            </div>
-            <div class="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onclick={clearDraft}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                disabled={busy || !canEdit || addQty < 1}
-                onclick={commitDraft}
-              >
-                Add line
-              </Button>
-            </div>
-          </div>
-        {:else}
-          <p class="text-xs text-muted-foreground">
-            Pick a variant (Enter picks the highlighted row). Stock is
-            decremented on add; voiding returns it.
-          </p>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Items -->
-    <div class="overflow-hidden rounded-lg border bg-card">
-      <table class="w-full text-sm">
+    <!-- Items + add line -->
+    <div class="rounded-lg border bg-card">
+      <div class="overflow-hidden {isOpen ? 'rounded-t-lg' : 'rounded-lg'}">
+        <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
             <th class="px-4 py-2 font-medium">Item</th>
@@ -813,13 +777,29 @@
           </tr>
         </thead>
         <tbody>
-          {#each order.items as i (i.id)}
-            <tr
-              class="border-b last:border-0 align-top
-                {i.voidedAt ? 'text-muted-foreground line-through' : ''}"
-            >
+          {#each visibleItems as i (i.id)}
+            {@const margin = marginPct(i)}
+            <tr class="border-b align-top last:border-0">
               <td class="px-4 py-2">
-                <div class="font-medium">{i.displayName}</div>
+                {#if cellEdit?.id === i.id && cellEdit.field === "name"}
+                  <input
+                    bind:value={cellStr}
+                    use:selectOnMount
+                    onkeydown={cellKeydown}
+                    onblur={commitCell}
+                    placeholder={i.snapshotProductName}
+                    class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                {:else if lineEditable(i)}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 text-left font-medium hover:bg-accent"
+                    title="Edit display name (clear to use the default)"
+                    onclick={() => startCellEdit(i, "name")}>{i.displayName}</button
+                  >
+                {:else}
+                  <div class="font-medium">{i.displayName}</div>
+                {/if}
                 <div class="text-xs text-muted-foreground">
                   {i.snapshotProductSku}{i.snapshotVariantLabel
                     ? ` · ${i.snapshotVariantLabel}`
@@ -828,47 +808,95 @@
                     · {i.snapshotCategoryName}
                   {/if}
                 </div>
-                {#if i.voidReason}
-                  <div class="text-xs text-destructive">Void: {i.voidReason}</div>
+                {#if margin != null}
+                  <div class="mt-1">
+                    <Badge class={marginBadgeClass(margin)}>
+                      {margin.toFixed(1)}% margin
+                    </Badge>
+                  </div>
                 {/if}
               </td>
-              <td class="px-4 py-2 text-right">{i.qty}</td>
               <td class="px-4 py-2 text-right">
-                {formatMoney(i.snapshotPriceMinor)}
+                {#if cellEdit?.id === i.id && cellEdit.field === "qty"}
+                  <input
+                    type="number"
+                    min="1"
+                    bind:value={cellStr}
+                    use:selectOnMount
+                    onkeydown={cellKeydown}
+                    onblur={commitCell}
+                    class="h-7 w-16 rounded-md border border-input bg-background px-2 text-right text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                {:else if lineEditable(i)}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit qty"
+                    onclick={() => startCellEdit(i, "qty")}>{i.qty}</button
+                  >
+                {:else}
+                  {i.qty}
+                {/if}
               </td>
               <td class="px-4 py-2 text-right">
-                {i.discountMinor ? formatMoney(i.discountMinor) : "—"}
+                {#if cellEdit?.id === i.id && cellEdit.field === "price"}
+                  <MoneyInput
+                    autofocus
+                    bind:value={cellMoney}
+                    onkeydown={cellKeydown}
+                    onblur={commitCell}
+                    class="ml-auto h-7 w-28 px-2 text-right"
+                  />
+                {:else if lineEditable(i)}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit price"
+                    onclick={() => startCellEdit(i, "price")}
+                    >{formatMoney(i.snapshotPriceMinor)}</button
+                  >
+                {:else}
+                  {formatMoney(i.snapshotPriceMinor)}
+                {/if}
+              </td>
+              <td class="px-4 py-2 text-right">
+                {#if cellEdit?.id === i.id && cellEdit.field === "discount"}
+                  <MoneyInput
+                    autofocus
+                    bind:value={cellMoney}
+                    onkeydown={cellKeydown}
+                    onblur={commitCell}
+                    class="ml-auto h-7 w-28 px-2 text-right"
+                  />
+                {:else if lineEditable(i)}
+                  <button
+                    type="button"
+                    class="-mx-1 rounded px-1 hover:bg-accent"
+                    title="Edit discount"
+                    onclick={() => startCellEdit(i, "discount")}
+                    >{i.discountMinor ? formatMoney(i.discountMinor) : "—"}</button
+                  >
+                {:else}
+                  {i.discountMinor ? formatMoney(i.discountMinor) : "—"}
+                {/if}
               </td>
               <td class="px-4 py-2 text-right font-medium">
                 {formatMoney(i.lineTotalMinor)}
               </td>
               {#if isOpen}
                 <td class="px-4 py-2 text-right whitespace-nowrap">
-                  {#if !i.voidedAt}
-                    <span class="inline-flex items-center gap-0.5">
-                    {#if !i.snapshotBundleName}
-                      <IconButton
-                        icon={Pencil}
-                        label="Edit line"
-                        variant="primary"
-                        disabled={busy || !canEdit}
-                        onclick={() => startLineEdit(i)}
-                      />
-                    {/if}
-                    <IconButton
-                      icon={Ban}
-                      label="Void line"
-                      variant="destructive"
-                      disabled={busy || !canVoid}
-                      onclick={() => voidLine(i.id)}
-                    />
-                    </span>
-                  {/if}
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete line"
+                    variant="destructive"
+                    disabled={busy || !canVoid}
+                    onclick={() => deleteLine(i.id)}
+                  />
                 </td>
               {/if}
             </tr>
           {/each}
-          {#if order.items.length === 0}
+          {#if visibleItems.length === 0}
             <tr>
               <td
                 colspan={isOpen ? 6 : 5}
@@ -907,103 +935,148 @@
           </tr>
         </tfoot>
       </table>
+      </div>
+
+      {#if isOpen}
+        <!-- Add line — compact, attached to the bottom of the list -->
+        <div class="space-y-2 border-t p-3">
+          <div class="relative">
+            <Input
+              type="search"
+              placeholder="Add line — search product or SKU…"
+              bind:value={variantSearch}
+              onfocus={() => (pickerOpen = true)}
+              onblur={() => setTimeout(() => (pickerOpen = false), 150)}
+              onkeydown={onPickerKey}
+              autocomplete="off"
+              class="h-8"
+              disabled={busy || !canEdit}
+            />
+            {#if pickerOpen && pickMatches.length > 0}
+              <ul
+                class="absolute bottom-full z-10 mb-1 max-h-72 w-full overflow-auto rounded-md border bg-popover shadow-md"
+              >
+                {#each pickMatches as v, i (v.variantId)}
+                  <li>
+                    <button
+                      type="button"
+                      class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/60 {i ===
+                      highlight
+                        ? 'bg-muted/60'
+                        : ''}"
+                      onmousedown={(e) => e.preventDefault()}
+                      onmouseenter={() => (highlight = i)}
+                      onclick={() => selectVariant(v)}
+                    >
+                      <span>
+                        <span class="font-medium">{v.productName}</span>
+                        <span class="ml-2 font-mono text-xs text-muted-foreground">
+                          {v.sku}{v.label ? ` · ${v.label}` : ""}
+                        </span>
+                        {#if v.productKind !== "physical"}
+                          <span class="ml-2 text-xs text-muted-foreground">
+                            ({v.productKind})
+                          </span>
+                        {/if}
+                      </span>
+                      <span class="text-xs text-muted-foreground">
+                        {formatMoney(v.priceMinor)}
+                      </span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else if pickerOpen && variantSearch.trim()}
+              <div
+                class="absolute bottom-full z-10 mb-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
+              >
+                No matches.
+              </div>
+            {/if}
+          </div>
+
+          {#if draft}
+            <div
+              class="flex flex-wrap items-end gap-2 rounded-md border bg-background p-2"
+            >
+              <div class="min-w-[8rem] flex-1">
+                <div class="truncate text-sm font-medium">
+                  {draft.row.productName}
+                </div>
+                <div class="truncate text-xs text-muted-foreground">
+                  {draft.row.sku}{draft.row.label ? ` · ${draft.row.label}` : ""}
+                  · {draft.row.unit} · base {formatMoney(draft.row.priceMinor)}
+                  {#if draft.productKind !== "physical"}
+                    · {draft.productKind}
+                  {/if}
+                </div>
+              </div>
+              <label class="space-y-0.5">
+                <span class="block text-[11px] font-medium text-muted-foreground">
+                  Qty
+                </span>
+                <Input
+                  type="number"
+                  min={1}
+                  bind:value={addQty}
+                  bind:ref={qtyInput}
+                  onkeydown={onDraftKey}
+                  class="h-8 w-16"
+                  disabled={busy || !canEdit}
+                />
+              </label>
+              <label class="space-y-0.5">
+                <span class="block text-[11px] font-medium text-muted-foreground">
+                  Disc (Rp)
+                </span>
+                <MoneyInput
+                  bind:value={addDiscount}
+                  onkeydown={onDraftKey}
+                  class="h-8 w-24"
+                  disabled={busy || !canEdit}
+                />
+              </label>
+              <label class="space-y-0.5">
+                <span class="block text-[11px] font-medium text-muted-foreground">
+                  Price (Rp)
+                </span>
+                <MoneyInput
+                  placeholder={draft.productKind === "open_price"
+                    ? "Required"
+                    : "Base"}
+                  bind:value={addPriceOverride}
+                  onkeydown={onDraftKey}
+                  class="h-8 w-28"
+                  disabled={busy || !canEdit}
+                />
+              </label>
+              {#if draftMargin != null}
+                <Badge class="{marginBadgeClass(draftMargin)} self-end">
+                  {draftMargin.toFixed(1)}% margin
+                </Badge>
+              {/if}
+              <Button
+                size="sm"
+                disabled={busy || !canEdit || addQty < 1}
+                onclick={commitDraft}
+              >
+                Add
+              </Button>
+              <Button variant="ghost" size="sm" disabled={busy} onclick={clearDraft}>
+                Cancel
+              </Button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
 
-    {#if lineDraft}
-      <div class="space-y-3 rounded-lg border bg-card p-4">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold">Edit line</h2>
-          <button
-            type="button"
-            class="text-xs text-muted-foreground hover:text-foreground"
-            disabled={busy}
-            onclick={() => (lineDraft = null)}
-          >
-            Close
-          </button>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <label class="space-y-1">
-            <span class="text-xs font-medium">Display name (receipt)</span>
-            <Input
-              bind:value={lineDraft.displayName}
-              disabled={busy || !canEdit}
-            />
-            <span class="text-xs text-muted-foreground">
-              Clear to fall back to the product's default.
-            </span>
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium">Qty</span>
-            <Input
-              type="number"
-              min={1}
-              bind:value={lineDraft.qty}
-              disabled={busy || !canEdit}
-            />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium">Discount (Rp)</span>
-            <MoneyInput bind:value={lineDraft.discountMinor} disabled={busy || !canEdit} />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium">Price (Rp)</span>
-            <MoneyInput
-              bind:value={lineDraft.priceMinor}
-              disabled={busy || !canEdit || lineDraft.productKind !== "service"}
-            />
-            {#if lineDraft.productKind !== "service"}
-              <span class="text-xs text-muted-foreground">
-                Price is editable on service products only.
-              </span>
-            {/if}
-          </label>
-        </div>
-        {#if lineDraft}
-          {@const m = marginPct(
-            lineDraft.priceMinor,
-            lineDraft.costMinor,
-            lineDraft.discountMinor,
-            lineDraft.qty,
-          )}
-          <div class="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Cost {formatMoney(lineDraft.costMinor)} (snapshot)</span>
-            <span>
-              Margin
-              {#if m == null}
-                <span class="font-medium">—</span>
-              {:else}
-                <span
-                  class="font-medium {m < 0
-                    ? 'text-destructive'
-                    : m < 10
-                      ? 'text-amber-700'
-                      : 'text-emerald-700'}"
-                >
-                  {m.toFixed(1)}%
-                </span>
-              {/if}
-            </span>
-          </div>
-        {/if}
-        <div class="flex justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onclick={() => (lineDraft = null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            disabled={busy || !canEdit}
-            onclick={saveLineEdit}
-          >
-            Save line
-          </Button>
-        </div>
-      </div>
+    {#if isOpen && canEdit}
+      <p class="text-xs text-muted-foreground">
+        Click a line's name, qty, price, or discount to edit it in place. Enter
+        saves, Escape cancels. Search above to add a line (Enter picks the
+        highlighted match); voiding a line returns its stock.
+      </p>
     {/if}
 
     <!-- Payments -->
