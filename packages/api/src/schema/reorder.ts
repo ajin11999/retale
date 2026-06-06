@@ -43,6 +43,13 @@ export const typeDefs = /* GraphQL */ `
     vendorId: ID
   }
 
+  "One selected suggestion to append to an existing PO, with optional qty override."
+  input AddReorderLineInput {
+    suggestionId: ID!
+    "Override the suggested quantity."
+    qty: Int
+  }
+
   extend type Query {
     "Reorder suggestions, newest scan first; optionally filtered by status."
     reorderSuggestions(status: ReorderSuggestionStatus): [ReorderSuggestion!]!
@@ -53,6 +60,8 @@ export const typeDefs = /* GraphQL */ `
     runReorderScan: [ReorderSuggestion!]!
     "Convert selected open suggestions into draft purchases (one per vendor)."
     convertReorderSuggestions(lines: [ConvertReorderLineInput!]!): [Purchase!]!
+    "Append selected open suggestions as lines on an existing purchase; marks them converted."
+    addReorderSuggestionsToPurchase(purchaseId: ID!, lines: [AddReorderLineInput!]!): [PurchaseItem!]!
     "Drop a suggestion from the review list without ordering it."
     dismissReorderSuggestion(id: ID!): ReorderSuggestion!
   }
@@ -126,6 +135,18 @@ export const resolvers = {
       const viewer = await requirePermission(ctx, "purchase.create");
       try {
         return await reorder.convertSuggestions(args.lines, viewer.userId);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    addReorderSuggestionsToPurchase: async (
+      _: unknown,
+      args: { purchaseId: string; lines: reorder.AddReorderLine[] },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.create");
+      try {
+        return await reorder.addSuggestionsToPurchase(args.purchaseId, args.lines);
       } catch (e) {
         asGraphQLError(e);
       }

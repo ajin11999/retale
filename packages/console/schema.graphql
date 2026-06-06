@@ -269,6 +269,11 @@ type Mutation {
   deletePurchaseSection(id: ID!): Boolean!
   reorderPurchaseSections(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseSection!]!
   createPurchaseItem(purchaseId: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float!, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
+
+  """
+  Append several lines at once (bulk-add picker); all-or-nothing, one revision bump.
+  """
+  createPurchaseItems(purchaseId: ID!, lines: [PurchaseLineInput!]!): [PurchaseItem!]!
   updatePurchaseItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
   deletePurchaseItem(id: ID!): Boolean!
   reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
@@ -467,6 +472,11 @@ type Mutation {
   """
   convertReorderSuggestions(lines: [ConvertReorderLineInput!]!): [Purchase!]!
 
+  """
+  Append selected open suggestions as lines on an existing purchase; marks them converted.
+  """
+  addReorderSuggestionsToPurchase(purchaseId: ID!, lines: [AddReorderLineInput!]!): [PurchaseItem!]!
+
   """Drop a suggestion from the review list without ordering it."""
   dismissReorderSuggestion(id: ID!): ReorderSuggestion!
 
@@ -641,6 +651,11 @@ type ProductVariant {
   priceMinor: Float!
   costMinor: Float!
   totalQty: Float!
+
+  """
+  Stock level at/below which the reorder scan suggests a purchase; null = not tracked.
+  """
+  reorderPoint: Float
   sortOrder: Int!
   priceTiers: [PriceTier!]!
 
@@ -1015,6 +1030,15 @@ type PurchaseSend {
   expectedDeliveryDate: String
   note: String
   createdAt: String!
+}
+
+"""One line for the bulk-add picker (reorder suggestions / by-stock)."""
+input PurchaseLineInput {
+  sectionId: ID
+  variantId: ID
+  description: String
+  qtyOrdered: Float!
+  unitCostMinor: Float!
 }
 
 enum DeliveryStatus {
@@ -1550,6 +1574,16 @@ input ConvertReorderLineInput {
 
   """Override / assign the vendor."""
   vendorId: ID
+}
+
+"""
+One selected suggestion to append to an existing PO, with optional qty override.
+"""
+input AddReorderLineInput {
+  suggestionId: ID!
+
+  """Override the suggested quantity."""
+  qty: Int
 }
 
 """

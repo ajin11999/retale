@@ -14,6 +14,7 @@
     ChevronRight,
     Pencil,
     Trash2,
+    X,
   } from "@lucide/svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -91,6 +92,9 @@
           id
           sku
           label
+          totalQty
+          costMinor
+          reorderPoint
         }
       }
     }
@@ -185,6 +189,48 @@
         qtyOrdered: $qtyOrdered
         unitCostMinor: $unitCostMinor
       ) {
+        id
+      }
+    }
+  `);
+
+  // Bulk-add the checked variants from the "By stock" tab in one round-trip.
+  const CreateItems = graphql(`
+    mutation ConsoleCreatePurchaseItems(
+      $purchaseId: ID!
+      $lines: [PurchaseLineInput!]!
+    ) {
+      createPurchaseItems(purchaseId: $purchaseId, lines: $lines) {
+        id
+      }
+    }
+  `);
+
+  // Open reorder suggestions for the bulk-add modal's "Reorder" tab. Fetched
+  // imperatively when the modal opens (keeps the page load lean).
+  const ReorderSuggestionsQuery = graphql(`
+    query PurchaseReorderSuggestions {
+      reorderSuggestions(status: open) {
+        id
+        variantId
+        productName
+        sku
+        vendorId
+        vendorName
+        currentStock
+        reorderPoint
+        suggestedQty
+      }
+    }
+  `);
+
+  // Append the checked suggestions to this PO and flip them to converted.
+  const AddReorderToPurchase = graphql(`
+    mutation ConsoleAddReorderSuggestionsToPurchase(
+      $purchaseId: ID!
+      $lines: [AddReorderLineInput!]!
+    ) {
+      addReorderSuggestionsToPurchase(purchaseId: $purchaseId, lines: $lines) {
         id
       }
     }
@@ -690,6 +736,158 @@
   async function deleteItem(id: string) {
     const ok = await run("Item", () => DeleteItem.mutate({ id }));
     if (ok) await refetch();
+  }
+
+  // ---- Bulk-add modal ------------------------------------------------------
+  // Two ways to fill a PO fast: pick from the reorder scan (intent-driven, the
+  // default tab), or sweep the catalog sorted by least stock (ad-hoc). Both end
+  // in a single batch insert + refetch.
+  let bulkOpen = $state(false);
+  let bulkTab = $state<"reorder" | "stock">("reorder");
+  // Reorder tab: default-scope to this PO's vendor; toggle shows all vendors.
+  let reorderAllVendors = $state(false);
+  // Per-row picks, keyed by suggestion id / variant id.
+  interface BulkPick {
+    selected: boolean;
+    qty: number;
+    unitCostMinor: number | null;
+  }
+  let reorderPicks = $state<Record<string, BulkPick>>({});
+  let stockPicks = $state<Record<string, BulkPick>>({});
+  let stockSearch = $state("");
+
+  const suggestions = $derived(
+    $ReorderSuggestionsQuery.data?.reorderSuggestions ?? [],
+  );
+  // Filter to the PO's vendor by default; suggestions with no vendor always show.
+  const reorderRows = $derived(
+    reorderAllVendors
+      ? suggestions
+      : suggestions.filter(
+          (s) => !purchase?.vendorId || s.vendorId === purchase.vendorId,
+        ),
+  );
+
+  // Flat variant list with stock/cost, sorted least-stock-first, name-filtered.
+  interface StockRow {
+    variantId: string;
+    label: string;
+    totalQty: number;
+    costMinor: number;
+    reorderPoint: number | null;
+  }
+  const stockRows = $derived.by<StockRow[]>(() => {
+    const out: StockRow[] = [];
+    for (const p of products) {
+      for (const v of p.variants) {
+        const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
+        out.push({
+          variantId: v.id,
+          label: `${p.name} · ${suffix}`,
+          totalQty: v.totalQty,
+          costMinor: v.costMinor,
+          reorderPoint: v.reorderPoint ?? null,
+        });
+      }
+    }
+    const tokens = stockSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matched = tokens.length
+      ? out.filter((r) => {
+          const hay = r.label.toLowerCase();
+          return tokens.every((t) => hay.includes(t));
+        })
+      : out;
+    return matched.sort((a, b) => a.totalQty - b.totalQty);
+  });
+
+  // Default order qty for a by-stock row: close the reorder gap, else 1.
+  const stockDefaultQty = (r: StockRow) =>
+    r.reorderPoint != null ? Math.max(1, r.reorderPoint - r.totalQty) : 1;
+
+  async function openBulk() {
+    bulkOpen = true;
+    bulkTab = "reorder";
+    stockSearch = "";
+    // Seed every variant's by-stock pick up front so the row's qty / cost
+    // inputs have a stable object to bind to (default qty = reorder gap).
+    const sp: Record<string, BulkPick> = {};
+    for (const r of stockRows) {
+      sp[r.variantId] = {
+        selected: false,
+        qty: stockDefaultQty(r),
+        unitCostMinor: r.costMinor,
+      };
+    }
+    stockPicks = sp;
+    // Pull fresh suggestions every open — a scan may have run since last time.
+    await ReorderSuggestionsQuery.fetch({ policy: "NetworkOnly" });
+    const picks: Record<string, BulkPick> = {};
+    for (const s of suggestions) {
+      picks[s.id] = { selected: false, qty: s.suggestedQty, unitCostMinor: null };
+    }
+    reorderPicks = picks;
+  }
+
+  function closeBulk() {
+    bulkOpen = false;
+  }
+
+  // Count / add from the pick maps (not the filtered row lists) so a selection
+  // survives changing the search or the vendor toggle.
+  const reorderSelectedCount = $derived(
+    Object.values(reorderPicks).filter((p) => p.selected).length,
+  );
+  const stockSelectedCount = $derived(
+    Object.values(stockPicks).filter((p) => p.selected).length,
+  );
+
+  // The catalog can be large; render only the first slice of the (sorted,
+  // filtered) list and nudge the user to narrow by name for the rest. Selected
+  // rows still count toward the batch even when scrolled out by the cap.
+  const STOCK_CAP = 60;
+  const stockVisible = $derived(stockRows.slice(0, STOCK_CAP));
+  const stockTruncated = $derived(stockRows.length > STOCK_CAP);
+
+  const tabClass = (t: "reorder" | "stock") =>
+    bulkTab === t
+      ? "border-b-2 border-primary px-3 py-2 text-sm font-medium"
+      : "border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground";
+
+  async function addReorderSelected() {
+    if (!purchase) return;
+    const lines = Object.entries(reorderPicks)
+      .filter(([, p]) => p.selected)
+      .map(([suggestionId, p]) => ({
+        suggestionId,
+        qty: Math.round(p.qty),
+      }));
+    if (lines.length === 0) return;
+    const ok = await run("Lines", () =>
+      AddReorderToPurchase.mutate({ purchaseId: purchase.id, lines }),
+    );
+    if (ok) {
+      await refetch();
+      closeBulk();
+    }
+  }
+
+  async function addStockSelected() {
+    if (!purchase) return;
+    const lines = Object.entries(stockPicks)
+      .filter(([, p]) => p.selected)
+      .map(([variantId, p]) => ({
+        variantId,
+        qtyOrdered: Math.round(p.qty),
+        unitCostMinor: p.unitCostMinor ?? 0,
+      }));
+    if (lines.length === 0) return;
+    const ok = await run("Lines", () =>
+      CreateItems.mutate({ purchaseId: purchase.id, lines }),
+    );
+    if (ok) {
+      await refetch();
+      closeBulk();
+    }
   }
 
   // ---- Inline cell edit ----------------------------------------------------
@@ -1200,6 +1398,14 @@
      menu first — it only reaches here once the menu is already shut. -->
 <svelte:window
   onkeydown={(e) => {
+    // Esc closes the bulk-add modal first, when it's open.
+    if (bulkOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeBulk();
+      }
+      return;
+    }
     if (!itemDraft || busy) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && editable) {
       e.preventDefault();
@@ -1357,6 +1563,12 @@
             size="sm"
             disabled={busy || !editable}
             onclick={() => (newSectionName = "")}>Add section</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !editable}
+            onclick={openBulk}>Add multiple</Button
           >
           <Button
             variant="outline"
@@ -2002,5 +2214,204 @@
         </div>
       {/if}
     </section>
+
+    {#if bulkOpen}
+      <!-- Bulk-add modal: a centered overlay with two tabs. Backdrop click /
+           Esc closes (Esc handled by the window listener above). Both tabs end
+           in a single batch insert + refetch. -->
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="presentation"
+        onclick={(e) => e.target === e.currentTarget && closeBulk()}
+      >
+        <div
+          class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add multiple lines"
+        >
+          <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
+            <h2 class="text-sm font-semibold">Add multiple lines</h2>
+            <IconButton icon={X} label="Close" variant="muted" onclick={closeBulk} />
+          </div>
+
+          <div class="flex gap-1 border-b px-5">
+            <button class={tabClass("reorder")} onclick={() => (bulkTab = "reorder")}>
+              Reorder suggestions
+            </button>
+            <button class={tabClass("stock")} onclick={() => (bulkTab = "stock")}>
+              By stock
+            </button>
+          </div>
+
+          <div class="flex-1 overflow-auto px-5 py-4">
+            {#if bulkTab === "reorder"}
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <p class="text-xs text-muted-foreground">
+                  Open suggestions{purchase?.vendorId && !reorderAllVendors
+                    ? " for this vendor"
+                    : ""}. Adding marks them converted.
+                </p>
+                {#if purchase?.vendorId}
+                  <label class="flex items-center gap-2 text-xs">
+                    <input type="checkbox" bind:checked={reorderAllVendors} />
+                    Show all vendors
+                  </label>
+                {/if}
+              </div>
+
+              {#if $ReorderSuggestionsQuery.fetching && suggestions.length === 0}
+                <p class="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+              {:else if reorderRows.length === 0}
+                <p class="py-8 text-center text-sm text-muted-foreground">
+                  No open suggestions{purchase?.vendorId && !reorderAllVendors
+                    ? " for this vendor"
+                    : ""}. Run a scan on the Reorder screen to generate them.
+                </p>
+              {:else}
+                <table class="w-full text-sm">
+                  <thead
+                    class="border-b text-left text-xs text-muted-foreground"
+                  >
+                    <tr>
+                      <th class="w-8 py-2"></th>
+                      <th class="py-2 font-medium">Product</th>
+                      <th class="py-2 text-right font-medium">Stock</th>
+                      <th class="py-2 text-right font-medium">Point</th>
+                      <th class="py-2 font-medium">Vendor</th>
+                      <th class="py-2 font-medium">Order qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each reorderRows as s (s.id)}
+                      {#if reorderPicks[s.id]}
+                        <tr class="border-b last:border-0 hover:bg-muted/40">
+                          <td class="py-2">
+                            <input
+                              type="checkbox"
+                              bind:checked={reorderPicks[s.id].selected}
+                            />
+                          </td>
+                          <td class="py-2">
+                            <span class="font-medium">{s.productName}</span>
+                            <span
+                              class="ml-1 font-mono text-xs text-muted-foreground"
+                              >{s.sku}</span
+                            >
+                          </td>
+                          <td class="py-2 text-right">{s.currentStock}</td>
+                          <td class="py-2 text-right">{s.reorderPoint}</td>
+                          <td class="py-2 text-xs text-muted-foreground">
+                            {s.vendorName ?? "—"}
+                          </td>
+                          <td class="py-2">
+                            <Input
+                              type="number"
+                              class="w-24"
+                              bind:value={reorderPicks[s.id].qty}
+                            />
+                          </td>
+                        </tr>
+                      {/if}
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
+            {:else}
+              <div class="mb-3">
+                <Input
+                  type="search"
+                  placeholder="Filter by product name…"
+                  bind:value={stockSearch}
+                />
+              </div>
+              {#if stockVisible.length === 0}
+                <p class="py-8 text-center text-sm text-muted-foreground">
+                  No variants match.
+                </p>
+              {:else}
+                <table class="w-full text-sm">
+                  <thead
+                    class="border-b text-left text-xs text-muted-foreground"
+                  >
+                    <tr>
+                      <th class="w-8 py-2"></th>
+                      <th class="py-2 font-medium">Product</th>
+                      <th class="py-2 text-right font-medium">Stock</th>
+                      <th class="py-2 font-medium">Order qty</th>
+                      <th class="py-2 font-medium">Unit cost (Rp)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each stockVisible as r (r.variantId)}
+                      {#if stockPicks[r.variantId]}
+                        <tr class="border-b last:border-0 hover:bg-muted/40">
+                          <td class="py-2">
+                            <input
+                              type="checkbox"
+                              bind:checked={stockPicks[r.variantId].selected}
+                            />
+                          </td>
+                          <td class="py-2 font-medium">{r.label}</td>
+                          <td class="py-2 text-right">{r.totalQty}</td>
+                          <td class="py-2">
+                            <Input
+                              type="number"
+                              class="w-24"
+                              bind:value={stockPicks[r.variantId].qty}
+                            />
+                          </td>
+                          <td class="py-2">
+                            <div class="w-32">
+                              <MoneyInput
+                                bind:value={stockPicks[r.variantId].unitCostMinor}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      {/if}
+                    {/each}
+                  </tbody>
+                </table>
+                {#if stockTruncated}
+                  <p class="pt-3 text-center text-xs text-muted-foreground">
+                    Showing the {STOCK_CAP} lowest-stock matches — refine the
+                    filter to see more.
+                  </p>
+                {/if}
+              {/if}
+            {/if}
+          </div>
+
+          <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
+            <p class="text-sm text-muted-foreground">
+              {bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount} selected
+            </p>
+            <div class="flex items-center gap-2">
+              <Button variant="ghost" size="sm" disabled={busy} onclick={closeBulk}>
+                Cancel
+              </Button>
+              {#if bulkTab === "reorder"}
+                <Button
+                  size="sm"
+                  disabled={busy || !editable || reorderSelectedCount === 0}
+                  onclick={addReorderSelected}
+                >
+                  Add {reorderSelectedCount} line{reorderSelectedCount === 1 ? "" : "s"}
+                </Button>
+              {:else}
+                <Button
+                  size="sm"
+                  disabled={busy || !editable || stockSelectedCount === 0}
+                  onclick={addStockSelected}
+                >
+                  Add {stockSelectedCount} line{stockSelectedCount === 1 ? "" : "s"}
+                </Button>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>

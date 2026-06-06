@@ -19,6 +19,7 @@ import {
   clonePurchase,
   confirmPurchaseSend,
   createItem,
+  createItems,
   createPurchase,
   createSection,
   getPurchase,
@@ -357,5 +358,77 @@ describe("recordPurchaseSend / confirmPurchaseSend", () => {
 
   test("confirming an unknown send is rejected", async () => {
     await expectError(confirmPurchaseSend({ id: ulid() }), "SEND_NOT_FOUND");
+  });
+});
+
+describe("createItems (bulk add)", () => {
+  test("appends lines after the current max sortOrder and bumps revision once", async () => {
+    const v1 = await seedVariant();
+    const v2 = await seedVariant();
+    const purchase = await createPurchase({
+      snapshotVendorName: "Acme",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    // An existing line so the batch must append after it.
+    await createItem({
+      purchaseId: purchase.id,
+      variantId: v1,
+      qtyOrdered: 5,
+      unitCostMinor: 100,
+    });
+    const revBefore = (await getPurchase(purchase.id)).revision;
+
+    const added = await createItems({
+      purchaseId: purchase.id,
+      lines: [
+        { variantId: v2, qtyOrdered: 3, unitCostMinor: 200 },
+        { variantId: null, description: "Freight", qtyOrdered: 1, unitCostMinor: 5000 },
+      ],
+    });
+
+    expect(added).toHaveLength(2);
+    // Returned in input order, appended after the existing line's sortOrder (0).
+    expect(added[0]!.variantId).toBe(v2);
+    expect(added[0]!.sortOrder).toBe(1);
+    expect(added[1]!.description).toBe("Freight");
+    expect(added[1]!.sortOrder).toBe(2);
+
+    const items = await listItems(purchase.id);
+    expect(items).toHaveLength(3);
+    // A single bump for the whole batch, not one per line.
+    expect((await getPurchase(purchase.id)).revision).toBe(revBefore + 1);
+  });
+
+  test("rejects a bad line and rolls the whole batch back", async () => {
+    const v1 = await seedVariant();
+    const purchase = await createPurchase({
+      snapshotVendorName: "Acme",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await expectError(
+      createItems({
+        purchaseId: purchase.id,
+        lines: [
+          { variantId: v1, qtyOrdered: 3, unitCostMinor: 200 },
+          { variantId: v1, qtyOrdered: 0, unitCostMinor: 200 },
+        ],
+      }),
+      "INVALID_INPUT",
+    );
+    expect(await listItems(purchase.id)).toHaveLength(0);
+  });
+
+  test("rejects an empty batch", async () => {
+    const purchase = await createPurchase({
+      snapshotVendorName: "Acme",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await expectError(
+      createItems({ purchaseId: purchase.id, lines: [] }),
+      "INVALID_INPUT",
+    );
   });
 });

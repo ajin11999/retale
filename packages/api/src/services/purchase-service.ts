@@ -471,6 +471,80 @@ export async function createItem(input: {
 }
 
 /**
+ * Append several lines to a purchase in one transaction — the bulk-add picker
+ * (reorder suggestions / by-stock) calls this so a multi-row add is a single
+ * round-trip with one `revision` bump. Lines append after the current max
+ * `sortOrder`, preserving the order they arrive in. All-or-nothing: any invalid
+ * line rolls the whole batch back.
+ */
+export async function createItems(input: {
+  purchaseId: string;
+  lines: Array<{
+    sectionId?: string | null;
+    variantId?: string | null;
+    description?: string | null;
+    qtyOrdered: number;
+    unitCostMinor: number;
+  }>;
+}): Promise<Item[]> {
+  const purchase = await loadPurchase(input.purchaseId);
+  assertEditable(purchase);
+  if (input.lines.length === 0) {
+    throw new PurchaseError("INVALID_INPUT", "no lines to add");
+  }
+
+  // Validate every line up front (outside the tx) so we fail before writing.
+  const prepared: Array<{
+    id: string;
+    purchaseId: string;
+    sectionId: string | null;
+    variantId: string | null;
+    description: string | null;
+    qtyOrdered: number;
+    unitCostMinor: number;
+  }> = [];
+  for (const line of input.lines) {
+    const variantId = line.variantId ?? null;
+    const description = line.description?.trim() || null;
+    assertLineTarget(variantId, description);
+    if (variantId) await assertVariantExists(variantId);
+    if (line.sectionId) await assertSectionInPurchase(line.sectionId, input.purchaseId);
+    if (!Number.isInteger(line.qtyOrdered) || line.qtyOrdered <= 0) {
+      throw new PurchaseError("INVALID_INPUT", "qtyOrdered must be a positive integer");
+    }
+    if (!Number.isInteger(line.unitCostMinor) || line.unitCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+    }
+    prepared.push({
+      id: ulid(),
+      purchaseId: input.purchaseId,
+      sectionId: line.sectionId ?? null,
+      variantId,
+      description,
+      qtyOrdered: line.qtyOrdered,
+      unitCostMinor: line.unitCostMinor,
+    });
+  }
+
+  const ids = await db.transaction(async (tx) => {
+    const [{ maxSort } = { maxSort: null }] = await tx
+      .select({ maxSort: sql<number | null>`max(${purchaseItems.sortOrder})` })
+      .from(purchaseItems)
+      .where(eq(purchaseItems.purchaseId, input.purchaseId));
+    let next = (maxSort ?? -1) + 1;
+    const rows = prepared.map((p) => ({ ...p, sortOrder: next++ }));
+    await tx.insert(purchaseItems).values(rows);
+    await bumpRevision(tx, input.purchaseId);
+    return rows.map((r) => r.id);
+  });
+
+  return db.query.purchaseItems.findMany({
+    where: inArray(purchaseItems.id, ids),
+    orderBy: asc(purchaseItems.sortOrder),
+  });
+}
+
+/**
  * Edit a line. `qtyOrdered` / `unitCostMinor` are locked once any quantity has
  * been delivered against the item (`qtyDelivered > 0`) — cancel the delivery
  * first. Section / description / sort changes are always allowed while open.

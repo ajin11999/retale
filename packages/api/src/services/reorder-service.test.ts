@@ -16,6 +16,7 @@ import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import {
+  addSuggestionsToPurchase,
   convertSuggestions,
   dismissSuggestion,
   listSuggestions,
@@ -396,6 +397,121 @@ describe("convertSuggestions", () => {
     await expectError(
       () => convertSuggestions([{ suggestionId: s!.id, vendorId: ulid() }], userId),
       "VENDOR_NOT_FOUND",
+    );
+  });
+});
+
+describe("addSuggestionsToPurchase", () => {
+  /** Seed an empty target purchase; returns its id. */
+  async function seedEmptyPurchase(
+    status: "open" | "cancelled" = "open",
+  ): Promise<string> {
+    const id = ulid();
+    await db.insert(purchases).values({
+      id,
+      vendorId: null,
+      snapshotVendorName: "Target",
+      date: "2026-01-01",
+      status,
+    });
+    return id;
+  }
+
+  test("appends suggestions as lines priced at variant cost and marks them converted", async () => {
+    await seedVariant({
+      totalQty: 2,
+      reorderPoint: 10,
+      reorderQty: 8,
+      costMinor: 700,
+    });
+    const [s] = await runReorderScan();
+    const purchaseId = await seedEmptyPurchase();
+    const [before] = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId));
+
+    const added = await addSuggestionsToPurchase(purchaseId, [
+      { suggestionId: s!.id },
+    ]);
+
+    expect(added).toHaveLength(1);
+    expect(added[0]!.variantId).toBe(s!.variantId);
+    expect(added[0]!.qtyOrdered).toBe(8); // reorderQty
+    expect(added[0]!.unitCostMinor).toBe(700); // variant cost
+    expect(added[0]!.sortOrder).toBe(0);
+
+    expect(await listSuggestions("converted")).toHaveLength(1);
+    expect(await listSuggestions("open")).toHaveLength(0);
+
+    const [row] = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId));
+    expect(row!.revision).toBe(before!.revision + 1); // one bump for the batch
+  });
+
+  test("applies a qty override", async () => {
+    await seedVariant({ totalQty: 0, reorderPoint: 10, costMinor: 100 });
+    const [s] = await runReorderScan();
+    const purchaseId = await seedEmptyPurchase();
+    const added = await addSuggestionsToPurchase(purchaseId, [
+      { suggestionId: s!.id, qty: 42 },
+    ]);
+    expect(added[0]!.qtyOrdered).toBe(42);
+  });
+
+  test("appends after existing lines' sortOrder", async () => {
+    const vendorId = await seedVendor();
+    const existingVariant = await seedVariant({ totalQty: 5, reorderPoint: 0 });
+    const purchaseId = await seedPurchase({
+      vendorId,
+      variantId: existingVariant,
+      qtyOrdered: 3,
+    });
+    await seedVariant({ totalQty: 0, reorderPoint: 10 });
+    const [s] = await runReorderScan();
+    const added = await addSuggestionsToPurchase(purchaseId, [
+      { suggestionId: s!.id },
+    ]);
+    expect(added[0]!.sortOrder).toBe(1); // existing line was sortOrder 0
+  });
+
+  test("rejects adding to a cancelled purchase", async () => {
+    await seedVariant({ totalQty: 0, reorderPoint: 10 });
+    const [s] = await runReorderScan();
+    const purchaseId = await seedEmptyPurchase("cancelled");
+    await expectError(
+      () => addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]),
+      "PURCHASE_NOT_OPEN",
+    );
+  });
+
+  test("rejects an unknown purchase", async () => {
+    await seedVariant({ totalQty: 0, reorderPoint: 10 });
+    const [s] = await runReorderScan();
+    await expectError(
+      () => addSuggestionsToPurchase(ulid(), [{ suggestionId: s!.id }]),
+      "PURCHASE_NOT_FOUND",
+    );
+  });
+
+  test("rejects an already-converted suggestion", async () => {
+    await seedVariant({ totalQty: 0, reorderPoint: 10 });
+    const [s] = await runReorderScan();
+    const purchaseId = await seedEmptyPurchase();
+    await addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]);
+    await expectError(
+      () => addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]),
+      "NOT_OPEN",
+    );
+  });
+
+  test("rejects an empty selection", async () => {
+    const purchaseId = await seedEmptyPurchase();
+    await expectError(
+      () => addSuggestionsToPurchase(purchaseId, []),
+      "EMPTY_SELECTION",
     );
   });
 });

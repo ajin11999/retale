@@ -109,6 +109,15 @@ export const typeDefs = /* GraphQL */ `
     ): PurchaseSendDraft!
   }
 
+  "One line for the bulk-add picker (reorder suggestions / by-stock)."
+  input PurchaseLineInput {
+    sectionId: ID
+    variantId: ID
+    description: String
+    qtyOrdered: Float!
+    unitCostMinor: Float!
+  }
+
   extend type Mutation {
     createPurchase(
       vendorId: ID
@@ -145,6 +154,8 @@ export const typeDefs = /* GraphQL */ `
       unitCostMinor: Float!
       sortOrder: Int
     ): PurchaseItem!
+    "Append several lines at once (bulk-add picker); all-or-nothing, one revision bump."
+    createPurchaseItems(purchaseId: ID!, lines: [PurchaseLineInput!]!): [PurchaseItem!]!
     updatePurchaseItem(
       id: ID!
       sectionId: ID
@@ -370,6 +381,18 @@ export const resolvers = {
         return await purchases.createItem(
           args as Parameters<typeof purchases.createItem>[0],
         );
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    createPurchaseItems: async (
+      _: unknown,
+      args: Parameters<typeof purchases.createItems>[0],
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.edit");
+      try {
+        return await purchases.createItems(args);
       } catch (e) {
         asGraphQLError(e);
       }

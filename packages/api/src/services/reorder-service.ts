@@ -21,7 +21,9 @@ export type ReorderErrorCode =
   | "UNASSIGNED_VENDOR"
   | "VENDOR_NOT_FOUND"
   | "INVALID_INPUT"
-  | "EMPTY_SELECTION";
+  | "EMPTY_SELECTION"
+  | "PURCHASE_NOT_FOUND"
+  | "PURCHASE_NOT_OPEN";
 
 export class ReorderError extends Error {
   constructor(
@@ -324,6 +326,101 @@ export async function convertSuggestions(
         ),
       );
     return created;
+  });
+}
+
+/** One selected suggestion to append to an existing PO, with optional qty override. */
+export interface AddReorderLine {
+  suggestionId: string;
+  /** Override the suggested quantity. Defaults to the suggestion's value. */
+  qty?: number;
+}
+
+type PurchaseItem = typeof purchaseItems.$inferSelect;
+
+/**
+ * Append selected open suggestions as lines on an *existing* purchase — the PO
+ * editor's bulk-add picker. Each line is priced at the variant's current cost
+ * and appended after the PO's current max `sortOrder`. The picked suggestions
+ * are flipped to `converted` so the next scan won't re-suggest them. Atomic:
+ * either every line is added, every suggestion converted, and the revision
+ * bumped, or nothing. The suggestion's own vendor is irrelevant here — the line
+ * joins whatever PO the buyer is editing.
+ */
+export async function addSuggestionsToPurchase(
+  purchaseId: string,
+  lines: AddReorderLine[],
+): Promise<PurchaseItem[]> {
+  if (!lines.length) throw new ReorderError("EMPTY_SELECTION");
+
+  const purchase = await db.query.purchases.findFirst({
+    where: eq(purchases.id, purchaseId),
+  });
+  if (!purchase) throw new ReorderError("PURCHASE_NOT_FOUND");
+  if (purchase.status === "cancelled") {
+    throw new ReorderError("PURCHASE_NOT_OPEN", "purchase is cancelled");
+  }
+
+  // Resolve each line against its suggestion before opening the transaction.
+  type Resolved = { suggestion: Suggestion; qty: number };
+  const resolved: Resolved[] = [];
+  for (const line of lines) {
+    const suggestion = await loadSuggestion(line.suggestionId);
+    if (suggestion.status !== "open") {
+      throw new ReorderError(
+        "NOT_OPEN",
+        `suggestion ${line.suggestionId} is already ${suggestion.status}`,
+      );
+    }
+    const qty = line.qty ?? suggestion.suggestedQty;
+    if (!Number.isInteger(qty) || qty <= 0) {
+      throw new ReorderError("INVALID_INPUT", "qty must be a positive integer");
+    }
+    resolved.push({ suggestion, qty });
+  }
+
+  // Gather variant costs up front.
+  const variantIds = [...new Set(resolved.map((r) => r.suggestion.variantId))];
+  const variantRows = await db
+    .select({ id: productVariants.id, costMinor: productVariants.costMinor })
+    .from(productVariants)
+    .where(inArray(productVariants.id, variantIds));
+  const costByVariant = new Map(variantRows.map((v) => [v.id, v.costMinor]));
+
+  const ids = await db.transaction(async (tx) => {
+    const [{ maxSort } = { maxSort: null }] = await tx
+      .select({ maxSort: sql<number | null>`max(${purchaseItems.sortOrder})` })
+      .from(purchaseItems)
+      .where(eq(purchaseItems.purchaseId, purchaseId));
+    let next = (maxSort ?? -1) + 1;
+    const rows = resolved.map((r) => ({
+      id: ulid(),
+      purchaseId,
+      variantId: r.suggestion.variantId,
+      qtyOrdered: r.qty,
+      unitCostMinor: costByVariant.get(r.suggestion.variantId) ?? 0,
+      sortOrder: next++,
+    }));
+    await tx.insert(purchaseItems).values(rows);
+    await tx
+      .update(reorderSuggestions)
+      .set({ status: "converted" })
+      .where(
+        inArray(
+          reorderSuggestions.id,
+          resolved.map((r) => r.suggestion.id),
+        ),
+      );
+    await tx
+      .update(purchases)
+      .set({ revision: sql`${purchases.revision} + 1` })
+      .where(eq(purchases.id, purchaseId));
+    return rows.map((r) => r.id);
+  });
+
+  return db.query.purchaseItems.findMany({
+    where: inArray(purchaseItems.id, ids),
+    orderBy: (pi, { asc }) => asc(pi.sortOrder),
   });
 }
 

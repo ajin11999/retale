@@ -42,6 +42,8 @@ export const typeDefs = /* GraphQL */ `
     priceMinor: Float!
     costMinor: Float!
     totalQty: Float!
+    "Stock level at/below which the reorder scan suggests a purchase; null = not tracked."
+    reorderPoint: Float
     sortOrder: Int!
     priceTiers: [PriceTier!]!
     "Components, if this variant belongs to a kind='bundle' product."
