@@ -58,6 +58,11 @@ export const orders = mysqlTable(
     returnOfOrderId: ulidRef().references((): AnyMySqlColumn => orders.id, {
       onDelete: "set null",
     }),
+    // When this order's tracking-account attribution hit the ledger. POS orders
+    // collect attribution per checkout (snapshotted on order_items) but post it
+    // once the POS session closes; this stamp guards against double-posting on
+    // reopen→reclose / force-close. Console sales stamp it at their own close.
+    attributionPostedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     ...timestamps,
   },

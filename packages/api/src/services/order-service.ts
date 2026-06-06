@@ -325,7 +325,7 @@ async function buildSnapshotRow(opts: {
     : null;
 
   // Tracking-account attribution: snapshotted on the line at sale time. The
-  // ledger row is posted separately (POS: on create; Console: on close).
+  // ledger row is posted separately (POS: at session close; Console: on close).
   let attributionAccountId: string | null = null;
   let attributionAmountMinor = 0;
   let trackingAccountName: string | null = null;
@@ -558,20 +558,21 @@ async function syncTrackingBalance(tx: Tx, accountId: string): Promise<void> {
 }
 
 /**
- * Post one `attribution` tracking_account_ledger row per non-voided line of an
- * order that carries an attribution account and a non-zero amount, then
- * re-sync each touched account's balance.
+ * Post one `attribution` tracking_account_ledger row per non-voided, attributed
+ * line of a single order, then stamp `orders.attributionPostedAt`. Touched
+ * account ids are collected into `touched` so the caller can sync their
+ * balances once (the stamp is what makes posting idempotent at the order level).
  */
-async function postAttribution(
+async function postOrderAttributionRows(
   tx: Tx,
   orderId: string,
   createdByUserId: string,
+  touched: Set<string>,
 ): Promise<void> {
   const items = await tx
     .select()
     .from(orderItems)
     .where(eq(orderItems.orderId, orderId));
-  const touched = new Set<string>();
   for (const item of items) {
     if (item.voidedAt) continue;
     if (!item.attributionAccountId || item.attributionAmountMinor === 0) continue;
@@ -585,6 +586,55 @@ async function postAttribution(
       createdByUserId,
     });
     touched.add(item.attributionAccountId);
+  }
+  await tx
+    .update(orders)
+    .set({ attributionPostedAt: new Date() })
+    .where(eq(orders.id, orderId));
+}
+
+/**
+ * Post a single order's attribution and re-sync the touched accounts. Used by
+ * the Console sale-close path, where attribution commits at the order's own
+ * close. POS orders post via {@link postSessionAttribution} at session close.
+ */
+async function postAttribution(
+  tx: Tx,
+  orderId: string,
+  createdByUserId: string,
+): Promise<void> {
+  const touched = new Set<string>();
+  await postOrderAttributionRows(tx, orderId, createdByUserId, touched);
+  for (const accountId of touched) {
+    await syncTrackingBalance(tx, accountId);
+  }
+}
+
+/**
+ * Post collected attribution for every not-yet-posted, non-cancelled order in a
+ * POS session, then re-sync each touched account once. Called at session close
+ * / force-close — the POS session is the accounting unit for attribution. The
+ * `attributionPostedAt` stamp keeps this safe across reopen→reclose and a
+ * force-close followed by a normal close (already-posted orders are skipped).
+ */
+export async function postSessionAttribution(
+  tx: Tx,
+  posSessionId: string,
+  createdByUserId: string,
+): Promise<void> {
+  const sessionOrders = await tx
+    .select({ id: orders.id })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.posSessionId, posSessionId),
+        isNull(orders.cancelledAt),
+        isNull(orders.attributionPostedAt),
+      ),
+    );
+  const touched = new Set<string>();
+  for (const o of sessionOrders) {
+    await postOrderAttributionRows(tx, o.id, createdByUserId, touched);
   }
   for (const accountId of touched) {
     await syncTrackingBalance(tx, accountId);
@@ -714,8 +764,8 @@ export async function createPosOrder(input: {
       await syncCustomerBalance(tx, customer.id);
     }
 
-    // POS orders attribute on create (the atomic "Pay" action).
-    await postAttribution(tx, orderId, input.createdByUserId);
+    // Attribution is snapshotted on the lines here but posted at session close
+    // (the POS session is the accounting unit) — see postSessionAttribution.
 
     const row = await tx.query.orders.findFirst({ where: eq(orders.id, orderId) });
     return row as Order;
@@ -1422,8 +1472,8 @@ export async function createReturn(input: {
       await syncCustomerBalance(tx, customerId);
     }
 
-    // Reverse the mechanic's attribution proportionally to what was returned.
-    await postAttribution(tx, returnOrderId, input.createdByUserId);
+    // The negative attribution is snapshotted on the return lines; it posts
+    // (reversing the mechanic's cut) at session close, like the sale lines.
 
     const row = await tx.query.orders.findFirst({
       where: eq(orders.id, returnOrderId),

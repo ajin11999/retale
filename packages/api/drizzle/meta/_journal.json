@@ -239,6 +239,13 @@
       "when": 1780662692646,
       "tag": "0033_wise_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1780718702952,
+      "tag": "0034_good_pyro",
+      "breakpoints": true
     }
   ]
 }

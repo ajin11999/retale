@@ -9,6 +9,7 @@ import { ulid } from "ulid";
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
 import { pointsOfSale, posSessions } from "../db/schema/pos.ts";
 import { db } from "../lib/db.ts";
+import { postSessionAttribution } from "./order-service.ts";
 
 export type PosErrorCode =
   | "POS_NOT_FOUND"
@@ -339,6 +340,10 @@ export async function closeSession(input: {
       })
       .where(eq(posSessions.id, session.id));
 
+    // The session is the accounting unit for tracking-account attribution:
+    // post the shift's collected attribution now, on close.
+    await postSessionAttribution(tx, session.id, input.closedByUserId);
+
     const row = await tx.query.posSessions.findFirst({
       where: eq(posSessions.id, session.id),
     });
@@ -378,6 +383,9 @@ export async function forceCloseSession(input: {
         zReportJson: buildZReport(session, totals, expected, null, null, closedAt),
       })
       .where(eq(posSessions.id, session.id));
+
+    // A force-close still finalizes real sales — post their attribution too.
+    await postSessionAttribution(tx, session.id, input.closedByUserId);
 
     const row = await tx.query.posSessions.findFirst({
       where: eq(posSessions.id, session.id),

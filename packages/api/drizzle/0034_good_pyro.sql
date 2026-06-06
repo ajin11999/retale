@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `attribution_posted_at` timestamp;

@@ -31,7 +31,13 @@ import {
   type OrderErrorCode,
   voidCustomerSaleItem,
 } from "./order-service.ts";
-import { closeSession, createPointOfSale, openSession } from "./pos-service.ts";
+import {
+  closeSession,
+  createPointOfSale,
+  forceCloseSession,
+  openSession,
+  reopenSession,
+} from "./pos-service.ts";
 import { ProductError, setBundleComponents } from "./product-service.ts";
 import {
   createTrackingAccount,
@@ -868,7 +874,7 @@ describe("tracking attribution", () => {
     return a.id;
   }
 
-  test("a POS sale posts full pre-tax attribution to the account", async () => {
+  test("a POS sale snapshots attribution on create but posts it at session close", async () => {
     const sessionId = await seedSession("P1");
     const accountId = await seedAccount();
     const variantId = await seedVariant({
@@ -883,9 +889,13 @@ describe("tracking attribution", () => {
       payments: [{ amountMinor: 3000 }],
       createdByUserId: userId,
     });
+    // Snapshot is on the line immediately; the ledger stays empty until close.
     const items = await listOrderItems(order.id);
     expect(items[0]!.attributionAccountId).toBe(accountId);
     expect(items[0]!.attributionAmountMinor).toBe(3000);
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+
+    await closeSession({ sessionId, closingCashMinor: 3000, closedByUserId: userId });
     expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
   });
 
@@ -945,10 +955,12 @@ describe("tracking attribution", () => {
     });
     const items = await listOrderItems(order.id);
     expect(items[0]!.attributionAmountMinor).toBe(1200);
+
+    await closeSession({ sessionId, closingCashMinor: 3000, closedByUserId: userId });
     expect((await getTrackingAccount(accountId)).balanceMinor).toBe(1200);
   });
 
-  test("a return reverses the attribution proportionally", async () => {
+  test("a sale and its return net at close — the return reverses proportionally", async () => {
     const sessionId = await seedSession("P1");
     const accountId = await seedAccount();
     const variantId = await seedVariant({
@@ -963,8 +975,6 @@ describe("tracking attribution", () => {
       payments: [{ amountMinor: 3000 }],
       createdByUserId: userId,
     });
-    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
-
     const itemId = (await listOrderItems(order.id))[0]!.id;
     await createReturn({
       originalOrderId: order.id,
@@ -973,7 +983,56 @@ describe("tracking attribution", () => {
       refundMethod: "cash",
       createdByUserId: userId,
     });
+    // Nothing posted while the session is open — sale and return both collect.
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+
+    await closeSession({ sessionId, closingCashMinor: 2000, closedByUserId: userId });
     expect((await getTrackingAccount(accountId)).balanceMinor).toBe(2000);
+  });
+
+  test("reopening then reclosing a session does not double-post attribution", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    await closeSession({ sessionId, closingCashMinor: 3000, closedByUserId: userId });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
+
+    await reopenSession(sessionId);
+    await closeSession({ sessionId, closingCashMinor: 3000, closedByUserId: userId });
+    // Already-posted orders are skipped on the second close.
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
+  });
+
+  test("force-closing a session posts the collected attribution", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+
+    await forceCloseSession({ sessionId, closedByUserId: userId });
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(3000);
   });
 
   test("a console sale attributes on close only when fully paid", async () => {

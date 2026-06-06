@@ -1526,18 +1526,20 @@ Mechanic's cut is on the goods/service portion — never on tax (which is remitt
 
 Cashier override (requires `order.attribute` permission) replaces the computed value directly on `order_items.attribution_amount_minor`. The variant's mode/pct config remains the default for subsequent lines.
 
-### Ledger write timing — per-event
+### Ledger write timing
 
-Per-event writes, consistent with `customer_ledger` / `vendor_ledger`. Trigger event differs by mode:
+The `attribution_amount_minor` is **snapshotted on every `order_items` row at sale time** regardless of mode — that is when attribution is *collected*. When the `tracking_account_ledger` rows are *posted* differs by mode:
 
 | Mode | Trigger | Same transaction writes |
 |---|---|---|
-| POS sale | Order create (the atomic "Pay" action) | One `tracking_account_ledger` row per attributed line, `type='attribution'`, `ref_type='order_item'`, `ref_id=item.id` |
-| POS return | Return order create | Negative attribution row(s), `ref_type='order_item'`, `ref_id=return_item.id` |
+| POS sale | **POS session close** (close or force-close) | One `tracking_account_ledger` row per attributed line, `type='attribution'`, `ref_type='order_item'`, `ref_id=item.id` |
+| POS return | **POS session close** — alongside the sale lines | Negative attribution row(s), `ref_type='order_item'`, `ref_id=return_item.id` |
 | Console sale | When order transitions to `fully paid AND closed` | One row per attributed line as above |
 | Console return | Same: when the return order is fully paid AND closed | Negative rows |
 
-Console-specific rule: attribution does **not** fire on item-add. Open orders accumulate without ledger writes. When the order is paid in full *and* closed (in either order), the service layer scans the order's non-voided items and writes the attribution rows in one transaction.
+**POS rule (session = accounting unit):** during a shift, POS sales and returns only snapshot their attribution onto the order lines. At session close (`closeSession` / `forceCloseSession`), the service scans every order in the session and writes the attribution rows in one transaction — aligned with the Z-report / cash reconciliation. `orders.attribution_posted_at` is stamped per order as it posts, so the scan is **idempotent**: reopen→reclose and a force-close followed by a later normal close never double-post; only not-yet-posted, non-cancelled orders are written. A POS return created in the same session nets against its sale at close. (Implementation: `postSessionAttribution` in `order-service.ts`, called from `pos-service.ts`.)
+
+**Console-specific rule:** attribution does **not** fire on item-add. Open orders accumulate without ledger writes. When the order is paid in full *and* closed (in either order), the service layer scans the order's non-voided items and writes the attribution rows in one transaction.
 
 **Bad-debt handling (all-or-nothing):** if a Console order never fully pays — write-off via customer adjustment — the mechanic earns nothing for it. The business absorbs the loss. (Pro-rata bad-debt sharing is an additive future enhancement; don't pre-build.)
 
