@@ -489,15 +489,24 @@
 
     if (ok) {
       variantDraft = null;
-      // Adds change the variant set — refetch to pull the new row.
-      if (!d.id) await ProductDetail.fetch({ variables: { id: product.id } });
+      // Adds change the variant set — refetch to pull the new row. The cached
+      // query won't include it, so force a network round-trip (NetworkOnly).
+      if (!d.id)
+        await ProductDetail.fetch({
+          variables: { id: product.id },
+          policy: CachePolicy.NetworkOnly,
+        });
     }
   }
 
   async function deleteVariant(id: string) {
     if (!product || !confirm("Delete this variant?")) return;
     const ok = await run("Variant", () => DeleteVariant.mutate({ id }));
-    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+    if (ok)
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
   }
 
   // ---- Inline cell edit ----------------------------------------------------
@@ -700,7 +709,12 @@
     );
     if (ok) {
       stockDraft = null;
-      await ProductDetail.fetch({ variables: { id: product.id } });
+      // AdjustStock returns only { id } — refetch over the network so the
+      // updated quantities show without a hard refresh.
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
     }
   }
 
@@ -746,7 +760,10 @@
         ok: true,
         text: `Uploaded ${files.length} image${files.length === 1 ? "" : "s"}.`,
       };
-      await ProductDetail.fetch({ variables: { id: product.id } });
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
     } catch (err) {
       feedback = {
         ok: false,
@@ -760,7 +777,11 @@
   async function removeImage(id: string) {
     if (!product || !confirm("Delete this image?")) return;
     const ok = await run("Image", () => DeleteProductImage.mutate({ id }));
-    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+    if (ok)
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
   }
 
   // ---- Per-product catalog settings ---------------------------------------
@@ -816,7 +837,11 @@
         orderedIds: ordered,
       }),
     );
-    if (ok) await ProductDetail.fetch({ variables: { id: product.id } });
+    if (ok)
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
   }
 </script>
 
