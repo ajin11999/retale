@@ -71,6 +71,8 @@ async function seedOrder(input: {
   priceMinor: number;
   costMinor: number;
   discountMinor?: number;
+  /** Tracking-account cut snapshotted on the line; netted out of revenue. */
+  attributionMinor?: number;
 }): Promise<void> {
   const orderId = ulid();
   await db.insert(orders).values({
@@ -92,6 +94,7 @@ async function seedOrder(input: {
     snapshotCostMinor: input.costMinor,
     snapshotTaxRateBps: 0,
     snapshotPriceMode: "tax_exclusive",
+    attributionAmountMinor: input.attributionMinor ?? 0,
   });
 }
 
@@ -116,6 +119,29 @@ describe("salesReport / profitReport", () => {
     expect(profit.cogsMinor).toBe(4200);
     expect(profit.grossMarginMinor).toBe(2800);
     expect(profit.marginBps).toBe(4000); // 2800 / 7000
+  });
+
+  test("nets tracking-account attribution out of revenue (not COGS)", async () => {
+    // Plain retail line — full revenue.
+    await seedOrder({ closedAt: new Date("2026-05-10T10:00:00"), qty: 1, priceMinor: 10000, costMinor: 6000 });
+    // full-mode service: the whole pre-tax line is the mechanic's — nets to 0.
+    await seedOrder({ closedAt: new Date("2026-05-11T10:00:00"), qty: 1, priceMinor: 5000, costMinor: 0, attributionMinor: 5000 });
+    // percent-mode line: 30% (1200 of 4000) goes to the mechanic; shop keeps 2800.
+    await seedOrder({ closedAt: new Date("2026-05-12T10:00:00"), qty: 1, priceMinor: 4000, costMinor: 1000, attributionMinor: 1200 });
+
+    const range = { periodStart: "2026-05-01", periodEnd: "2026-05-31" };
+    const sales = await salesReport(range);
+    // 10000 + (5000 − 5000) + (4000 − 1200) = 12800.
+    expect(sales.revenueMinor).toBe(12800);
+    // Units sold and order count ignore attribution.
+    expect(sales.itemsSoldQty).toBe(3);
+    expect(sales.orderCount).toBe(3);
+
+    const profit = await profitReport(range);
+    expect(profit.revenueMinor).toBe(12800);
+    // COGS is untouched by attribution: 6000 + 0 + 1000.
+    expect(profit.cogsMinor).toBe(7000);
+    expect(profit.grossMarginMinor).toBe(5800);
   });
 });
 

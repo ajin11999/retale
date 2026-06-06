@@ -1526,6 +1526,12 @@ Mechanic's cut is on the goods/service portion — never on tax (which is remitt
 
 Cashier override (requires `order.attribute` permission) replaces the computed value directly on `order_items.attribution_amount_minor`. The variant's mode/pct config remains the default for subsequent lines.
 
+### Revenue reporting
+
+The operational **sales / profit reports** (`report-service.ts`) report the shop's *own* revenue, so they subtract `attribution_amount_minor` per line: `line_revenue = price·qty − discount − attribution`. A `full`-mode line nets to 0 (pure pass-through to the mechanic); a `percent` line keeps the shop's remainder. COGS is left whole — the product cost the shop paid is real regardless — so margin reflects revenue-after-cut minus cost.
+
+This is **reporting only**. The GL **journal export** (`journal-service.ts`) and the POS **Z-report cash takings** deliberately stay gross: the journal books attribution as a separate balanced `expense.commission` / `liability.tracking.*` entry, and drawer reconciliation must count the full cash collected.
+
 ### Ledger write timing
 
 The `attribution_amount_minor` is **snapshotted on every `order_items` row at sale time** regardless of mode — that is when attribution is *collected*. When the `tracking_account_ledger` rows are *posted* differs by mode:

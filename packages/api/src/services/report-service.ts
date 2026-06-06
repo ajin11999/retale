@@ -50,6 +50,7 @@ async function aggregatePeriod(range: DateRange): Promise<PeriodAggregate> {
       costMinor: orderItems.snapshotCostMinor,
       qty: orderItems.qty,
       discountMinor: orderItems.discountMinor,
+      attributionMinor: orderItems.attributionAmountMinor,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -71,7 +72,11 @@ async function aggregatePeriod(range: DateRange): Promise<PeriodAggregate> {
   };
   const orderIds = new Set<string>();
   for (const r of rows) {
-    const lineRevenue = r.priceMinor * r.qty - r.discountMinor;
+    // Net the tracking-account cut out of the shop's own revenue: a full-mode
+    // attributed line nets to 0, a percent line keeps the shop's share. COGS is
+    // untouched — the product cost the shop paid is real either way. Return
+    // lines carry negative qty *and* attribution, so this reverses cleanly.
+    const lineRevenue = r.priceMinor * r.qty - r.discountMinor - r.attributionMinor;
     const lineCogs = r.costMinor * r.qty;
     agg.revenueMinor += lineRevenue;
     agg.cogsMinor += lineCogs;
