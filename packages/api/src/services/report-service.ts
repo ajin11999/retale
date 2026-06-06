@@ -149,6 +149,77 @@ export async function profitReport(range: DateRange): Promise<ProfitReport> {
   };
 }
 
+// --- Per-session variant breakdown ---
+
+export interface SessionVariantSaleRow {
+  /** Null when the variant was hard-deleted; snapshot fields still identify it. */
+  variantId: string | null;
+  productName: string;
+  variantLabel: string | null;
+  sku: string;
+  /** Units sold in the variant's smallest unit; nets returns. */
+  qtySold: number;
+  /** Revenue net of attribution (price×qty − discount − attribution). */
+  revenueMinor: number;
+  /** COGS — snapshot WAC × qty. */
+  costMinor: number;
+}
+
+/**
+ * Per-variant units / revenue / cost for one POS session. Scans non-voided lines
+ * of the session's non-cancelled orders and groups by variant — return lines
+ * (negative qty/revenue/cost) net cleanly, bundle lines arrive pre-exploded per
+ * component variant. Revenue nets the tracking-account attribution out, matching
+ * the sales/profit reports. Sorted by revenue, descending.
+ */
+export async function sessionVariantSales(
+  sessionId: string,
+): Promise<SessionVariantSaleRow[]> {
+  const rows = await db
+    .select({
+      variantId: orderItems.variantId,
+      productName: orderItems.snapshotProductName,
+      variantLabel: orderItems.snapshotVariantLabel,
+      sku: orderItems.snapshotProductSku,
+      priceMinor: orderItems.snapshotPriceMinor,
+      costMinor: orderItems.snapshotCostMinor,
+      qty: orderItems.qty,
+      discountMinor: orderItems.discountMinor,
+      attributionMinor: orderItems.attributionAmountMinor,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orderItems.orderId, orders.id))
+    .where(
+      and(
+        eq(orders.posSessionId, sessionId),
+        isNull(orders.cancelledAt),
+        isNull(orderItems.voidedAt),
+      ),
+    );
+
+  const byVariant = new Map<string, SessionVariantSaleRow>();
+  for (const r of rows) {
+    // A hard-deleted variant leaves variantId null; bucket those by sku so they
+    // don't all collapse into one row.
+    const key = r.variantId ?? `sku:${r.sku}`;
+    const entry = byVariant.get(key) ?? {
+      variantId: r.variantId,
+      productName: r.productName,
+      variantLabel: r.variantLabel,
+      sku: r.sku,
+      qtySold: 0,
+      revenueMinor: 0,
+      costMinor: 0,
+    };
+    entry.qtySold += r.qty;
+    entry.revenueMinor += r.priceMinor * r.qty - r.discountMinor - r.attributionMinor;
+    entry.costMinor += r.costMinor * r.qty;
+    byVariant.set(key, entry);
+  }
+
+  return [...byVariant.values()].sort((a, b) => b.revenueMinor - a.revenueMinor);
+}
+
 // --- AR / AP aging ---
 
 export interface AgingRow {

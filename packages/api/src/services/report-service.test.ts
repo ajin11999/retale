@@ -21,6 +21,7 @@ import {
   profitReport,
   salesReport,
   sessionVarianceReport,
+  sessionVariantSales,
 } from "./report-service.ts";
 
 let userId: string;
@@ -216,6 +217,131 @@ describe("apAgingReport", () => {
     const report = await apAgingReport();
     expect(report.rows[0]?.bucket0_30).toBe(30000);
     expect(report.rows[0]?.bucket31_60).toBe(0);
+  });
+});
+
+describe("sessionVariantSales", () => {
+  /** Create a location + POS + open session; returns the session id. */
+  async function seedSession(code: string): Promise<string> {
+    const locationId = ulid();
+    await db.insert(locations).values({ id: locationId, name: "Store" });
+    const posId = ulid();
+    await db.insert(pointsOfSale).values({
+      id: posId,
+      locationId,
+      code,
+      name: "Register",
+    });
+    const sessionId = ulid();
+    await db.insert(posSessions).values({
+      id: sessionId,
+      posId,
+      openedByUserId: userId,
+      openedAt: new Date(),
+      openingCashMinor: 0,
+    });
+    return sessionId;
+  }
+
+  /** Insert one order in a session, with one line per item. */
+  async function seedSessionOrder(input: {
+    posSessionId: string;
+    cancelled?: boolean;
+    items: {
+      sku: string;
+      name?: string;
+      variantLabel?: string | null;
+      qty: number;
+      priceMinor: number;
+      costMinor: number;
+      discountMinor?: number;
+      attributionMinor?: number;
+      voided?: boolean;
+    }[];
+  }): Promise<void> {
+    const orderId = ulid();
+    await db.insert(orders).values({
+      id: orderId,
+      posSessionId: input.posSessionId,
+      closedAt: new Date(),
+      cancelledAt: input.cancelled ? new Date() : null,
+      totalMinor: 0,
+      createdByUserId: userId,
+    });
+    await db.insert(orderItems).values(
+      input.items.map((it) => ({
+        id: ulid(),
+        orderId,
+        qty: it.qty,
+        discountMinor: it.discountMinor ?? 0,
+        snapshotProductName: it.name ?? "Widget",
+        snapshotProductSku: it.sku,
+        snapshotVariantLabel: it.variantLabel ?? null,
+        snapshotUnit: "piece" as const,
+        snapshotPriceMinor: it.priceMinor,
+        snapshotCostMinor: it.costMinor,
+        snapshotTaxRateBps: 0,
+        snapshotPriceMode: "tax_exclusive" as const,
+        attributionAmountMinor: it.attributionMinor ?? 0,
+        voidedAt: it.voided ? new Date() : null,
+      })),
+    );
+  }
+
+  test("groups by variant, nets returns/attribution, scopes to the session", async () => {
+    const sessionId = await seedSession("P1");
+    const otherSession = await seedSession("P2");
+
+    // Two sales touching A; the first also sells B with a mechanic's cut.
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      items: [
+        { sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: 2, priceMinor: 1000, costMinor: 600 },
+        { sku: "SKU-B", name: "Beta", qty: 1, priceMinor: 5000, costMinor: 3000, attributionMinor: 1200 },
+      ],
+    });
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      items: [{ sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: 3, priceMinor: 1000, costMinor: 600 }],
+    });
+    // A return of one A in the same session — negative qty/revenue/cost.
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      items: [{ sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: -1, priceMinor: 1000, costMinor: 600 }],
+    });
+    // Voided line — excluded.
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      items: [{ sku: "SKU-A", qty: 9, priceMinor: 1000, costMinor: 600, voided: true }],
+    });
+    // Cancelled order — excluded.
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      cancelled: true,
+      items: [{ sku: "SKU-A", qty: 7, priceMinor: 1000, costMinor: 600 }],
+    });
+    // Another session — excluded.
+    await seedSessionOrder({
+      posSessionId: otherSession,
+      items: [{ sku: "SKU-A", qty: 5, priceMinor: 1000, costMinor: 600 }],
+    });
+
+    const rows = await sessionVariantSales(sessionId);
+    expect(rows).toHaveLength(2);
+
+    // Sorted by revenue desc: A = 2000 + 3000 − 1000 = 4000; B = 5000 − 1200 = 3800.
+    const [a, b] = rows;
+    expect(a!.sku).toBe("SKU-A");
+    expect(a!.productName).toBe("Alpha");
+    expect(a!.variantLabel).toBe("Red");
+    expect(a!.qtySold).toBe(4); // 2 + 3 − 1
+    expect(a!.revenueMinor).toBe(4000);
+    expect(a!.costMinor).toBe(2400); // 600 × 4
+
+    expect(b!.sku).toBe("SKU-B");
+    expect(b!.qtySold).toBe(1);
+    expect(b!.revenueMinor).toBe(3800); // attribution netted out
+    expect(b!.costMinor).toBe(3000);
   });
 });
 

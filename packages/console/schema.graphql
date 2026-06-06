@@ -56,6 +56,11 @@ type Query {
   orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
 
   """
+  Closed, non-return orders that contain all of the given variants — newest first. Drives the POS return-from-cart picker.
+  """
+  ordersForReturn(variantIds: [ID!]!, limit: Int): [Order!]!
+
+  """
   Render a customer sale for sending: receipt body + recipient + wa.me / mailto: deep link.
   """
   orderSendDraft(orderId: ID!, channel: OrderSendChannel!, recipientOverride: String): OrderSendDraft!
@@ -140,6 +145,11 @@ type Query {
 
   """Cash-drawer variance for sessions closed in the period."""
   sessionVarianceReport(periodStart: String!, periodEnd: String!): SessionVarianceReport!
+
+  """
+  Per-variant units / revenue / cost for one POS session. Revenue nets attribution.
+  """
+  sessionVariantSales(sessionId: ID!): [SessionVariantSale!]!
 
   """Balanced double-entry journal for the period, for external accounting."""
   journalExport(periodStart: String!, periodEnd: String!): JournalExport!
@@ -1720,6 +1730,11 @@ type BusinessSettings {
 type BusinessReceiptInfo {
   name: String!
   phone: String
+
+  """
+  API-relative URL of the business logo (PNG), printed in place of the name when set.
+  """
+  logoUrl: String
 }
 
 """One of the business's ship-to addresses (store, warehouse, ...)."""
@@ -1806,6 +1821,26 @@ type SessionVarianceReport {
   sessions: [SessionVarianceRow!]!
   totalVarianceMinor: Float!
   unreconciledCount: Int!
+}
+
+"""One variant's units / revenue / cost within a single POS session."""
+type SessionVariantSale {
+  """
+  Null when the variant was hard-deleted; the snapshot fields still identify it.
+  """
+  variantId: ID
+  productName: String!
+  variantLabel: String
+  sku: String!
+
+  """Units sold in the variant's smallest unit; nets returns."""
+  qtySold: Float!
+
+  """Revenue net of attribution (price×qty − discount − attribution)."""
+  revenueMinor: Float!
+
+  """COGS — snapshot WAC × qty."""
+  costMinor: Float!
 }
 
 """One side of a journal entry — exactly one of debit/credit is nonzero."""

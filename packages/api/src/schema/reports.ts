@@ -72,6 +72,21 @@ export const typeDefs = /* GraphQL */ `
     unreconciledCount: Int!
   }
 
+  "One variant's units / revenue / cost within a single POS session."
+  type SessionVariantSale {
+    "Null when the variant was hard-deleted; the snapshot fields still identify it."
+    variantId: ID
+    productName: String!
+    variantLabel: String
+    sku: String!
+    "Units sold in the variant's smallest unit; nets returns."
+    qtySold: Float!
+    "Revenue net of attribution (price×qty − discount − attribution)."
+    revenueMinor: Float!
+    "COGS — snapshot WAC × qty."
+    costMinor: Float!
+  }
+
   extend type Query {
     "Sales volume — orders, units, revenue, by day."
     salesReport(periodStart: String!, periodEnd: String!): SalesReport!
@@ -86,6 +101,8 @@ export const typeDefs = /* GraphQL */ `
       periodStart: String!
       periodEnd: String!
     ): SessionVarianceReport!
+    "Per-variant units / revenue / cost for one POS session. Revenue nets attribution."
+    sessionVariantSales(sessionId: ID!): [SessionVariantSale!]!
   }
 `;
 
@@ -122,6 +139,14 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "report.session_variance.view");
       return reports.sessionVarianceReport(args);
+    },
+    sessionVariantSales: async (
+      _: unknown,
+      args: { sessionId: string },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "report.margin.view");
+      return reports.sessionVariantSales(args.sessionId);
     },
   },
 };

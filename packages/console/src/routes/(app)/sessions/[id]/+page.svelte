@@ -1,5 +1,7 @@
 <script lang="ts">
   import { graphql } from "$houdini";
+  import { page } from "$app/state";
+  import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import type { PageData } from "./$types";
@@ -36,6 +38,12 @@
   const SessionDetail = $derived(data.SessionDetail);
   const session = $derived($SessionDetail.data?.posSession ?? null);
   const orders = $derived($SessionDetail.data?.orders ?? []);
+
+  const viewer = $derived(page.data.user as Viewer | undefined);
+  // The per-variant breakdown surfaces cost — gated on the margin report key.
+  const canViewVariants = $derived(
+    !!viewer && viewer.permissions.includes("report.margin.view"),
+  );
 
   // zReportJson arrives as a JSON string per the schema; parse for display.
   const zReport = $derived.by(() => {
@@ -79,13 +87,23 @@
           Opened {fmt(session.openedAt)} · closed {fmt(session.closedAt)}
         </p>
       </div>
-      {#if !session.closedAt}
-        <Badge class="bg-emerald-100 text-emerald-700">Open</Badge>
-      {:else if session.forceClosed}
-        <Badge class="bg-amber-100 text-amber-800">Force-closed</Badge>
-      {:else}
-        <Badge class="bg-muted text-muted-foreground">Closed</Badge>
-      {/if}
+      <div class="flex items-center gap-3">
+        {#if canViewVariants}
+          <a
+            href={`/sessions/${session.id}/variants`}
+            class="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+          >
+            Variant sales
+          </a>
+        {/if}
+        {#if !session.closedAt}
+          <Badge class="bg-emerald-100 text-emerald-700">Open</Badge>
+        {:else if session.forceClosed}
+          <Badge class="bg-amber-100 text-amber-800">Force-closed</Badge>
+        {:else}
+          <Badge class="bg-muted text-muted-foreground">Closed</Badge>
+        {/if}
+      </div>
     </div>
 
     <div class="grid grid-cols-4 gap-3">
