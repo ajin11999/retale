@@ -67,6 +67,7 @@ async function seedVariant(opts: {
   totalQty?: number;
   reorderPoint?: number | null;
   reorderQty?: number | null;
+  minQty?: number | null;
   primaryVendorId?: string | null;
   costMinor?: number;
   kind?: "physical" | "service";
@@ -80,6 +81,7 @@ async function seedVariant(opts: {
     name: "Widget",
     priceMode: "tax_exclusive",
     kind: opts.kind ?? "physical",
+    minQty: opts.minQty ?? null,
     primaryVendorId: opts.primaryVendorId ?? null,
     replenishMonitored: opts.monitored ?? true,
     archivedAt: opts.archived ? new Date() : null,
@@ -155,8 +157,24 @@ describe("runReorderScan", () => {
     expect(out[0]!.status).toBe("open");
   });
 
-  test("ignores a variant with no reorder point", async () => {
-    await seedVariant({ totalQty: 0, reorderPoint: null });
+  test("ignores a variant with no reorder point and no product minQty", async () => {
+    await seedVariant({ totalQty: 0, reorderPoint: null, minQty: null });
+    expect(await runReorderScan()).toHaveLength(0);
+  });
+
+  test("falls back to product minQty when the variant has no reorder point", async () => {
+    const v = await seedVariant({ totalQty: 3, reorderPoint: null, minQty: 5 });
+    const out = await runReorderScan();
+    expect(out).toHaveLength(1);
+    expect(out[0]!.variantId).toBe(v);
+    expect(out[0]!.reorderPoint).toBe(5);
+    // suggestedQty brings available (3) back up to the point (5).
+    expect(out[0]!.suggestedQty).toBe(2);
+  });
+
+  test("variant reorder point overrides the product minQty", async () => {
+    await seedVariant({ totalQty: 8, reorderPoint: 5, minQty: 20 });
+    // Available 8 ≥ variant point 5, so no suggestion — minQty=20 is ignored.
     expect(await runReorderScan()).toHaveLength(0);
   });
 

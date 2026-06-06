@@ -6,7 +6,7 @@
 // member confirms a conversion. See docs/future-features.md →
 // "Reorder-point → suggested reorders".
 
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
@@ -70,8 +70,9 @@ async function loadSuggestion(id: string): Promise<Suggestion> {
 /**
  * Scan every tracked variant and rebuild the `open` suggestion set.
  *
- * A variant is *tracked* when it has a `reorderPoint` and sits on a monitored,
- * non-archived physical product. It is suggested when
+ * A variant is *tracked* when it has an effective reorder point — its own
+ * `reorderPoint`, or, failing that, its product's `minQty` — and sits on a
+ * monitored, non-archived physical product. It is suggested when
  * `available = onHand + onOrder` is below the point — netting out `onOrder`
  * so a variant that already has an open PO is not re-suggested every day.
  *
@@ -92,13 +93,15 @@ export async function runReorderScan(): Promise<Suggestion[]> {
       totalQty: productVariants.totalQty,
       reorderPoint: productVariants.reorderPoint,
       reorderQty: productVariants.reorderQty,
+      minQty: products.minQty,
       primaryVendorId: products.primaryVendorId,
     })
     .from(productVariants)
     .innerJoin(products, eq(productVariants.productId, products.id))
     .where(
       and(
-        isNotNull(productVariants.reorderPoint),
+        // Tracked if the variant has its own point or the product sets minQty.
+        or(isNotNull(productVariants.reorderPoint), isNotNull(products.minQty)),
         eq(products.kind, "physical"),
         eq(products.replenishMonitored, true),
         isNull(products.archivedAt),
@@ -162,7 +165,9 @@ export async function runReorderScan(): Promise<Suggestion[]> {
 
   const rows: (typeof reorderSuggestions.$inferInsert)[] = [];
   for (const c of candidates) {
-    const reorderPoint = c.reorderPoint as number;
+    // Variant's own point wins; otherwise fall back to the product's minQty.
+    // The WHERE guarantees at least one is set, so this is never null.
+    const reorderPoint = (c.reorderPoint ?? c.minQty) as number;
     const onOrder = onOrderByVariant.get(c.variantId) ?? 0;
     const available = c.totalQty + onOrder;
     if (available >= reorderPoint) continue;
