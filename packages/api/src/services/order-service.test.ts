@@ -26,6 +26,7 @@ import {
   createReturn,
   listOrderItems,
   listOrderPayments,
+  listOrdersForReturn,
   OrderError,
   type OrderErrorCode,
   voidCustomerSaleItem,
@@ -1174,5 +1175,94 @@ describe("product bundles", () => {
       code = (e as ProductError).code;
     }
     expect(code).toBe("BUNDLE_NESTING");
+  });
+});
+
+describe("listOrdersForReturn", () => {
+  test("returns closed orders covering all requested variants; excludes partials", async () => {
+    const sessionId = await seedSession("P1");
+    const a = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+    const b = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+
+    const orderAB = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: a, qty: 2 }, { variantId: b, qty: 1 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+    const orderA = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: a, qty: 1 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+
+    const byA = (await listOrdersForReturn([a])).map((o) => o.id);
+    expect(byA).toContain(orderAB.id);
+    expect(byA).toContain(orderA.id);
+
+    // Needs both variants — only the order that has both qualifies.
+    const byAB = (await listOrdersForReturn([a, b])).map((o) => o.id);
+    expect(byAB).toEqual([orderAB.id]);
+
+    // No variants → nothing.
+    expect(await listOrdersForReturn([])).toEqual([]);
+  });
+
+  test("excludes cancelled, open, and return orders", async () => {
+    const sessionId = await seedSession("P1");
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const a = await seedVariant({ priceMinor: 1000, stockQty: 100 });
+
+    // A normal closed sale — the one that should match.
+    const closed = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: a, qty: 3 }],
+      payments: [{ amountMinor: 3000 }],
+      createdByUserId: userId,
+    });
+
+    // A return against it carries variant A but must not be offered for return.
+    const itemId = (await listOrderItems(closed.id))[0]!.id;
+    const ret = await createReturn({
+      originalOrderId: closed.id,
+      posSessionId: sessionId,
+      items: [{ orderItemId: itemId, qty: 1 }],
+      refundMethod: "cash",
+      createdByUserId: userId,
+    });
+
+    // An open customer sale with variant A — not closed, so excluded.
+    const open = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: open.id,
+      item: { variantId: a, qty: 1 },
+      createdByUserId: userId,
+    });
+
+    // A cancelled customer sale with variant A — excluded.
+    const cancelledSale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: cancelledSale.id,
+      item: { variantId: a, qty: 1 },
+      createdByUserId: userId,
+    });
+    await cancelCustomerSale({
+      orderId: cancelledSale.id,
+      reason: "test",
+      cancelledByUserId: userId,
+    });
+
+    const ids = (await listOrdersForReturn([a])).map((o) => o.id);
+    expect(ids).toEqual([closed.id]);
+    expect(ids).not.toContain(ret.id);
+    expect(ids).not.toContain(open.id);
+    expect(ids).not.toContain(cancelledSale.id);
   });
 });

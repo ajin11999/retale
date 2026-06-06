@@ -129,6 +129,8 @@ export const typeDefs = /* GraphQL */ `
   extend type Query {
     order(id: ID!): Order
     orders(posSessionId: ID, customerId: ID, limit: Int): [Order!]!
+    "Closed, non-return orders that contain all of the given variants — newest first. Drives the POS return-from-cart picker."
+    ordersForReturn(variantIds: [ID!]!, limit: Int): [Order!]!
     "Render a customer sale for sending: receipt body + recipient + wa.me / mailto: deep link."
     orderSendDraft(
       orderId: ID!
@@ -252,6 +254,14 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "report.sales.view");
       return orders.listOrders(args);
+    },
+    ordersForReturn: async (
+      _: unknown,
+      args: { variantIds: string[]; limit?: number },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "report.sales.view");
+      return orders.listOrdersForReturn(args.variantIds, args.limit);
     },
     orderSendDraft: async (
       _: unknown,

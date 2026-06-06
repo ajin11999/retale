@@ -5,7 +5,7 @@
 // See docs/design-decisions.md → "Order lifecycle" and "Payments & customer
 // debt".
 
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { customerLedger, customerPrices, customers } from "../db/schema/customers.ts";
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
@@ -114,6 +114,49 @@ export function listOrders(filter?: {
 
 export function listOrderItems(orderId: string): Promise<OrderItem[]> {
   return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+}
+
+/**
+ * Closed, non-return orders that contain *every* one of `variantIds` on a
+ * non-voided, positive-qty line — newest first. Drives the POS return-from-cart
+ * picker: the cashier builds a cart of items to send back, and this surfaces the
+ * past sale(s) those items could have come from. Per-variant quantity coverage
+ * is judged on the client; `createReturn` enforces over-return at submit.
+ */
+export async function listOrdersForReturn(
+  variantIds: string[],
+  limit = 50,
+): Promise<Order[]> {
+  if (variantIds.length === 0) return [];
+  // Orders whose lines cover all of the requested variants.
+  const matched = await db
+    .select({ orderId: orderItems.orderId })
+    .from(orderItems)
+    .where(
+      and(
+        inArray(orderItems.variantId, variantIds),
+        isNull(orderItems.voidedAt),
+        gt(orderItems.qty, 0),
+      ),
+    )
+    .groupBy(orderItems.orderId)
+    .having(sql`count(distinct ${orderItems.variantId}) = ${variantIds.length}`);
+  const ids = matched.map((m) => m.orderId);
+  if (ids.length === 0) return [];
+  // Keep only returnable orders: closed, not cancelled, not themselves returns.
+  return db
+    .select()
+    .from(orders)
+    .where(
+      and(
+        inArray(orders.id, ids),
+        isNotNull(orders.closedAt),
+        isNull(orders.cancelledAt),
+        isNull(orders.returnOfOrderId),
+      ),
+    )
+    .orderBy(desc(orders.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 200));
 }
 
 /** The live variant behind a line, if it still exists (null after a hard-delete). */
