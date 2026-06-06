@@ -60,18 +60,23 @@ class ProductCache {
 
   /// Case-insensitive search over product name, variant SKU and barcode.
   /// Open-price products are excluded — they live in the quick-tile palette.
+  ///
+  /// The query is split into whitespace-separated terms, each of which must
+  /// match somewhere in the product's combined text (name, public name, and
+  /// every variant's SKU/barcode). This makes search order-independent and
+  /// cross-field, so "6201 nkn" finds "NKN 6201 2RS".
   List<Product> search(String query) {
     final sellable = _products.where((p) => p.kind != 'open_price');
-    final q = query.trim().toLowerCase();
-    if (q.isEmpty) return sellable.toList();
+    final terms = query.toLowerCase().split(RegExp(r'\s+'))
+      ..removeWhere((t) => t.isEmpty);
+    if (terms.isEmpty) return sellable.toList();
     return sellable.where((p) {
-      if (p.name.toLowerCase().contains(q) ||
-          p.publicDisplayName.toLowerCase().contains(q)) {
-        return true;
-      }
-      return p.variants.any((v) =>
-          v.sku.toLowerCase().contains(q) ||
-          (v.barcode?.toLowerCase().contains(q) ?? false));
+      final haystack = [
+        p.name,
+        p.publicDisplayName,
+        for (final v in p.variants) ...[v.sku, v.barcode ?? ''],
+      ].join(' ').toLowerCase();
+      return terms.every(haystack.contains);
     }).toList();
   }
 
