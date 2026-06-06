@@ -438,6 +438,15 @@
           oninput={(e) => onSearchInput(e.currentTarget.value)}
         />
       </div>
+      {#if canCreate}
+        <Button
+          size="sm"
+          variant="outline"
+          onclick={() => goto("/products/bulk")}
+        >
+          Bulk add
+        </Button>
+      {/if}
       <Button size="sm" disabled={busy || !canCreate} onclick={newProduct}>
         Add product
       </Button>
