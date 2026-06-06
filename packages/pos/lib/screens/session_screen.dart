@@ -127,8 +127,8 @@ class _OpenSessionScreenState extends State<OpenSessionScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _cash,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: TextInputType.number,
+                inputFormatters: [ThousandsSeparatorInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Opening cash float',
                   border: OutlineInputBorder(),

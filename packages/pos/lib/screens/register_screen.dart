@@ -175,8 +175,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
               decoration: const InputDecoration(
                 labelText: 'Closing cash count',
                 border: OutlineInputBorder(),
@@ -336,7 +336,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          keyboardType: TextInputType.number,
+          inputFormatters: [ThousandsSeparatorInputFormatter()],
           onSubmitted: (_) => Navigator.pop(ctx, submit()),
           decoration: const InputDecoration(
             labelText: 'Price',
@@ -420,13 +421,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
               icon: const Icon(Icons.payments),
               label: const Text('Charge'),
               onPressed: cart.isEmpty ? null : _checkout,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.assignment_return),
+              label: const Text('Return'),
+              onPressed: cart.isEmpty ? null : _startReturnFromCart,
             ),
           ),
         ),
@@ -470,6 +482,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _announceSale(sale);
     } else {
       _toast('Offline — sale queued, will sync when reconnected');
+    }
+  }
+
+  /// Return flow driven by the cart: find past orders that contain every item
+  /// in the cart, let the cashier pick one, and ring the return against it
+  /// (prefilled with the cart quantities). On success, clear the cart.
+  Future<void> _startReturnFromCart() async {
+    final cart = _register.active;
+    if (cart.isEmpty) return;
+    // Sum the cart's quantities per variant — the demand to return.
+    final demand = <String, int>{};
+    for (final l in cart.lines) {
+      demand[l.variant.id] = (demand[l.variant.id] ?? 0) + l.qty;
+    }
+    List<Map<String, dynamic>> candidates;
+    try {
+      final data = await GraphQLService.instance.query(
+        Ops.ordersForReturn,
+        variables: {'variantIds': demand.keys.toList(), 'limit': 50},
+      );
+      candidates =
+          (data['ordersForReturn'] as List<dynamic>).cast<Map<String, dynamic>>();
+    } on GraphQLAppException catch (e) {
+      _toast(e.isNetworkError
+          ? 'Returns need a connection — you appear to be offline'
+          : e.message);
+      return;
+    }
+    if (!mounted) return;
+    if (candidates.isEmpty) {
+      _toast('No past order contains these items');
+      return;
+    }
+    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => ReturnOrderPicker(
+        candidates: candidates,
+        demand: demand,
+        posSessionId: widget.session.id,
+      ),
+    ));
+    if (done == true && mounted) {
+      _register.active.clear();
+      _toast('Return recorded');
     }
   }
 
@@ -749,7 +804,7 @@ class _CartLineTile extends StatelessWidget {
   /// parse back cleanly.
   Future<void> _edit(BuildContext context) async {
     final priceController =
-        TextEditingController(text: Money.editText(line.unitPriceMinor));
+        TextEditingController(text: Money.format(line.unitPriceMinor));
     final qtyController = TextEditingController(text: '${line.qty}');
     final saved = await showDialog<bool>(
       context: context,
@@ -761,8 +816,9 @@ class _CartLineTile extends StatelessWidget {
             TextField(
               controller: priceController,
               autofocus: true,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
+              onSubmitted: (_) => Navigator.pop(ctx, true),
               decoration: const InputDecoration(
                 labelText: 'Unit price',
                 border: OutlineInputBorder(),
@@ -959,11 +1015,9 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     super.dispose();
   }
 
-  int get _changeMinor {
-    final tendered = Money.parse(_tendered.text);
-    final change = tendered - widget.cart.totalMinor;
-    return change > 0 ? change : 0;
-  }
+  /// Signed cash balance: tendered − total. Positive is change owed back to the
+  /// customer; negative is how much they still need to hand over.
+  int get _balanceMinor => Money.parse(_tendered.text) - widget.cart.totalMinor;
 
   Future<void> _pickCustomer() async {
     final picked = await showModalBottomSheet<Customer>(
@@ -1056,23 +1110,36 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
           TextField(
             controller: _tendered,
             autofocus: true,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: TextInputType.number,
+            inputFormatters: [ThousandsSeparatorInputFormatter()],
             onChanged: (_) => setState(() {}),
+            // Enter completes the sale, so the cashier never has to reach for
+            // the mouse after counting cash.
+            onSubmitted: (_) {
+              if (!_busy) _submit();
+            },
             decoration: const InputDecoration(
               labelText: 'Cash tendered',
               border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              const Text('Change'),
-              const Spacer(),
-              Text(Money.format(_changeMinor),
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          ),
+          Builder(builder: (context) {
+            final balance = _balanceMinor;
+            final settled = balance >= 0;
+            final color = settled
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.error;
+            return Row(
+              children: [
+                Text(settled ? 'Change' : 'Still due'),
+                const Spacer(),
+                Text(Money.format(balance),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: color)),
+              ],
+            );
+          }),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: Colors.red)),

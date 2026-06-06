@@ -131,6 +131,21 @@ class Ops {
     }
   ''';
 
+  /// Closed, non-return orders that contain every variant in the current cart —
+  /// newest first. Drives the register's "Return" button: the cashier builds a
+  /// cart of items to send back, and this finds the past sale(s) to return them
+  /// against. Items carry `variantId` so cart lines map straight to order items.
+  static const ordersForReturn = '''
+    query OrdersForReturn(\$variantIds: [ID!]!, \$limit: Int) {
+      ordersForReturn(variantIds: \$variantIds, limit: \$limit) {
+        id displayNumber totalMinor createdAt returnOfOrderId
+        items {
+          id variantId displayName qty snapshotPriceMinor voidedAt
+        }
+      }
+    }
+  ''';
+
   /// Name/phone search over active customers, for attaching one to a POS sale.
   static const posCustomerSearch = '''
     query PosCustomerSearch(\$search: String, \$limit: Int) {

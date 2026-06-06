@@ -184,7 +184,7 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
         .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
         .toList();
     final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => _ReturnScreen(
+      builder: (_) => ReturnScreen(
         originalOrderId: widget.orderId,
         posSessionId: widget.posSessionId,
         items: items,
@@ -327,27 +327,55 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
 /// Pick lines and quantities to return, choose a refund method, and submit.
 /// The server enforces over-return limits; this caps each line at its original
 /// quantity and surfaces any rejection (e.g. units already returned).
-class _ReturnScreen extends StatefulWidget {
-  const _ReturnScreen({
+///
+/// [prefillByVariantId] seeds the per-line quantities from a cart of items to
+/// return (the register's "Return" flow). Each line's `variantId` consumes from
+/// the matching demand, so an order with several lines of one variant fills in
+/// order until the demand runs out. Null (the order-history path) starts empty.
+class ReturnScreen extends StatefulWidget {
+  const ReturnScreen({
+    super.key,
     required this.originalOrderId,
     required this.posSessionId,
     required this.items,
+    this.prefillByVariantId,
   });
 
   final String originalOrderId;
   final String posSessionId;
   final List<Map<String, dynamic>> items;
+  final Map<String, int>? prefillByVariantId;
 
   @override
-  State<_ReturnScreen> createState() => _ReturnScreenState();
+  State<ReturnScreen> createState() => _ReturnScreenState();
 }
 
-class _ReturnScreenState extends State<_ReturnScreen> {
+class _ReturnScreenState extends State<ReturnScreen> {
   /// orderItemId -> units to return.
   final Map<String, int> _qty = {};
   String _refundMethod = 'cash';
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final demand = widget.prefillByVariantId;
+    if (demand == null) return;
+    // Greedily allocate each variant's demand across the order's lines.
+    final remaining = Map<String, int>.from(demand);
+    for (final it in widget.items) {
+      final variantId = it['variantId'] as String?;
+      if (variantId == null) continue;
+      final want = remaining[variantId] ?? 0;
+      if (want <= 0) continue;
+      final max = (it['qty'] as num).toInt();
+      final take = want < max ? want : max;
+      if (take <= 0) continue;
+      _qty[it['id'] as String] = take;
+      remaining[variantId] = want - take;
+    }
+  }
 
   int get _selectedCount => _qty.values.fold(0, (a, b) => a + b);
 
@@ -463,6 +491,98 @@ class _ReturnScreenState extends State<_ReturnScreen> {
                 selected >= max ? null : () => _setQty(id, max, selected + 1),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Picks which past order to return the current cart against. Lists the
+/// candidate orders (server-filtered to those containing every cart variant),
+/// flagging which can fully cover the cart's quantities. Tapping one opens the
+/// [ReturnScreen] prefilled with the cart's quantities; a recorded return pops
+/// back to the register with `true` so it can clear the cart.
+class ReturnOrderPicker extends StatelessWidget {
+  const ReturnOrderPicker({
+    super.key,
+    required this.candidates,
+    required this.demand,
+    required this.posSessionId,
+  });
+
+  /// Orders from `Ops.ordersForReturn`, newest first.
+  final List<Map<String, dynamic>> candidates;
+
+  /// variantId -> units the cart wants to return.
+  final Map<String, int> demand;
+  final String posSessionId;
+
+  /// Non-voided, positive-qty lines of an order — the only returnable units.
+  static List<Map<String, dynamic>> _returnableItems(Map<String, dynamic> o) =>
+      (o['items'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
+          .toList();
+
+  /// True when the order has enough of every demanded variant to cover the cart.
+  bool _coversCart(Map<String, dynamic> o) {
+    final sold = <String, int>{};
+    for (final it in _returnableItems(o)) {
+      final v = it['variantId'] as String?;
+      if (v == null) continue;
+      sold[v] = (sold[v] ?? 0) + (it['qty'] as num).toInt();
+    }
+    return demand.entries.every((e) => (sold[e.key] ?? 0) >= e.value);
+  }
+
+  Future<void> _pick(BuildContext context, Map<String, dynamic> o) async {
+    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => ReturnScreen(
+        originalOrderId: o['id'] as String,
+        posSessionId: posSessionId,
+        items: _returnableItems(o),
+        prefillByVariantId: demand,
+      ),
+    ));
+    if (done == true && context.mounted) Navigator.pop(context, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Orders that can fully cover the cart first; recency order is preserved
+    // within each group (the server already sorted newest-first).
+    final covering = candidates.where(_coversCart).toList();
+    final partial = candidates.where((o) => !_coversCart(o)).toList();
+    final ordered = [...covering, ...partial];
+    return Scaffold(
+      appBar: AppBar(title: const Text('Return against…')),
+      body: ListView.separated(
+        itemCount: ordered.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final o = ordered[i];
+          final covers = _coversCart(o);
+          final lineCount = _returnableItems(o).length;
+          return ListTile(
+            title: Text(o['displayNumber'] as String? ?? o['id'] as String),
+            subtitle: Text(
+                '${_formatTime(o['createdAt'] as String?)}  ·  $lineCount item${lineCount == 1 ? '' : 's'}'),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(Money.format(o['totalMinor'] as num),
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(covers ? 'covers cart' : 'partial',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: covers
+                            ? Colors.green
+                            : Theme.of(context).hintColor)),
+              ],
+            ),
+            onTap: () => _pick(context, o),
+          );
+        },
       ),
     );
   }

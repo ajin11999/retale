@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 /// Money helpers. Retale stores every amount as an integer count of minor
@@ -32,5 +33,31 @@ class Money {
     s = s.replaceAll(',', '.'); // id-ID decimal mark -> parseable
     final value = double.tryParse(s) ?? 0;
     return (value * minorPerMajor).round();
+  }
+}
+
+/// Groups the integer part of a number field with id-ID thousands separators as
+/// the user types ("75000" -> "75.000"), so amounts stay readable in entry.
+/// Output round-trips cleanly through [Money.parse]. Assumes a 0-decimal
+/// currency (IDR); rejects any non-digit, including the decimal mark.
+class ThousandsSeparatorInputFormatter extends TextInputFormatter {
+  ThousandsSeparatorInputFormatter();
+
+  static final NumberFormat _grouped = NumberFormat('#,##0', 'id_ID');
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    if (newValue.text.isEmpty) return newValue;
+    final digits = newValue.text.replaceAll('.', '');
+    final value = int.tryParse(digits);
+    if (value == null) return oldValue; // block anything but digits/grouping
+    final formatted = _grouped.format(value);
+    // Keep the caret at the end — simplest stable behaviour for a price field
+    // that is typically retyped rather than edited mid-string.
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
   }
 }
