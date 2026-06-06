@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
@@ -56,14 +56,9 @@
   // ---- Search --------------------------------------------------------------
   let search = $state("");
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
-    const list = q
-      ? customers.filter(
-          (c) =>
-            c.name.toLowerCase().includes(q) ||
-            (c.phone ?? "").toLowerCase().includes(q) ||
-            (c.email ?? "").toLowerCase().includes(q),
-        )
+    const tokens = searchTokens(search.trim());
+    const list = tokens.length
+      ? customers.filter((c) => matchesTokens(tokens, c.name, c.phone, c.email))
       : customers;
     // Active first, then by name.
     return [...list].sort((a, b) => {

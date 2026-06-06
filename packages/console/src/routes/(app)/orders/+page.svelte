@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
@@ -59,13 +59,9 @@
   let saleError = $state<string | null>(null);
 
   const custMatches = $derived.by(() => {
-    const q = custSearch.trim().toLowerCase();
-    const filtered = q
-      ? customers.filter(
-          (c) =>
-            c.name.toLowerCase().includes(q) ||
-            (c.phone ?? "").toLowerCase().includes(q),
-        )
+    const tokens = searchTokens(custSearch.trim());
+    const filtered = tokens.length
+      ? customers.filter((c) => matchesTokens(tokens, c.name, c.phone))
       : customers;
     return [...filtered]
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -121,14 +117,12 @@
   let statusFilter = $state<"all" | "open" | "closed" | "cancelled">("all");
 
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
+    const tokens = searchTokens(search.trim());
     let list = orders;
     if (statusFilter !== "all") list = list.filter((o) => o.status === statusFilter);
-    if (q) {
-      list = list.filter(
-        (o) =>
-          (o.displayNumber ?? "").toLowerCase().includes(q) ||
-          (o.snapshotCustomerName ?? "").toLowerCase().includes(q),
+    if (tokens.length) {
+      list = list.filter((o) =>
+        matchesTokens(tokens, o.displayNumber, o.snapshotCustomerName),
       );
     }
     // Most recent first by closed > cancelled > created.

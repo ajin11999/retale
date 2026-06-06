@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
@@ -66,15 +66,10 @@
     { value: "expedition", label: "Couriers" },
   ];
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
+    const tokens = searchTokens(search.trim());
     const list = vendors.filter((v) => {
       if (kindFilter !== "all" && v.kind !== kindFilter) return false;
-      if (!q) return true;
-      return (
-        v.name.toLowerCase().includes(q) ||
-        (v.phone ?? "").toLowerCase().includes(q) ||
-        (v.email ?? "").toLowerCase().includes(q)
-      );
+      return matchesTokens(tokens, v.name, v.phone, v.email);
     });
     // Active first, then by name.
     return [...list].sort((a, b) => {

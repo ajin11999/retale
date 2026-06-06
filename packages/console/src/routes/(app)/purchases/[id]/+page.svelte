@@ -5,7 +5,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import {
     ArrowDown,
     ArrowUp,
@@ -1050,14 +1050,12 @@
   // moving a row relative to hidden rows would be ambiguous.
   let lineSearch = $state("");
   let sectionFilter = $state(""); // "" = all; section id; or UNGROUPED
-  const query = $derived(lineSearch.trim().toLowerCase());
-  const filtering = $derived(!!query || !!sectionFilter);
+  const queryTokens = $derived(searchTokens(lineSearch.trim()));
+  const filtering = $derived(queryTokens.length > 0 || !!sectionFilter);
   const canReorder = $derived(editable && !filtering);
 
   const lineMatches = (i: Line) =>
-    !query ||
-    lineLabel(i).toLowerCase().includes(query) ||
-    (i.description ?? "").toLowerCase().includes(query);
+    matchesTokens(queryTokens, lineLabel(i), i.description);
 
   interface VisibleGroup extends Group {
     visibleItems: Line[];
@@ -1068,12 +1066,12 @@
       .map((g) => ({ ...g, visibleItems: g.items.filter(lineMatches) }))
       // While searching, drop groups with no matches; otherwise keep empty
       // sections so lines can still be added to them.
-      .filter((g) => !query || g.visibleItems.length > 0),
+      .filter((g) => !queryTokens.length || g.visibleItems.length > 0),
   );
 
   // Collapse state by group key; a search forces everything open.
   let collapsed = $state<Set<string>>(new Set());
-  const isOpen = (key: string) => !!query || !collapsed.has(key);
+  const isOpen = (key: string) => queryTokens.length > 0 || !collapsed.has(key);
   function toggleCollapse(key: string) {
     const next = new Set(collapsed);
     next.has(key) ? next.delete(key) : next.add(key);
@@ -1992,7 +1990,7 @@
             {/if}
             {#if itemDraft && draftGroupKey === g.key}
               <div class="border-t p-3">{@render lineForm()}</div>
-            {:else if editable && !query}
+            {:else if editable && !queryTokens.length}
               <div class="border-t px-3 py-2">
                 <button
                   class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"

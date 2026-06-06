@@ -24,6 +24,31 @@ export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+/**
+ * Split a search query into lowercase whitespace-separated tokens. Empty/blank
+ * queries yield `[]`. Pair with {@link matchesTokens} for AND-token filtering.
+ */
+export function searchTokens(query: string): string[] {
+  return query.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * AND-match pre-tokenised search terms against one or more haystack fields:
+ * every token must appear (as a substring) in at least one field. This lets a
+ * query span fields and word order — "sproc sss" matches a product named
+ * "sprocket … sss", and "john 0812" matches a customer by name + phone. Pass
+ * the fields you want searchable; null/undefined fields are ignored. Tokenise
+ * the query once with {@link searchTokens} rather than per row.
+ */
+export function matchesTokens(
+  tokens: readonly string[],
+  ...fields: (string | null | undefined)[]
+): boolean {
+  if (tokens.length === 0) return true;
+  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+  return tokens.every((t) => haystack.includes(t));
+}
+
 /** A node in a self-referential forest — only the fields needed for a path. */
 export interface TreePathNode {
   id: string;

@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Check, Pencil, X } from "@lucide/svelte";
-  import { formatMoney, treePathMap } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, treePathMap } from "$lib/utils";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -272,9 +272,12 @@
   const rows = $derived.by<Row[]>(() => {
     let base = allRows;
     if (categoryFilter) base = base.filter((r) => r.categoryId === categoryFilter);
-    const q = search.toLowerCase();
-    if (!q) return base;
-    return base.filter((r) => r.haystack.includes(q));
+    // AND-match whitespace tokens, so "sproc sss" matches "sprocket … sss"
+    // regardless of word order — mirrors the server-side listProducts search
+    // rather than a single contiguous match.
+    const tokens = searchTokens(search);
+    if (!tokens.length) return base;
+    return base.filter((r) => matchesTokens(tokens, r.haystack));
   });
 
   type SortKey = "name" | "category" | "kind" | "variants" | "minPrice" | "stock" | "archived";

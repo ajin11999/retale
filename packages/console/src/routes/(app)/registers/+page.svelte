@@ -9,6 +9,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -131,15 +132,10 @@
   // ---- Search --------------------------------------------------------------
   let search = $state("");
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
-    const list = registers.filter((r) => {
-      if (!q) return true;
-      return (
-        r.code.toLowerCase().includes(q) ||
-        r.name.toLowerCase().includes(q) ||
-        (pathById.get(r.locationId) ?? "").toLowerCase().includes(q)
-      );
-    });
+    const tokens = searchTokens(search.trim());
+    const list = registers.filter((r) =>
+      matchesTokens(tokens, r.code, r.name, pathById.get(r.locationId)),
+    );
     // Active first, then by code.
     return [...list].sort((a, b) => {
       const av = a.archivedAt ? 1 : 0;

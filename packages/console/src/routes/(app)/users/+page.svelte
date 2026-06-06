@@ -7,6 +7,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -80,13 +81,9 @@
   // ---- Search & sort -------------------------------------------------------
   let search = $state("");
   const rows = $derived.by(() => {
-    const q = search.trim().toLowerCase();
-    const list = q
-      ? users.filter(
-          (u) =>
-            u.username.toLowerCase().includes(q) ||
-            u.name.toLowerCase().includes(q),
-        )
+    const tokens = searchTokens(search.trim());
+    const list = tokens.length
+      ? users.filter((u) => matchesTokens(tokens, u.username, u.name))
       : users;
     return [...list].sort((a, b) => {
       const av = a.archivedAt ? 1 : 0;

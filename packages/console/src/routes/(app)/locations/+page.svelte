@@ -10,6 +10,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -154,15 +155,12 @@
   // Match by name or code; keep each match's ancestors so the tree still reads.
   let search = $state("");
   const visibleTree = $derived.by<Node[]>(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return tree;
+    const tokens = searchTokens(search.trim());
+    if (!tokens.length) return tree;
     const byId = new Map(tree.map((n) => [n.id, n]));
     const visible = new Set<string>();
     for (const n of tree) {
-      const hit =
-        n.name.toLowerCase().includes(q) ||
-        (n.code?.toLowerCase().includes(q) ?? false);
-      if (!hit) continue;
+      if (!matchesTokens(tokens, n.name, n.code)) continue;
       let cur: Node | undefined = n;
       while (cur && !visible.has(cur.id)) {
         visible.add(cur.id);

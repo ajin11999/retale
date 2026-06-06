@@ -9,6 +9,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -158,12 +159,12 @@
   // Match by name; keep each match's ancestors so the hierarchy still reads.
   let search = $state("");
   const visibleTree = $derived.by<Node[]>(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return tree;
+    const tokens = searchTokens(search.trim());
+    if (!tokens.length) return tree;
     const byId = new Map(tree.map((n) => [n.id, n]));
     const visible = new Set<string>();
     for (const n of tree) {
-      if (!n.name.toLowerCase().includes(q)) continue;
+      if (!matchesTokens(tokens, n.name)) continue;
       let cur: Node | undefined = n;
       while (cur && !visible.has(cur.id)) {
         visible.add(cur.id);

@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -74,11 +74,9 @@
       statusFilter === "all"
         ? purchases
         : purchases.filter((p) => p.status === statusFilter);
-    const q = search.trim().toLowerCase();
-    if (!q) return byStatus;
-    return byStatus.filter((p) =>
-      (p.snapshotVendorName ?? "").toLowerCase().includes(q),
-    );
+    const tokens = searchTokens(search.trim());
+    if (!tokens.length) return byStatus;
+    return byStatus.filter((p) => matchesTokens(tokens, p.snapshotVendorName));
   });
 
   const statusClass = (s: string) =>
