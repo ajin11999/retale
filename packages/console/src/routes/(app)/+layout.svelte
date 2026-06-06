@@ -26,6 +26,7 @@
     { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },
     { href: "/reorder", label: "Reorder suggestions" },
     { href: "/orders", label: "Orders", perm: "report.sales.view" },
+    { href: "/registers", label: "Registers", perm: "pos.create" },
     { href: "/sessions", label: "POS sessions", perm: "session.open" },
     { href: "/tracking", label: "Tracking accounts", perm: "tracking_account.edit" },
     { href: "/alerts", label: "Alerts", perm: "alert.acknowledge" },
