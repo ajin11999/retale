@@ -47,6 +47,14 @@ class CartLine {
   /// Line revenue minus line cost. Can be negative if sold below cost.
   int get lineMarginMinor => lineTotalMinor - lineCostMinor;
 
+  /// Per-unit margin, ignoring any line-level discount: unit price minus unit
+  /// cost. The "each" figure, as opposed to [lineMarginMinor] (× qty).
+  int get unitMarginMinor => unitPriceMinor - unitCostMinor;
+
+  /// Per-unit margin as a fraction of unit price, or null when price is zero.
+  double? get unitMarginFraction =>
+      unitPriceMinor == 0 ? null : unitMarginMinor / unitPriceMinor;
+
   /// Gross margin as a fraction of revenue (0.25 = 25%), or null when the line
   /// has no revenue to measure against.
   double? get marginFraction =>

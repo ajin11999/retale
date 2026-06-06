@@ -53,15 +53,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _connectivity.addListener(_onConnectivityChanged);
     _refreshCatalog();
     _sync.flushQueue();
+    // F9 charges the active cart. Handled at the keyboard level (rather than via
+    // CallbackShortcuts) so it fires even while the catalog search field holds
+    // focus — on web a focused text input otherwise swallows the key.
+    HardwareKeyboard.instance.addHandler(_handleKey);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKey);
     _debounce?.cancel();
     _connectivity.removeListener(_onConnectivityChanged);
     _searchController.dispose();
     _register.dispose();
     super.dispose();
+  }
+
+  /// Global key handler for the register. Only acts while the register is the
+  /// frontmost route, so F9 doesn't re-fire behind an open dialog or sheet.
+  bool _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.f9) {
+      return false;
+    }
+    if (ModalRoute.of(context)?.isCurrent != true) return false;
+    if (!_register.active.isEmpty) _checkout();
+    return true;
   }
 
   void _onConnectivityChanged() {
@@ -426,7 +443,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             width: double.infinity,
             child: FilledButton.icon(
               icon: const Icon(Icons.payments),
-              label: const Text('Charge'),
+              label: const Text('Charge · F9'),
               onPressed: cart.isEmpty ? null : _checkout,
             ),
           ),
@@ -926,9 +943,12 @@ class _CartDetailSheet extends StatelessWidget {
                   title: Text('${line.displayName}  ×${line.qty}'),
                   subtitle: Text(
                     'Revenue ${Money.format(line.lineTotalMinor)}'
-                    '   ·   Cost ${Money.format(line.lineCostMinor)}',
+                    '   ·   Cost ${Money.format(line.lineCostMinor)}\n'
+                    'Each ${Money.format(line.unitMarginMinor)} margin'
+                    '   (${_pct(line.unitMarginFraction)})',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
+                  isThreeLine: true,
                   trailing: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.end,

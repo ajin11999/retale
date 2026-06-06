@@ -15,7 +15,15 @@ class PosApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
+        visualDensity: VisualDensity.compact,
       ),
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(textScaler: const TextScaler.linear(0.9)),
+          child: child!,
+        );
+      },
       home: const RouterScreen(),
     );
   }
