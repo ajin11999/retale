@@ -373,8 +373,24 @@
         <tbody>
           {#each rows as r (r.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
-              <td class="px-4 py-2 font-mono text-xs">{r.code}</td>
-              <td class="px-4 py-2 font-medium">{r.name}</td>
+              <td class="px-4 py-2">
+                <a
+                  href={`/sessions?pos=${r.id}`}
+                  class="font-mono text-xs text-primary hover:underline"
+                  title="View this register's sessions"
+                >
+                  {r.code}
+                </a>
+              </td>
+              <td class="px-4 py-2">
+                <a
+                  href={`/sessions?pos=${r.id}`}
+                  class="font-medium text-primary hover:underline"
+                  title="View this register's sessions"
+                >
+                  {r.name}
+                </a>
+              </td>
               <td class="px-4 py-2 text-muted-foreground">
                 {pathById.get(r.locationId) ?? "—"}
               </td>

@@ -37,7 +37,9 @@
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
   const canView = $derived(has("session.open"));
 
-  let posFilter = $state<string>("");
+  // Deep-link support: /sessions?pos=<id> arrives pre-filtered (e.g. from the
+  // Registers page). Falls back to "All registers" when absent.
+  let posFilter = $state<string>(page.url.searchParams.get("pos") ?? "");
   const rows = $derived.by(() => {
     const list = posFilter
       ? sessions.filter((s) => s.posId === posFilter)
