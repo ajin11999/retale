@@ -18,7 +18,12 @@
 
 <header class="site-header">
   <div class="page">
-    <h1><a href="/">Retale Catalog</a></h1>
+    <h1>
+      <a href="/" style="display:flex;align-items:center;gap:0.625rem;">
+        <img src="/logo.png" alt="Retale" style="height:1.75rem;width:1.75rem;" />
+        Retale Catalog
+      </a>
+    </h1>
   </div>
 </header>
 

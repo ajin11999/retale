@@ -71,6 +71,8 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Image.asset('assets/logo.png', height: 56),
+              const SizedBox(height: 12),
               Text('Retale Workshop',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleLarge),

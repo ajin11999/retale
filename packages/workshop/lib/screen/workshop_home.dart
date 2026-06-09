@@ -64,6 +64,10 @@ class _WorkshopHomeState extends State<WorkshopHome> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Image.asset('assets/logo.png'),
+        ),
         title: const Text('Retale Workshop'),
         actions: [
           IconButton(

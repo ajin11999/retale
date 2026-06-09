@@ -245,6 +245,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       },
       child: Scaffold(
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Image.asset('assets/logo.png'),
+        ),
         title: Text('Register · ${AppConfig.instance.posId ?? ''}'),
         actions: [
           IconButton(
