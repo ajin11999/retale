@@ -50,7 +50,7 @@
 <div class="flex min-h-screen">
   <aside class="flex w-60 flex-col border-r bg-card">
     <div class="flex h-14 items-center gap-2.5 border-b px-5 font-semibold">
-      <img src="/logo.png" alt="Retale" class="h-7 w-7" /> Retale Console
+      <img src="/logo.png" alt="Retale" class="h-7 w-auto" /> Console
     </div>
     <nav class="flex-1 space-y-0.5 p-3">
       {#each nav as item (item.href)}

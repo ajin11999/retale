@@ -25,7 +25,8 @@ export type ProductErrorCode =
   | "SKU_TAKEN"
   | "NOT_A_BUNDLE"
   | "BUNDLE_NESTING"
-  | "INVALID_INPUT";
+  | "INVALID_INPUT"
+  | "INVALID_KIND_CHANGE";
 
 export class ProductError extends Error {
   constructor(public code: ProductErrorCode, message?: string) {
@@ -289,10 +290,19 @@ export async function updateProduct(
     replenishMonitored?: boolean;
   },
 ): Promise<ProductWithVariants> {
-  await loadProductRow(id);
+  const existing = await loadProductRow(id);
   if (patch.categoryId) await loadCategory(patch.categoryId);
   if (patch.primaryVendorId) await assertVendorExists(patch.primaryVendorId);
   assertNonNegative("taxRateBps", patch.taxRateBps);
+
+  if (patch.kind !== undefined && patch.kind !== existing.kind) {
+    if (existing.kind === "physical" && patch.kind === "bundle") {
+      throw new ProductError("INVALID_KIND_CHANGE", "cannot change a physical product to a bundle — clear stock first");
+    }
+    if (existing.kind === "bundle" && patch.kind === "physical") {
+      throw new ProductError("INVALID_KIND_CHANGE", "cannot change a bundle to a physical product — remove bundle components first");
+    }
+  }
   assertNonNegative("costRatioBps", patch.costRatioBps ?? undefined);
 
   await db

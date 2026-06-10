@@ -88,6 +88,7 @@
       products(includeArchived: true) {
         id
         name
+        kind
         variants {
           id
           sku
@@ -374,7 +375,7 @@
     { value: "", label: "— Ad-hoc vendor —" },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
-  const products = $derived($RefData.data?.products ?? []);
+  const products = $derived(($RefData.data?.products ?? []).filter(p => p.kind !== "bundle"));
 
   // Flat variant options for the item editor — "Product · SKU (label)".
   // `value`/`label` shape feeds the searchable Combobox directly.

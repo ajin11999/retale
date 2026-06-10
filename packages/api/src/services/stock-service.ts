@@ -34,7 +34,8 @@ const COST_AFFECTING: ReadonlySet<MovementType> = new Set([
 export type StockErrorCode =
   | "VARIANT_NOT_FOUND"
   | "INVALID_INPUT"
-  | "NO_STOCK_TO_PULL";
+  | "NO_STOCK_TO_PULL"
+  | "BUNDLE_NO_STOCK";
 
 export class StockError extends Error {
   constructor(
@@ -100,6 +101,12 @@ function weightedAverage(
 async function recordMovementTx(tx: Tx, input: RecordMovementInput): Promise<Movement> {
   const variant = await loadVariant(tx, input.variantId);
   const locationId = input.locationId ?? null;
+
+  // Bundle products carry no stock — reject any movement targeting them.
+  const product = await tx.query.products.findFirst({ where: eq(products.id, variant.productId) });
+  if (product?.kind === "bundle") {
+    throw new StockError("BUNDLE_NO_STOCK", "bundle products do not carry stock — adjust the component variants instead");
+  }
 
   if (COST_AFFECTING.has(input.type) && input.unitCost == null) {
     throw new StockError("INVALID_INPUT", `${input.type} requires a unitCost`);

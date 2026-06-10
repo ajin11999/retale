@@ -12,7 +12,7 @@ import {
   purchaseDeliveryItems,
 } from "../db/schema/deliveries.ts";
 import { locations } from "../db/schema/locations.ts";
-import { productVariants } from "../db/schema/products.ts";
+import { productVariants, products } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
@@ -32,7 +32,8 @@ export type DeliveryErrorCode =
   | "NOT_DELIVERED"
   | "OVER_DELIVERY"
   | "EMPTY_DELIVERY"
-  | "HAS_CHILDREN";
+  | "HAS_CHILDREN"
+  | "BUNDLE_NOT_STOCKED";
 
 export class DeliveryError extends Error {
   constructor(
@@ -725,6 +726,16 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
     for (const leaf of leaves) {
       const pi = lines.get(leaf.purchaseItemId as string);
       if (!pi?.variantId) continue;
+
+      // Bundles cannot be received as stock — their components hold inventory.
+      const v = await tx.query.productVariants.findFirst({ where: eq(productVariants.id, pi.variantId) });
+      if (v) {
+        const prd = await tx.query.products.findFirst({ where: eq(products.id, v.productId) });
+        if (prd?.kind === "bundle") {
+          throw new DeliveryError("BUNDLE_NOT_STOCKED", `variant ${pi.variantId} is a bundle — it cannot be received as stock`);
+        }
+      }
+
       const qty = leaf.qty as number;
       const landed = leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0);
       await recordMovement(
