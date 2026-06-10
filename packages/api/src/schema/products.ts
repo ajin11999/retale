@@ -48,6 +48,8 @@ export const typeDefs = /* GraphQL */ `
     priceTiers: [PriceTier!]!
     "Components, if this variant belongs to a kind='bundle' product."
     bundleComponents: [BundleComponent!]!
+    "The parent product."
+    product: Product!
   }
 
   "One component of a bundle: a variant and how many units the bundle holds."
@@ -56,6 +58,8 @@ export const typeDefs = /* GraphQL */ `
     bundleVariantId: ID!
     componentVariantId: ID!
     qty: Float!
+    "The variant this component points to — its SKU, label, and parent product."
+    componentVariant: ProductVariant!
   }
 
   input BundleComponentInput {
@@ -205,6 +209,11 @@ export const resolvers = {
   ProductVariant: {
     priceTiers: (v: { id: string }) => products.getPriceTiers(v.id),
     bundleComponents: (v: { id: string }) => products.getBundleComponents(v.id),
+    product: (v: { productId: string }) => products.getProduct(v.productId),
+  },
+  BundleComponent: {
+    componentVariant: (bc: { componentVariantId: string }) =>
+      products.getVariant(bc.componentVariantId),
   },
 
   Query: {

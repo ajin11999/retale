@@ -662,6 +662,9 @@ type ProductVariant {
   """Components, if this variant belongs to a kind='bundle' product."""
   bundleComponents: [BundleComponent!]!
 
+  """The parent product."""
+  product: Product!
+
   """
   Per-location stock rows for this variant (locationId null = unlocated root).
   """
@@ -676,6 +679,11 @@ type BundleComponent {
   bundleVariantId: ID!
   componentVariantId: ID!
   qty: Float!
+
+  """
+  The variant this component points to — its SKU, label, and parent product.
+  """
+  componentVariant: ProductVariant!
 }
 
 input BundleComponentInput {

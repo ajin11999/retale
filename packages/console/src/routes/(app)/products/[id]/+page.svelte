@@ -49,6 +49,19 @@
             locationId
             qty
           }
+          bundleComponents {
+            id
+            qty
+            componentVariant {
+              id
+              sku
+              label
+              product {
+                id
+                name
+              }
+            }
+          }
         }
         images {
           id
@@ -1404,6 +1417,49 @@
         </div>
       {/if}
     </section>
+
+    {#if product.kind === "bundle"}
+      <!-- Bundle components (read-only; edited via setBundleComponents) -->
+      <section class="space-y-3 rounded-lg border bg-card p-5">
+        <h2 class="text-sm font-semibold">Bundle components</h2>
+        {#each product.variants as v (v.id)}
+          <div class="space-y-1">
+            <span class="text-sm font-medium">
+              {v.label ? `${v.sku} · ${v.label}` : v.sku}
+            </span>
+            {#if v.bundleComponents.length > 0}
+              <table class="w-full text-sm">
+                <tbody>
+                  {#each v.bundleComponents as comp (comp.id)}
+                    <tr class="border-b last:border-0">
+                      <td class="py-1">
+                        {comp.componentVariant.product.name}
+                        {#if comp.componentVariant.label}
+                          <span class="ml-1 text-xs text-muted-foreground">
+                            {comp.componentVariant.label}
+                          </span>
+                        {/if}
+                      </td>
+                      <td class="py-1 font-mono text-xs text-muted-foreground">
+                        {comp.componentVariant.sku}
+                      </td>
+                      <td class="py-1 text-right">×{comp.qty}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {:else}
+              <p class="text-sm text-muted-foreground">
+                No components yet — this bundle can't be sold until it has some.
+              </p>
+            {/if}
+          </div>
+        {/each}
+        {#if product.variants.length === 0}
+          <p class="text-sm text-muted-foreground">No variants.</p>
+        {/if}
+      </section>
+    {/if}
 
     <!-- Stock by location -->
     <section class="space-y-3 rounded-lg border bg-card p-5">

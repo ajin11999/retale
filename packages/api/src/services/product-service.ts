@@ -361,6 +361,11 @@ export async function addVariant(
   return loadVariant(row.id);
 }
 
+/** Fetch a single variant by id; VARIANT_NOT_FOUND when missing. */
+export async function getVariant(id: string): Promise<Variant> {
+  return loadVariant(id);
+}
+
 async function loadVariant(id: string): Promise<Variant> {
   const rows = await db
     .select()
