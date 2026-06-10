@@ -477,6 +477,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               qty: l.qty,
               unitPriceMinor: l.unitPriceMinor,
               lineTotalMinor: l.lineTotalMinor,
+              unit: l.variant.unit,
             ))
         .toList();
     final totalMinor = cart.totalMinor;

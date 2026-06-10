@@ -20,12 +20,17 @@ class ReceiptLine {
     required this.qty,
     required this.unitPriceMinor,
     required this.lineTotalMinor,
+    this.unit,
   });
 
   final String name;
   final int qty;
   final int unitPriceMinor;
   final int lineTotalMinor;
+
+  /// Unit of measure — "piece", "g", "ml", "mm"; null on receipts rebuilt
+  /// from orders that predate the unit snapshot.
+  final String? unit;
 }
 
 /// A sale receipt that renders to a plain-text WhatsApp message. Built either
@@ -69,6 +74,7 @@ class Receipt {
               qty: (it['qty'] as num).toInt(),
               unitPriceMinor: (it['snapshotPriceMinor'] as num).toInt(),
               lineTotalMinor: (it['lineTotalMinor'] as num).toInt(),
+              unit: it['snapshotUnit'] as String?,
             ))
         .toList();
     final paid = (order['payments'] as List<dynamic>)
@@ -101,7 +107,9 @@ class Receipt {
     }
     b.writeln('--------------------------------');
     for (final line in lines) {
-      b.writeln('${line.qty} × ${line.name}');
+      final qty =
+          line.unit == null ? '${line.qty}' : '${line.qty} ${line.unit}';
+      b.writeln('$qty × ${line.name}');
       b.writeln(
           '   ${Money.format(line.unitPriceMinor)}   =   ${Money.format(line.lineTotalMinor)}');
     }

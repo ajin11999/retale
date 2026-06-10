@@ -23,7 +23,7 @@ const _receiptWidth = 80 * _mm; // a receipt is a fixed 80mm column
 ///
 /// The styling mirrors the ProDuck POS receipt: a centred logo (or the store
 /// name), a bordered item list — single-quantity lines collapse to name +
-/// total, multi-quantity lines show `N Units x price` — then the total, cash
+/// total, multi-quantity lines show `N <unit> x price` — then the total, cash
 /// tendered and change, with the date centred at the foot.
 ///
 /// The built-in Helvetica fonts cover Latin-1 only; [_latin1] folds the
@@ -94,7 +94,7 @@ Future<Uint8List> buildReceiptPdf(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text(
-                  '  ${line.qty} Units x ${Money.format(line.unitPriceMinor)}',
+                  '  ${line.qty} ${line.unit ?? 'Units'} x ${Money.format(line.unitPriceMinor)}',
                   style: pw.TextStyle(font: regular, fontSize: 9)),
               total,
             ],
