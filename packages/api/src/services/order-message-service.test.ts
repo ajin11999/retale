@@ -155,6 +155,28 @@ describe("renderOrderReceiptMessage", () => {
     expect(body).toContain("Total: Rp 100.000");
   });
 
+  test("compact: drops greeting, header and footer — item lines and totals only", async () => {
+    await updateBusinessSettings({
+      name: "Frans Retail",
+      receiptGreeting: "Terima kasih,",
+      receiptFooter: "Barang yang sudah dibeli tidak dapat dikembalikan.",
+    });
+    const orderId = await seedOrder({
+      customerName: "Pak Budi",
+      displayNumber: "TK1-2026-06-05-13",
+      lines: [{ name: "M6 Bolt", qty: 50, priceMinor: 2000 }],
+    });
+
+    const { body } = await renderOrderReceiptMessage(orderId, { compact: true });
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
+    expect(body).toContain("Total: Rp 100.000");
+    expect(body).not.toContain("Terima kasih,");
+    expect(body).not.toContain("RECEIPT");
+    expect(body).not.toContain("From:");
+    expect(body).not.toContain("To:");
+    expect(body).not.toContain("dikembalikan");
+  });
+
   test("uses the public name when present; notes a discount", async () => {
     const orderId = await seedOrder({
       customerName: "Walk-in",

@@ -34,11 +34,16 @@ const rp = (minor: number): string => `Rp ${groupThousands(minor)}`;
 
 /**
  * Render a purchase order as a sendable message. Throws PurchaseError
- * (PURCHASE_NOT_FOUND) via `getPurchase` for an unknown id.
+ * (PURCHASE_NOT_FOUND) via `getPurchase` for an unknown id. `compact` drops
+ * the greeting, the PURCHASE ORDER / From / Date / To header and the footer,
+ * leaving only the item lines and total — for chat channels where the
+ * conversation itself already carries the context.
  */
 export async function renderPurchaseOrderMessage(
   purchaseId: string,
+  opts: { compact?: boolean } = {},
 ): Promise<PurchaseMessage> {
+  const compact = opts.compact === true;
   const purchase = await getPurchase(purchaseId);
   const [items, sections, business] = await Promise.all([
     listItems(purchaseId),
@@ -90,17 +95,19 @@ export async function renderPurchaseOrderMessage(
   };
 
   const out: string[] = [];
-  if (business.poGreeting?.trim()) out.push(business.poGreeting.trim(), "");
+  if (!compact) {
+    if (business.poGreeting?.trim()) out.push(business.poGreeting.trim(), "");
 
-  out.push("PURCHASE ORDER");
-  if (business.name.trim()) out.push(`From: ${business.name.trim()}`);
-  const contact = [business.phone, business.email].filter(Boolean).join(" · ");
-  if (contact) out.push(contact);
-  out.push(`Date: ${purchase.date}`);
-  if (purchase.sourceDocument?.trim()) {
-    out.push(`Ref: ${purchase.sourceDocument.trim()}`);
+    out.push("PURCHASE ORDER");
+    if (business.name.trim()) out.push(`From: ${business.name.trim()}`);
+    const contact = [business.phone, business.email].filter(Boolean).join(" · ");
+    if (contact) out.push(contact);
+    out.push(`Date: ${purchase.date}`);
+    if (purchase.sourceDocument?.trim()) {
+      out.push(`Ref: ${purchase.sourceDocument.trim()}`);
+    }
+    out.push("", `To: ${purchase.snapshotVendorName}`, "");
   }
-  out.push("", `To: ${purchase.snapshotVendorName}`, "");
 
   // One block per section, in order, then an "Uncategorized" block.
   const blocks: { name: string; sectionId: string | null }[] = [
@@ -121,7 +128,7 @@ export async function renderPurchaseOrderMessage(
   }
 
   out.push(`Total: ${rp(await invoiceTotalMinor(purchaseId))}`);
-  if (business.poFooter?.trim()) out.push("", business.poFooter.trim());
+  if (!compact && business.poFooter?.trim()) out.push("", business.poFooter.trim());
 
   const subject = business.name.trim()
     ? `Purchase Order from ${business.name.trim()}`
@@ -172,7 +179,12 @@ export async function buildPurchaseSendDraft(
   channel: SendChannel,
   recipientOverride?: string | null,
 ): Promise<PurchaseSendDraft> {
-  const { subject, body } = await renderPurchaseOrderMessage(purchaseId);
+  // WhatsApp gets the compact body — only the item lines and total; the chat
+  // with the vendor already says who it's from. Email and manual keep the
+  // full document-style body.
+  const { subject, body } = await renderPurchaseOrderMessage(purchaseId, {
+    compact: channel === "whatsapp",
+  });
   const purchase = await getPurchase(purchaseId);
   const vendor = purchase.vendorId ? await getVendor(purchase.vendorId) : null;
 

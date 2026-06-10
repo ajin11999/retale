@@ -33,11 +33,16 @@ const dateOnly = (d: Date | string): string => new Date(d).toISOString().slice(0
 
 /**
  * Render a customer sale as a sendable receipt message. Throws OrderError
- * (ORDER_NOT_FOUND) via `getOrder` for an unknown id.
+ * (ORDER_NOT_FOUND) via `getOrder` for an unknown id. `compact` drops the
+ * greeting, the RECEIPT / From / Date / To header and the footer, leaving only
+ * the item lines and totals — for chat channels where the conversation itself
+ * already carries the context.
  */
 export async function renderOrderReceiptMessage(
   orderId: string,
+  opts: { compact?: boolean } = {},
 ): Promise<OrderMessage> {
+  const compact = opts.compact === true;
   const order = await getOrder(orderId);
   const [items, payments, business] = await Promise.all([
     listOrderItems(orderId),
@@ -49,15 +54,17 @@ export async function renderOrderReceiptMessage(
   const liveItems = items.filter((i) => !i.voidedAt);
 
   const out: string[] = [];
-  if (business.receiptGreeting?.trim()) out.push(business.receiptGreeting.trim(), "");
+  if (!compact) {
+    if (business.receiptGreeting?.trim()) out.push(business.receiptGreeting.trim(), "");
 
-  out.push("RECEIPT");
-  if (business.name.trim()) out.push(`From: ${business.name.trim()}`);
-  const contact = [business.phone, business.email].filter(Boolean).join(" · ");
-  if (contact) out.push(contact);
-  out.push(`Date: ${dateOnly(order.closedAt ?? order.createdAt)}`);
-  if (order.displayNumber) out.push(`No: ${order.displayNumber}`);
-  out.push("", `To: ${order.snapshotCustomerName ?? "Walk-in"}`, "");
+    out.push("RECEIPT");
+    if (business.name.trim()) out.push(`From: ${business.name.trim()}`);
+    const contact = [business.phone, business.email].filter(Boolean).join(" · ");
+    if (contact) out.push(contact);
+    out.push(`Date: ${dateOnly(order.closedAt ?? order.createdAt)}`);
+    if (order.displayNumber) out.push(`No: ${order.displayNumber}`);
+    out.push("", `To: ${order.snapshotCustomerName ?? "Walk-in"}`, "");
+  }
 
   for (const item of liveItems) {
     const name = item.snapshotPublicName ?? item.snapshotProductName;
@@ -81,7 +88,7 @@ export async function renderOrderReceiptMessage(
     if (balance > 0) out.push(`Balance due: ${rp(balance)}`);
   }
 
-  if (business.receiptFooter?.trim()) out.push("", business.receiptFooter.trim());
+  if (!compact && business.receiptFooter?.trim()) out.push("", business.receiptFooter.trim());
 
   const label = order.displayNumber ? ` ${order.displayNumber}` : "";
   const subject = business.name.trim()
@@ -118,7 +125,12 @@ export async function buildOrderSendDraft(
   channel: SendChannel,
   recipientOverride?: string | null,
 ): Promise<OrderSendDraft> {
-  const { subject, body } = await renderOrderReceiptMessage(orderId);
+  // WhatsApp gets the compact body — only the item lines and totals; the chat
+  // with the customer already says who it's from. Email and manual keep the
+  // full document-style body.
+  const { subject, body } = await renderOrderReceiptMessage(orderId, {
+    compact: channel === "whatsapp",
+  });
   const order = await getOrder(orderId);
 
   // The order keeps a snapshot name after a hard-delete; the live row carries

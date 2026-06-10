@@ -147,6 +147,36 @@ describe("renderPurchaseOrderMessage", () => {
     expect(body).toContain("Total: Rp 100.000");
   });
 
+  test("compact: drops greeting, header and footer — item lines and total only", async () => {
+    await updateBusinessSettings({
+      name: "Frans Retail",
+      poGreeting: "Dear supplier,",
+      poFooter: "Thank you.",
+    });
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant("M6 Bolt");
+    const purchase = await createPurchase({
+      vendorId,
+      date: "2026-05-18",
+      createdByUserId: userId,
+    });
+    await createItem({
+      purchaseId: purchase.id,
+      variantId,
+      qtyOrdered: 50,
+      unitCostMinor: 2000,
+    });
+
+    const { body } = await renderPurchaseOrderMessage(purchase.id, { compact: true });
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
+    expect(body).toContain("Total: Rp 100.000");
+    expect(body).not.toContain("Dear supplier,");
+    expect(body).not.toContain("PURCHASE ORDER");
+    expect(body).not.toContain("From:");
+    expect(body).not.toContain("To:");
+    expect(body).not.toContain("Thank you.");
+  });
+
   test("uses the vendor's code when mapped, the product name when not", async () => {
     const vendorId = await seedVendor();
     const mapped = await seedVariant("M6 Bolt");
@@ -228,6 +258,8 @@ describe("buildPurchaseSendDraft", () => {
     expect(draft.recipientAvailable).toBe(true);
     expect(draft.deepLink).toContain("https://wa.me/6281234567890?text=");
     expect(draft.body.length).toBeGreaterThan(0);
+    // WhatsApp carries the compact body — no document-style header.
+    expect(draft.body).not.toContain("PURCHASE ORDER");
   });
 
   test("whatsapp: an unparseable phone leaves no link", async () => {
