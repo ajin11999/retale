@@ -56,6 +56,10 @@ export const typeDefs = /* GraphQL */ `
     vendorId: ID
     "The resolved expedition vendor for a tagged cost node, if any."
     vendor: Vendor
+    "Freight leg: this root cost node spreads over the whole delivery's goods."
+    deliveryWide: Boolean!
+    "PO scope for a delivery-wide leg — spreads only over that purchase's goods."
+    appliesToPurchaseId: ID
     "The purchase line a goods leaf receives against — its ordered/delivered progress."
     purchaseItem: PurchaseItem
     description: String!
@@ -87,6 +91,10 @@ export const typeDefs = /* GraphQL */ `
       purchaseItemId: ID
       "Expedition owed for this cost node (freight/customs); cost nodes only."
       vendorId: ID
+      "Freight leg: spread over the whole delivery's goods. Root cost nodes only."
+      deliveryWide: Boolean
+      "Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide."
+      appliesToPurchaseId: ID
       description: String!
       qty: Float
       costMinor: Float!
@@ -99,6 +107,10 @@ export const typeDefs = /* GraphQL */ `
       costMinor: Float
       "Expedition owed for this cost node; pass null to clear, omit to leave unchanged."
       vendorId: ID
+      "Freight leg: spread over the whole delivery's goods. Root cost nodes only."
+      deliveryWide: Boolean
+      "PO scope; pass null to clear, omit to leave unchanged. Requires deliveryWide."
+      appliesToPurchaseId: ID
       "Reparent: a cost node id to nest under, null for the root, omit to leave unchanged."
       parentItemId: ID
       sortOrder: Int

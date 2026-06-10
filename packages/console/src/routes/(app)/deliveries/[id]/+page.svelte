@@ -31,11 +31,13 @@
           purchaseItemId
           vendorId
           vendor { id name }
+          deliveryWide
+          appliesToPurchaseId
           description
           qty
           costMinor
           sortOrder
-          purchaseItem { id qtyOrdered qtyDelivered }
+          purchaseItem { id purchaseId qtyOrdered qtyDelivered }
         }
         leafLandings {
           itemId
@@ -110,6 +112,8 @@
       $qty: Float
       $costMinor: Float!
       $vendorId: ID
+      $deliveryWide: Boolean
+      $appliesToPurchaseId: ID
     ) {
       createDeliveryItem(
         deliveryId: $deliveryId
@@ -119,6 +123,8 @@
         qty: $qty
         costMinor: $costMinor
         vendorId: $vendorId
+        deliveryWide: $deliveryWide
+        appliesToPurchaseId: $appliesToPurchaseId
       ) {
         id
       }
@@ -133,6 +139,7 @@
       $costMinor: Float
       $vendorId: ID
       $parentItemId: ID
+      $appliesToPurchaseId: ID
     ) {
       updateDeliveryItem(
         id: $id
@@ -141,6 +148,7 @@
         costMinor: $costMinor
         vendorId: $vendorId
         parentItemId: $parentItemId
+        appliesToPurchaseId: $appliesToPurchaseId
       ) {
         id
       }
@@ -320,6 +328,122 @@
       }));
     return build(null);
   });
+
+  // ---- Freight legs --------------------------------------------------------
+  // A leg is a root cost node flagged delivery-wide: one expedition's invoice
+  // for one transit (JKT→PTK, PTK→KTP, …), spread by value over the whole
+  // delivery's goods — or one PO's goods when scoped.
+  const freightLegs = $derived(
+    tree
+      .filter((n) => n.item.deliveryWide && n.item.purchaseItemId == null)
+      .map((n) => n.item),
+  );
+
+  // POs represented by this delivery's goods leaves — the leg scope choices.
+  const leafPoIds = $derived.by(() => {
+    const s = new Set<string>();
+    for (const it of items) {
+      const pid = it.purchaseItem?.purchaseId;
+      if (it.purchaseItemId != null && pid) s.add(pid);
+    }
+    return s;
+  });
+  const poLabel = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const p of openPurchases) {
+      m.set(p.id, `${p.snapshotVendorName} · #${p.id.slice(-6)}`);
+    }
+    return (id: string) => m.get(id) ?? `PO #${id.slice(-6)}`;
+  });
+  const deliveryPoOptions = $derived([
+    { value: "", label: "Whole delivery" },
+    ...[...leafPoIds].map((id) => ({ value: id, label: poLabel(id) })),
+  ]);
+
+  // Charges that will capitalize into nothing at commit: a cost node with no
+  // goods anywhere in its subtree and no delivery-wide flag, or a leg scoped
+  // to a PO that has no goods in this delivery. Courier AP still posts for
+  // them — surfaced as a warning before commit, never a blocker.
+  const inertCharges = $derived.by(() => {
+    const out: Item[] = [];
+    const hasGoods = (n: Node): boolean =>
+      n.children.some((c) => c.item.purchaseItemId != null || hasGoods(c));
+    const walk = (nodes: Node[]) => {
+      for (const n of nodes) {
+        if (n.item.purchaseItemId == null && n.item.costMinor > 0) {
+          if (n.item.deliveryWide) {
+            const scope = n.item.appliesToPurchaseId;
+            if ((scope && !leafPoIds.has(scope)) || leafPoIds.size === 0) {
+              out.push(n.item);
+            }
+          } else if (!hasGoods(n)) {
+            out.push(n.item);
+          }
+        }
+        walk(n.children);
+      }
+    };
+    walk(tree);
+    return out;
+  });
+
+  // Leg add / edit form. legEditId: null = closed, "" = adding, id = editing.
+  let legEditId = $state<string | null>(null);
+  let legDesc = $state("");
+  let legCost = $state<number | null>(null);
+  let legVendorId = $state("");
+  let legPoId = $state("");
+
+  function startLegAdd() {
+    legEditId = "";
+    legDesc = "";
+    legCost = null;
+    legVendorId = "";
+    legPoId = "";
+  }
+  function startLegEdit(it: Item) {
+    legEditId = it.id;
+    legDesc = it.description;
+    legCost = it.costMinor;
+    legVendorId = it.vendorId ?? "";
+    legPoId = it.appliesToPurchaseId ?? "";
+  }
+
+  async function saveLeg() {
+    if (!delivery || legEditId === null) return;
+    if (!legDesc.trim() || legCost == null) return;
+    busy = true;
+    error = null;
+    try {
+      const res =
+        legEditId === ""
+          ? await CreateDeliveryItem.mutate({
+              deliveryId: delivery.id,
+              description: legDesc.trim(),
+              costMinor: legCost,
+              vendorId: legVendorId || null,
+              deliveryWide: true,
+              appliesToPurchaseId: legPoId || null,
+            })
+          : await UpdateDeliveryItem.mutate({
+              id: legEditId,
+              description: legDesc.trim(),
+              costMinor: legCost,
+              vendorId: legVendorId || null,
+              appliesToPurchaseId: legPoId || null,
+            });
+      if (res.errors?.length) {
+        error = res.errors[0].message;
+        return;
+      }
+      legEditId = null;
+      await refetch();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+    }
+  }
 
   // ---- Header editing ------------------------------------------------------
   let editingHeader = $state(false);
@@ -561,7 +685,10 @@
     };
     walk(editingId);
     return items
-      .filter((it) => it.purchaseItemId == null && !blocked.has(it.id))
+      .filter(
+        // A delivery-wide leg cannot contain items, so it is never a target.
+        (it) => it.purchaseItemId == null && !it.deliveryWide && !blocked.has(it.id),
+      )
       .map((it) => ({ value: it.id, label: it.description }));
   });
 
@@ -783,6 +910,14 @@
         </div>
       </div>
 
+      {#if isDraft && inertCharges.length > 0}
+        <div class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          These charges won't be capitalized into any goods (courier AP still
+          posts): {inertCharges.map((c) => c.description).join(", ")}. Flag a
+          charge as a freight leg, or nest goods under it.
+        </div>
+      {/if}
+
       <!-- Lifecycle actions -->
       <div class="mt-3 flex flex-wrap gap-2 border-t pt-3">
         {#if isDraft}
@@ -813,6 +948,131 @@
       </div>
     </div>
 
+    <!-- Freight legs -->
+    <div class="rounded-lg border bg-card p-4">
+      <div class="mb-1 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">Freight legs</h2>
+        {#if editable}
+          <Button size="sm" variant="outline" onclick={startLegAdd}>
+            Add leg
+          </Button>
+        {/if}
+      </div>
+      <p class="mb-3 text-xs text-muted-foreground">
+        One row per transit invoice — each expedition's billed amount for its
+        stretch of the journey. A leg spreads by value over <em>all</em> goods
+        in this delivery, or only one PO's goods when scoped. Couriers get
+        their own payable on commit.
+      </p>
+
+      {#if freightLegs.length === 0 && legEditId === null}
+        <p class="text-sm text-muted-foreground">
+          No freight legs{editable ? " — add one per expedition invoice." : "."}
+        </p>
+      {:else}
+        <ul class="space-y-1">
+          {#each freightLegs as leg (leg.id)}
+            <li class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40">
+              {#if legEditId === leg.id}
+                <Input bind:value={legDesc} class="flex-1" />
+                <div class="w-40">
+                  <Combobox
+                    options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
+                    bind:value={legVendorId}
+                    placeholder="Search courier…"
+                  />
+                </div>
+                <Select bind:value={legPoId} class="w-44" title="Spread over the whole delivery or one PO's goods">
+                  {#each deliveryPoOptions as o (o.value)}
+                    <option value={o.value}>{o.label}</option>
+                  {/each}
+                </Select>
+                <MoneyInput bind:value={legCost} class="w-32" />
+                <Button size="sm" disabled={busy} onclick={saveLeg}>Save</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onclick={() => (legEditId = null)}>Cancel</Button
+                >
+              {:else}
+                <span class="flex-1 truncate text-sm">
+                  {leg.description}
+                  {#if leg.vendor}
+                    <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
+                      → {leg.vendor.name}
+                    </Badge>
+                  {/if}
+                </span>
+                <span class="text-xs text-muted-foreground">
+                  {leg.appliesToPurchaseId
+                    ? poLabel(leg.appliesToPurchaseId)
+                    : "Whole delivery"}
+                </span>
+                {#if leg.appliesToPurchaseId && !leafPoIds.has(leg.appliesToPurchaseId)}
+                  <span class="text-xs text-amber-600" title="No goods from this PO are in the delivery">
+                    ⚠ PO not in this delivery
+                  </span>
+                {/if}
+                <span class="w-32 text-right text-sm">{formatMoney(leg.costMinor)}</span>
+                {#if editable}
+                  <Button size="sm" variant="ghost" onclick={() => startLegEdit(leg)}>
+                    ✎
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="text-destructive"
+                    onclick={() => removeItem(leg.id)}>×</Button
+                  >
+                {/if}
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      {#if legEditId === ""}
+        <div class="mt-2 flex items-end gap-2 rounded-md border bg-muted/40 p-3">
+          <label class="flex-1 space-y-1">
+            <span class="text-xs font-medium">Description</span>
+            <Input bind:value={legDesc} placeholder="Leg 1: MKS Jakarta → Pontianak" />
+          </label>
+          <label class="w-40 space-y-1">
+            <span class="text-xs font-medium">Courier (AP)</span>
+            <Combobox
+              options={[{ value: "", label: "— None —" }, ...courierOptions]}
+              bind:value={legVendorId}
+              placeholder="Search courier…"
+            />
+          </label>
+          <label class="w-44 space-y-1">
+            <span class="text-xs font-medium">Applies to</span>
+            <Select bind:value={legPoId}>
+              {#each deliveryPoOptions as o (o.value)}
+                <option value={o.value}>{o.label}</option>
+              {/each}
+            </Select>
+          </label>
+          <label class="w-32 space-y-1">
+            <span class="text-xs font-medium">Billed (Rp)</span>
+            <MoneyInput bind:value={legCost} />
+          </label>
+          <Button
+            size="sm"
+            disabled={busy || !legDesc.trim() || legCost == null}
+            onclick={saveLeg}>Add</Button
+          >
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onclick={() => (legEditId = null)}>Cancel</Button
+          >
+        </div>
+      {/if}
+    </div>
+
     <!-- Cost tree -->
     <div class="rounded-lg border bg-card p-4">
       <div class="mb-1 flex items-center justify-between">
@@ -827,8 +1087,9 @@
         Add goods lines from any open PO, and freight / customs cost lines. A
         cost line spreads by value <em>only over the goods nested under it</em> —
         edit a goods line and pick a cost line under <em>Move to</em> to apply
-        that charge to it. Goods left at the top level carry no freight. Each
-        product shows its landed unit cost (→ /unit).
+        that charge to it. To spread a charge over the whole delivery, add it
+        as a freight leg above instead. Each product shows its landed unit cost
+        (→ /unit).
       </p>
 
       {#if addingUnder === ""}
@@ -1086,6 +1347,13 @@
               → {node.item.vendor.name}
             </Badge>
           {/if}
+          {#if node.item.deliveryWide}
+            <span title="Freight leg — spreads over the whole delivery's goods">
+              <Badge class="ml-1 bg-violet-100 text-xs text-violet-700">
+                delivery-wide
+              </Badge>
+            </span>
+          {/if}
         </span>
         {#if node.item.qty != null}
           <span class="text-xs text-muted-foreground">×{node.item.qty}</span>
@@ -1111,7 +1379,7 @@
           <span class="w-40"></span>
         {/if}
         {#if editable}
-          {#if !node.item.purchaseItemId}
+          {#if !node.item.purchaseItemId && !node.item.deliveryWide}
             <Button
               size="sm"
               variant="ghost"

@@ -9,6 +9,7 @@
 import { relations } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   date,
   foreignKey,
   index,
@@ -79,6 +80,14 @@ export const purchaseDeliveryItems = mysqlTable(
     // `purchase_on_account` to this vendor. Null = freight we absorb (no AP).
     // SET NULL on vendor delete drops the AP link but keeps the landed cost.
     vendorId: ulidRef().references(() => vendors.id, { onDelete: "set null" }),
+    // Explicit delivery-wide scope: this cost node (a freight leg) spreads over
+    // every stock leaf of the delivery instead of its own subtree. Root cost
+    // nodes only; never inferred — an unflagged childless node allocates nothing.
+    deliveryWide: boolean().notNull().default(false),
+    // Narrows a deliveryWide leg to one purchase's leaves — for multi-PO
+    // deliveries where an expedition invoices per PO. Requires deliveryWide.
+    // FK declared in the table-extras below to keep the constraint name short.
+    appliesToPurchaseId: ulidRef(),
     description: varchar({ length: 300 }).notNull(),
     // Set only on leaves; in the variant's smallest unit.
     qty: bigint({ mode: "number" }),
@@ -91,6 +100,11 @@ export const purchaseDeliveryItems = mysqlTable(
       columns: [t.parentItemId],
       foreignColumns: [t.id],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "pdi_applies_purchase_fk",
+      columns: [t.appliesToPurchaseId],
+      foreignColumns: [purchases.id],
+    }).onDelete("set null"),
     index("purchase_delivery_items_delivery_id_idx").on(t.deliveryId),
     index("purchase_delivery_items_purchase_item_id_idx").on(t.purchaseItemId),
   ],

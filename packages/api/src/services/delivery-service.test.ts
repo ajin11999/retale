@@ -25,6 +25,7 @@ import {
   deleteDelivery,
   DeliveryError,
   type DeliveryErrorCode,
+  updateDeliveryItem,
 } from "./delivery-service.ts";
 
 let userId: string;
@@ -417,6 +418,298 @@ describe("commitDelivery", () => {
     expect((await getVariant(inBox))?.costMinor).toBe(2000);
     // `b` carries none of it: 4000/4 = 1000.
     expect((await getVariant(loose))?.costMinor).toBe(1000);
+  });
+
+  test("a delivery-wide leg spreads over flat root leaves by value", async () => {
+    const locationId = await seedLocation();
+    const variantA = await seedVariant();
+    const variantB = await seedVariant();
+    const a = await seedPurchaseItem({ variantId: variantA, qtyOrdered: 2, unitCostMinor: 300 });
+    const b = await seedPurchaseItem({ variantId: variantB, qtyOrdered: 8, unitCostMinor: 50 });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    // Flat leaves at root — the receiving-check shape — with a freight leg
+    // beside them. Same numbers as the nested test above: 60 to A, 40 to B.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: a.itemId,
+      description: "Line A",
+      qty: 2,
+      costMinor: 600,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: b.itemId,
+      description: "Line B",
+      qty: 8,
+      costMinor: 400,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Leg 1: MKS JKT→PTK",
+      costMinor: 100,
+      deliveryWide: true,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    expect((await getVariant(variantA))?.costMinor).toBe(330);
+    expect((await getVariant(variantB))?.costMinor).toBe(55);
+  });
+
+  test("multi-leg: an unscoped leg spreads delivery-wide, a PO-scoped leg over one PO; each courier gets its own AP", async () => {
+    const locationId = await seedLocation();
+    const variantA = await seedVariant();
+    const variantB = await seedVariant();
+    // Two POs in one delivery, equal values: A = B = 4 × 1000 = 4000.
+    const a = await seedPurchaseItem({ variantId: variantA, qtyOrdered: 4, unitCostMinor: 1000 });
+    const b = await seedPurchaseItem({ variantId: variantB, qtyOrdered: 4, unitCostMinor: 1000 });
+    const courier1 = await seedVendor({ kind: "expedition" });
+    const courier2 = await seedVendor({ kind: "expedition" });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: a.itemId,
+      description: "PO-X goods",
+      qty: 4,
+      costMinor: 4000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: b.itemId,
+      description: "PO-Y goods",
+      qty: 4,
+      costMinor: 4000,
+    });
+    // Leg 1: whole delivery → 400 to each PO's goods.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Leg 1: whole shipment",
+      costMinor: 800,
+      deliveryWide: true,
+      vendorId: courier1,
+    });
+    // Leg 2: invoiced for PO-X only (weight bulked per PO) → 400 to A alone.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Leg 2: PO-X weight",
+      costMinor: 400,
+      deliveryWide: true,
+      appliesToPurchaseId: a.purchaseId,
+      vendorId: courier2,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    // A: (4000 + 400 + 400) / 4 = 1200. B: (4000 + 400) / 4 = 1100.
+    expect((await getVariant(variantA))?.costMinor).toBe(1200);
+    expect((await getVariant(variantB))?.costMinor).toBe(1100);
+    // AP per courier is the invoiced leg amount, regardless of scope.
+    const ap1 = await ledgerFor(courier1);
+    const ap2 = await ledgerFor(courier2);
+    expect(ap1).toHaveLength(1);
+    expect(ap1[0]?.amountMinor).toBe(800);
+    expect(ap2).toHaveLength(1);
+    expect(ap2[0]?.amountMinor).toBe(400);
+  });
+
+  test("an un-flagged childless charge still allocates nothing (root or nested)", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 4,
+      unitCostMinor: 1000,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    const group = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Customs group",
+      costMinor: 0,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: group.id,
+      purchaseItemId: itemId,
+      description: "Goods",
+      qty: 4,
+      costMinor: 4000,
+    });
+    // Childless, not delivery-wide: nested and root variants both inert.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: group.id,
+      description: "Handling (nested, childless)",
+      costMinor: 500,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Loose charge (root, childless)",
+      costMinor: 300,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    // Neither inert charge capitalizes: 4000 / 4 = 1000 flat.
+    expect((await getVariant(variantId))?.costMinor).toBe(1000);
+  });
+
+  test("a leg scoped to a PO absent from the delivery capitalizes nothing but still posts courier AP", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const present = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 4,
+      unitCostMinor: 1000,
+    });
+    // A second purchase that ships separately — not in this delivery.
+    const absent = await seedPurchaseItem({
+      variantId: await seedVariant(),
+      qtyOrdered: 1,
+      unitCostMinor: 1,
+    });
+    const courier = await seedVendor({ kind: "expedition" });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: present.itemId,
+      description: "Goods",
+      qty: 4,
+      costMinor: 4000,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Leg for the other PO",
+      costMinor: 400,
+      deliveryWide: true,
+      appliesToPurchaseId: absent.purchaseId,
+      vendorId: courier,
+    });
+
+    await commitDelivery(delivery.id, userId);
+
+    expect((await getVariant(variantId))?.costMinor).toBe(1000);
+    const ap = await ledgerFor(courier);
+    expect(ap).toHaveLength(1);
+    expect(ap[0]?.amountMinor).toBe(400);
+  });
+
+  test("delivery-wide and PO-scope guard rails", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { purchaseId, itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 4,
+      unitCostMinor: 1000,
+    });
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+
+    // deliveryWide on a goods leaf.
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        purchaseItemId: itemId,
+        description: "Goods",
+        qty: 4,
+        costMinor: 4000,
+        deliveryWide: true,
+      }),
+      "INVALID_INPUT",
+    );
+
+    const group = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Group",
+      costMinor: 0,
+    });
+    // deliveryWide on a nested node.
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        parentItemId: group.id,
+        description: "Nested leg",
+        costMinor: 100,
+        deliveryWide: true,
+      }),
+      "INVALID_INPUT",
+    );
+    // PO scope without deliveryWide.
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        description: "Scoped but not wide",
+        costMinor: 100,
+        appliesToPurchaseId: purchaseId,
+      }),
+      "INVALID_INPUT",
+    );
+    // Unknown purchase.
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        description: "Leg",
+        costMinor: 100,
+        deliveryWide: true,
+        appliesToPurchaseId: ulid(),
+      }),
+      "INVALID_INPUT",
+    );
+
+    const leg = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Leg",
+      costMinor: 100,
+      deliveryWide: true,
+    });
+    // Nothing can be created under a leg…
+    await expectError(
+      createDeliveryItem({
+        deliveryId: delivery.id,
+        parentItemId: leg.id,
+        description: "Inside a leg",
+        costMinor: 10,
+      }),
+      "INVALID_INPUT",
+    );
+    // …a leg cannot be nested without clearing its scope…
+    await expectError(
+      updateDeliveryItem(leg.id, { parentItemId: group.id }),
+      "INVALID_INPUT",
+    );
+    // …and a node with children cannot be flagged delivery-wide.
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: group.id,
+      description: "Child charge",
+      costMinor: 10,
+    });
+    await expectError(
+      updateDeliveryItem(group.id, { deliveryWide: true }),
+      "INVALID_INPUT",
+    );
   });
 
   test("rejects nesting a line under a goods leaf", async () => {

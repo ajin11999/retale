@@ -206,6 +206,10 @@ export async function createDeliveryItem(input: {
   costMinor: number;
   /** Expedition this cost node is owed to. Cost nodes (no purchaseItemId) only. */
   vendorId?: string | null;
+  /** Freight leg: spread over the whole delivery's goods. Root cost nodes only. */
+  deliveryWide?: boolean;
+  /** Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide. */
+  appliesToPurchaseId?: string | null;
   sortOrder?: number;
 }): Promise<DeliveryItem> {
   const delivery = await loadDelivery(input.deliveryId);
@@ -229,6 +233,11 @@ export async function createDeliveryItem(input: {
         "cannot nest a line under a goods leaf — only cost nodes can group",
       );
     }
+    // A delivery-wide leg already spreads over everything — nesting items
+    // under it would be meaningless (and confusing for subtree scoping).
+    if (parent.deliveryWide) {
+      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
+    }
   }
   // A leaf points at a purchase line and needs a positive qty; a grouping
   // node has neither.
@@ -250,6 +259,32 @@ export async function createDeliveryItem(input: {
       "a courier (vendorId) is only valid on a cost node, not a goods leaf",
     );
   }
+  // Delivery-wide scope (a freight leg) is a root cost node property only.
+  if (input.deliveryWide) {
+    if (input.purchaseItemId) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "delivery-wide scope is only valid on a cost node, not a goods leaf",
+      );
+    }
+    if (input.parentItemId) {
+      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge must sit at the root");
+    }
+  }
+  if (input.appliesToPurchaseId) {
+    if (!input.deliveryWide) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "a PO scope (appliesToPurchaseId) requires a delivery-wide charge",
+      );
+    }
+    const purchase = await db.query.purchases.findFirst({
+      where: eq(purchases.id, input.appliesToPurchaseId),
+    });
+    if (!purchase) {
+      throw new DeliveryError("INVALID_INPUT", "appliesToPurchaseId: purchase not found");
+    }
+  }
 
   const id = ulid();
   await db.transaction(async (tx) => {
@@ -259,6 +294,8 @@ export async function createDeliveryItem(input: {
       parentItemId: input.parentItemId ?? null,
       purchaseItemId: input.purchaseItemId ?? null,
       vendorId: input.purchaseItemId ? null : (input.vendorId ?? null),
+      deliveryWide: input.deliveryWide ?? false,
+      appliesToPurchaseId: input.deliveryWide ? (input.appliesToPurchaseId ?? null) : null,
       description: input.description.trim(),
       qty: input.purchaseItemId ? (input.qty as number) : null,
       costMinor: input.costMinor,
@@ -277,6 +314,10 @@ export async function updateDeliveryItem(
     qty?: number | null;
     costMinor?: number;
     vendorId?: string | null;
+    /** Freight leg: spread over the whole delivery's goods. Root cost nodes only. */
+    deliveryWide?: boolean;
+    /** Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide. */
+    appliesToPurchaseId?: string | null;
     sortOrder?: number;
     /** Reparent this node: a cost node to group under, or null for the root. */
     parentItemId?: string | null;
@@ -301,6 +342,9 @@ export async function updateDeliveryItem(
         "INVALID_INPUT",
         "cannot nest a line under a goods leaf — only cost nodes can group",
       );
+    }
+    if (parent.deliveryWide) {
+      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
     }
     const all = await listDeliveryItems(item.deliveryId);
     const subtree = new Set<string>([id]);
@@ -342,6 +386,50 @@ export async function updateDeliveryItem(
     );
   }
 
+  // Delivery-wide / PO-scope guards, evaluated against the post-patch state so
+  // a single update cannot leave an invalid combination behind.
+  const effWide = patch.deliveryWide ?? item.deliveryWide;
+  const effParent =
+    patch.parentItemId !== undefined ? patch.parentItemId : item.parentItemId;
+  const effScope =
+    patch.appliesToPurchaseId !== undefined
+      ? patch.appliesToPurchaseId
+      : item.appliesToPurchaseId;
+  if (effWide) {
+    if (item.purchaseItemId) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "delivery-wide scope is only valid on a cost node, not a goods leaf",
+      );
+    }
+    if (effParent != null) {
+      throw new DeliveryError(
+        "INVALID_INPUT",
+        "clear delivery-wide scope before nesting this charge",
+      );
+    }
+    const child = await db.query.purchaseDeliveryItems.findFirst({
+      where: eq(purchaseDeliveryItems.parentItemId, id),
+    });
+    if (child) {
+      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
+    }
+  }
+  if (effScope != null && !effWide) {
+    throw new DeliveryError(
+      "INVALID_INPUT",
+      "a PO scope (appliesToPurchaseId) requires a delivery-wide charge",
+    );
+  }
+  if (patch.appliesToPurchaseId != null) {
+    const purchase = await db.query.purchases.findFirst({
+      where: eq(purchases.id, patch.appliesToPurchaseId),
+    });
+    if (!purchase) {
+      throw new DeliveryError("INVALID_INPUT", "appliesToPurchaseId: purchase not found");
+    }
+  }
+
   await db.transaction(async (tx) => {
     await tx
       .update(purchaseDeliveryItems)
@@ -350,6 +438,10 @@ export async function updateDeliveryItem(
         ...(patch.qty !== undefined && { qty: patch.qty }),
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
         ...(patch.vendorId !== undefined && { vendorId: patch.vendorId }),
+        ...(patch.deliveryWide !== undefined && { deliveryWide: patch.deliveryWide }),
+        ...(patch.appliesToPurchaseId !== undefined && {
+          appliesToPurchaseId: patch.appliesToPurchaseId,
+        }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
         ...(patch.parentItemId !== undefined && { parentItemId: patch.parentItemId }),
       })
@@ -479,10 +571,14 @@ function leafQtyByPurchaseItem(leaves: DeliveryItem[]): Map<string, number> {
  * Scope follows the cost tree strictly. A cost node's cost spreads only over the
  * stock leaves **in its own subtree** — so nesting goods under a "Carton freight"
  * node confines that charge to those goods (the carton's Rp40k over its 24
- * bottles); to spread a charge over the whole delivery, nest all the goods under
- * it. A leaf nested under several cost nodes carries each one's share. A cost
- * node with **no** goods in its subtree applies to nothing — its charge is not
- * capitalized into any stock (goods left outside a cost line carry no freight).
+ * bottles). A leaf nested under several cost nodes carries each one's share.
+ *
+ * The one exception is an explicit **delivery-wide** node (a freight leg,
+ * `deliveryWide = true`): it spreads over every stock leaf of the delivery —
+ * or only one purchase's leaves when `appliesToPurchaseId` narrows it (multi-PO
+ * deliveries where an expedition invoices per PO). Never inferred: an unflagged
+ * cost node with no goods in its subtree still applies to nothing — its charge
+ * is not capitalized into any stock (the console warns before commit).
  *
  * Non-stock leaves (`variantId` null) are excluded everywhere — freight
  * capitalizes into goods of resale only (design-decisions.md → landed cost).
@@ -549,9 +645,18 @@ function allocateFreightByValue(
 
   for (const node of items) {
     if (node.purchaseItemId != null || node.costMinor <= 0) continue;
-    // Strict subtree scope: a charge with no goods nested under it applies to
-    // nothing (spread is a no-op on an empty target set).
-    spread(node.costMinor, subtreeStockLeaves(node.id));
+    // A delivery-wide leg spreads over all stock leaves (or one PO's); anything
+    // else keeps strict subtree scope — a charge with no goods nested under it
+    // applies to nothing (spread is a no-op on an empty target set).
+    const targets = node.deliveryWide
+      ? node.appliesToPurchaseId
+        ? stockLeaves.filter(
+            (l) =>
+              lines.get(l.purchaseItemId as string)?.purchaseId === node.appliesToPurchaseId,
+          )
+        : stockLeaves
+      : subtreeStockLeaves(node.id);
+    spread(node.costMinor, targets);
   }
   return out;
 }

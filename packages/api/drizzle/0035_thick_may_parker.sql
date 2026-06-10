@@ -1,0 +1,3 @@
+ALTER TABLE `purchase_delivery_items` ADD `delivery_wide` boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE `purchase_delivery_items` ADD `applies_to_purchase_id` varchar(26);--> statement-breakpoint
+ALTER TABLE `purchase_delivery_items` ADD CONSTRAINT `pdi_applies_purchase_fk` FOREIGN KEY (`applies_to_purchase_id`) REFERENCES `purchases`(`id`) ON DELETE set null ON UPDATE no action;

@@ -462,6 +462,13 @@
             You can stage counts; a viewer with delivery.commit must commit.
           </p>
         {/if}
+        <p class="text-xs text-muted-foreground">
+          Expedition / freight charges? Add
+          <a href={`/deliveries/${draft.id}`} class="text-primary hover:underline">
+            freight legs in the delivery editor
+          </a>
+          before committing, so they land into the goods' cost.
+        </p>
 
         <!-- Scan row -->
         <form

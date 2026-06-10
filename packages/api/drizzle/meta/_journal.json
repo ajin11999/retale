@@ -246,6 +246,13 @@
       "when": 1780718702952,
       "tag": "0034_good_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1781064029358,
+      "tag": "0035_thick_may_parker",
+      "breakpoints": true
     }
   ]
 }
