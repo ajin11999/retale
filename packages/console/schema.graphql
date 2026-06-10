@@ -1210,6 +1210,11 @@ type PosSession {
 
   """closing − expected drawer cash. Null when force-closed."""
   varianceMinor: Float
+
+  """
+  Cash that should be in the drawer right now: opening float + net cash sales.
+  """
+  expectedCashMinor: Float!
   forceClosed: Boolean!
 
   """Denormalized close-time snapshot, as a JSON string. Null until closed."""

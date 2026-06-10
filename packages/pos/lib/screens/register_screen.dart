@@ -180,6 +180,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _closeShift() async {
+    // Best effort: the dialog still works offline, just without the figure.
+    int? expectedCash;
+    try {
+      final data = await GraphQLService.instance.query(
+        Ops.sessionExpectedCash,
+        variables: {'id': widget.session.id},
+      );
+      final session = data['posSession'] as Map<String, dynamic>?;
+      expectedCash = (session?['expectedCashMinor'] as num?)?.toInt();
+    } on GraphQLAppException {
+      expectedCash = null;
+    }
+    if (!mounted) return;
+    final expected = expectedCash;
     final controller = TextEditingController(text: '0');
     final confirmed = await showDialog<bool>(
       context: context,
@@ -187,7 +201,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
         title: const Text('Close shift'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (expected != null) ...[
+              Text(
+                'Drawer should hold ${Money.format(expected)}',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+            ],
             const Text('Count the cash in the drawer to close the shift.'),
             const SizedBox(height: 12),
             TextField(

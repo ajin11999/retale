@@ -31,6 +31,8 @@ export const typeDefs = /* GraphQL */ `
     closingCashMinor: Float
     "closing − expected drawer cash. Null when force-closed."
     varianceMinor: Float
+    "Cash that should be in the drawer right now: opening float + net cash sales."
+    expectedCashMinor: Float!
     forceClosed: Boolean!
     "Denormalized close-time snapshot, as a JSON string. Null until closed."
     zReportJson: String
@@ -94,6 +96,7 @@ export const resolvers = {
     archivedAt: (p: { archivedAt: Date | string | null }) => iso(p.archivedAt),
   },
   PosSession: {
+    expectedCashMinor: (s: { id: string }) => pos.expectedCashMinor(s.id),
     openedAt: (s: { openedAt: Date | string }) => iso(s.openedAt),
     closedAt: (s: { closedAt: Date | string | null }) => iso(s.closedAt),
     createdAt: (s: { createdAt: Date | string }) => iso(s.createdAt),

@@ -38,6 +38,7 @@ type Session = typeof posSessions.$inferSelect;
 
 /** A drizzle transaction handle; structurally a subset of `db`. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Exec = typeof db | Tx;
 
 /** Reopen is allowed only within this window after close. */
 const REOPEN_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -241,7 +242,7 @@ interface SessionTotals {
  * vendor cash payments are not folded in (design-decisions.md §"POS sessions"
  * states the variance formula over order cash only).
  */
-async function sessionTotals(tx: Tx, sessionId: string): Promise<SessionTotals> {
+async function sessionTotals(tx: Exec, sessionId: string): Promise<SessionTotals> {
   const payRows = await tx
     .select({ amt: orderPayments.amountMinor })
     .from(orderPayments)
@@ -271,6 +272,17 @@ async function sessionTotals(tx: Tx, sessionId: string): Promise<SessionTotals> 
   }
 
   return { cashSalesMinor, orderCount, returnCount, voidedItemCount };
+}
+
+/**
+ * Cash that should be in the drawer right now: opening float + net cash
+ * through orders. The same figure `closeSession` uses for the variance —
+ * exposed so the close-shift dialog can show it before the count.
+ */
+export async function expectedCashMinor(sessionId: string): Promise<number> {
+  const session = await loadSession(sessionId);
+  const totals = await sessionTotals(db, sessionId);
+  return session.openingCashMinor + totals.cashSalesMinor;
 }
 
 /** Denormalized close-time snapshot stored in `z_report_json`. */

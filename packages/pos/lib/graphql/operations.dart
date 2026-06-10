@@ -74,6 +74,16 @@ class Ops {
     }
   ''';
 
+  /// Expected drawer cash (opening float + net cash sales), shown in the
+  /// close-shift dialog so the clerk can compare it to their count.
+  static const sessionExpectedCash = '''
+    query SessionExpectedCash(\$id: ID!) {
+      posSession(id: \$id) {
+        id expectedCashMinor
+      }
+    }
+  ''';
+
   static const closeSession = '''
     mutation CloseSession(\$id: ID!, \$closingCashMinor: Float!) {
       closeSession(id: \$id, closingCashMinor: \$closingCashMinor) {
