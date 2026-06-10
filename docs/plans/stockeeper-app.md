@@ -1,8 +1,8 @@
 # Plan: Retale Stockeeper — Android Flutter app (packages/stockeeper)
 
-**Status:** approved design, implementation deferred (no Android toolchain on the main dev
-machine — build on the other PC). **Zero API changes needed**; everything below already
-exists in `packages/api`.
+**Status:** implemented (commit `400434b`) — analyze/tests/API smoke/release APK all pass.
+Remaining: on-phone verification (§8.3). **Zero API changes were needed**; everything
+below already existed in `packages/api`.
 
 ## Context
 
