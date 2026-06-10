@@ -1,6 +1,6 @@
 import { fail, redirect } from "@sveltejs/kit";
-import type { Cookies } from "@sveltejs/kit";
 import { gqlRequest } from "$lib/server/graphql";
+import { storeSession, type SessionTokens } from "$lib/server/session";
 import type { Actions, PageServerLoad } from "./$types";
 
 const LOGIN = /* GraphQL */ `
@@ -11,6 +11,7 @@ const LOGIN = /* GraphQL */ `
       auth {
         accessToken
         refreshToken
+        refreshExpiresAt
       }
     }
   }
@@ -21,6 +22,7 @@ const LOGIN_2FA = /* GraphQL */ `
     loginTwoFactor(challengeToken: $t, code: $c) {
       accessToken
       refreshToken
+      refreshExpiresAt
     }
   }
 `;
@@ -29,29 +31,12 @@ interface LoginData {
   login: {
     requiresTwoFactor: boolean;
     challengeToken: string | null;
-    auth: { accessToken: string; refreshToken: string } | null;
+    auth: SessionTokens | null;
   };
 }
 
 interface TwoFactorData {
-  loginTwoFactor: { accessToken: string; refreshToken: string };
-}
-
-// One year — the API issues 365-day access tokens (see CLAUDE.md auth model).
-const COOKIE = {
-  path: "/",
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: false, // LAN-only; flip to true behind HTTPS
-  maxAge: 60 * 60 * 24 * 365,
-};
-
-function storeSession(
-  cookies: Cookies,
-  tokens: { accessToken: string; refreshToken: string },
-): void {
-  cookies.set("access_token", tokens.accessToken, COOKIE);
-  cookies.set("refresh_token", tokens.refreshToken, COOKIE);
+  loginTwoFactor: SessionTokens;
 }
 
 const errorText = (e: unknown) =>

@@ -150,9 +150,15 @@ No custom envelope middleware needed. GraphQL spec provides:
 
 ## Auth Model
 
-- JWT HS512, 365-day expiration
-- Claims in token: `jti` (userId), `sub` (username), `name`, `role` (multiple)
-- Roles: `root`, `clerk`
+- Access tokens: JWT HS512, **60-minute** expiration (`packages/api/src/lib/jwt.ts`).
+  Claims: `sub` (userId), `isRoot`, `roleIds`. Do NOT lengthen the TTL — clients
+  renew via refresh tokens.
+- Refresh tokens: opaque rotating tokens (`{sessionId}.{secret}`, argon2-hashed),
+  30-day expiry, stored in the `sessions` table. Rotation reuse is treated as
+  theft and revokes the session — clients must single-flight their refreshes.
+- Clients refresh via the `refreshToken` GraphQL mutation: the POS in
+  `auth_service.dart`, the console server-side in `$lib/server/session.ts`
+  (hooks.server.ts refreshes near-expiry tokens on every SSR request).
 - Bootstrap: create first user (auto-assigns root) when users table is empty
 - Secret: env var `JWT_SIGNING_KEY`
 

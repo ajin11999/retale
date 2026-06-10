@@ -1,10 +1,12 @@
 import { setSession } from "$houdini";
 import type { Handle } from "@sveltejs/kit";
+import { ensureFreshSession } from "$lib/server/session";
 
-// Lift the access-token cookie into the Houdini session so server-side
-// (SSR) GraphQL requests are authenticated.
+// Authenticate every SSR request: rotate the access token if it is at/near
+// expiry (the API issues 60-minute tokens), then lift it into the Houdini
+// session so server-side GraphQL requests carry it.
 export const handle: Handle = async ({ event, resolve }) => {
-  const token = event.cookies.get("access_token");
+  const token = await ensureFreshSession(event.cookies);
   if (token) setSession(event, { token });
   return resolve(event);
 };

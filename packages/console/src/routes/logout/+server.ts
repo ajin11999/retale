@@ -1,5 +1,6 @@
 import { redirect } from "@sveltejs/kit";
 import { gqlRequest } from "$lib/server/graphql";
+import { clearSession } from "$lib/server/session";
 import type { RequestHandler } from "./$types";
 
 const LOGOUT = /* GraphQL */ `
@@ -18,7 +19,6 @@ export const POST: RequestHandler = async ({ cookies }) => {
       /* ignore */
     }
   }
-  cookies.delete("access_token", { path: "/" });
-  cookies.delete("refresh_token", { path: "/" });
+  clearSession(cookies);
   redirect(303, "/login");
 };
