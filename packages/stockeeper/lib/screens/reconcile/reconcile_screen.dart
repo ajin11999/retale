@@ -1,0 +1,600 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+
+import '../../graphql/graphql_service.dart';
+import '../../graphql/operations.dart';
+import '../../models/models.dart';
+import '../../widgets/common.dart';
+import '../../widgets/scan_sheet.dart';
+import '../count_screen.dart';
+
+/// Count what is physically at one location. Counts stay local in
+/// [_counted] (presence = touched) until staff apply them in the review
+/// sheet; only touched lines are sent, so partial / spot counts are safe —
+/// untouched stock is never adjusted.
+class ReconcileScreen extends StatefulWidget {
+  const ReconcileScreen({super.key, required this.location});
+
+  final LocationNode location;
+
+  @override
+  State<ReconcileScreen> createState() => _ReconcileScreenState();
+}
+
+class _ReconcileScreenState extends State<ReconcileScreen> {
+  List<StockLevel>? _rows;
+  Object? _loadError;
+
+  /// variantId -> counted qty. Presence means the line was touched.
+  final _counted = <String, num>{};
+
+  final _scanField = TextEditingController();
+  final _searchField = TextEditingController();
+  final _qtyControllers = <String, TextEditingController>{};
+  String _search = '';
+  String? _lastScanHitId;
+  bool _applying = false;
+
+  final _checklistKeys = <String, GlobalKey>{};
+  final _byProductKeys = <String, GlobalKey>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _scanField.dispose();
+    _searchField.dispose();
+    for (final c in _qtyControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  String _fmt(num v) =>
+      v == v.truncate() ? v.toInt().toString() : v.toString();
+
+  Future<void> _load() async {
+    setState(() {
+      _rows = null;
+      _loadError = null;
+    });
+    try {
+      final data = await GraphQLService.instance.query(Ops.locationStockLevels,
+          variables: {'locationId': widget.location.id});
+      if (!mounted) return;
+      setState(() {
+        _rows = (data['locationStockLevels'] as List<dynamic>)
+            .map((r) => StockLevel.fromJson(r as Map<String, dynamic>))
+            .toList();
+      });
+    } catch (e) {
+      if (mounted) setState(() => _loadError = e);
+    }
+  }
+
+  // ── Local count bookkeeping ──────────────────────────────────────────────
+
+  void _setCount(StockLevel row, num qty) {
+    setState(() {
+      _counted[row.variantId] = qty;
+      _syncController(row);
+    });
+  }
+
+  void _clearCount(StockLevel row) {
+    setState(() {
+      _counted.remove(row.variantId);
+      _syncController(row);
+    });
+  }
+
+  void _syncController(StockLevel row) {
+    final c = _qtyControllers[row.variantId];
+    if (c == null) return;
+    final counted = _counted[row.variantId];
+    final text = counted == null ? '' : _fmt(counted);
+    if (c.text != text) c.text = text;
+  }
+
+  TextEditingController _controllerFor(StockLevel row) =>
+      _qtyControllers.putIfAbsent(row.variantId, () {
+        final counted = _counted[row.variantId];
+        final c =
+            TextEditingController(text: counted == null ? '' : _fmt(counted));
+        c.addListener(() {
+          final text = c.text.trim();
+          if (text.isEmpty) {
+            if (_counted.containsKey(row.variantId)) {
+              setState(() => _counted.remove(row.variantId));
+            }
+            return;
+          }
+          final qty = num.tryParse(text);
+          if (qty != null && _counted[row.variantId] != qty) {
+            setState(() => _counted[row.variantId] = qty);
+          }
+        });
+        return c;
+      });
+
+  List<TextInputFormatter> _qtyFormatters(StockLevel row) => [
+        if (row.qtyDecimals == 0)
+          FilteringTextInputFormatter.digitsOnly
+        else
+          FilteringTextInputFormatter.allow(
+              RegExp('^\\d*\\.?\\d{0,${row.qtyDecimals}}\$')),
+      ];
+
+  // ── Scanning (pure client-side over the loaded rows) ─────────────────────
+
+  Future<void> _handleCode(String code) async {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) return;
+    _scanField.clear();
+    final rows = _rows ?? [];
+    final lower = trimmed.toLowerCase();
+    final matches = rows
+        .where((r) =>
+            (r.barcode != null && r.barcode!.toLowerCase() == lower) ||
+            r.sku.toLowerCase() == lower)
+        .toList();
+    if (matches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Nothing at this location matches "$trimmed"')));
+      return;
+    }
+    final row = matches.length == 1 ? matches.first : await _pickRow(matches);
+    if (row == null || !mounted) return;
+    _setCount(row, (_counted[row.variantId] ?? 0) + 1);
+    setState(() => _lastScanHitId = row.variantId);
+    _revealRow(row.variantId);
+  }
+
+  Future<StockLevel?> _pickRow(List<StockLevel> matches) {
+    return showDialog<StockLevel>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Several items match — which one?'),
+        children: [
+          for (final row in matches)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, row),
+              child: Text(
+                '${row.displayName}\nsystem ${_fmt(row.onHand)}',
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _revealRow(String variantId) {
+    final key = _checklistKeys[variantId]?.currentContext != null
+        ? _checklistKeys[variantId]
+        : _byProductKeys[variantId];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 300), alignment: 0.3);
+    }
+  }
+
+  Future<void> _openCamera() async {
+    final code = await showScanSheet(context);
+    if (code != null && mounted) await _handleCode(code);
+  }
+
+  // ── Review & apply ───────────────────────────────────────────────────────
+
+  Future<void> _openReview() async {
+    final rows = _rows;
+    if (rows == null || _counted.isEmpty) return;
+    final touched =
+        rows.where((r) => _counted.containsKey(r.variantId)).toList();
+    final reason = TextEditingController(
+        text: 'Stockeeper count ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+          child: _ReviewSheet(
+            touched: touched,
+            counted: _counted,
+            reason: reason,
+            fmt: _fmt,
+            onApply: () => _apply(sheetContext, reason.text.trim()),
+          ),
+        ),
+      );
+    } finally {
+      reason.dispose();
+    }
+  }
+
+  Future<void> _apply(BuildContext sheetContext, String reason) async {
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('A reason is required')));
+      return;
+    }
+    if (_applying) return;
+    setState(() => _applying = true);
+    try {
+      final lines = _counted.entries
+          .map((e) => {'variantId': e.key, 'countedQty': e.value})
+          .toList();
+      final data =
+          await GraphQLService.instance.mutate(Ops.bulkAdjustStock, variables: {
+        'locationId': widget.location.id,
+        'reason': reason,
+        'lines': lines,
+      });
+      if (!mounted) return;
+      final n = data['bulkAdjustStock'] as int;
+      if (sheetContext.mounted) Navigator.pop(sheetContext);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(n == 0
+              ? 'All counted lines already matched — nothing adjusted'
+              : 'Adjusted $n line${n == 1 ? '' : 's'}')));
+      setState(() {
+        _counted.clear();
+        for (final c in _qtyControllers.values) {
+          c.clear();
+        }
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(describeError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _applying = false);
+    }
+  }
+
+  Future<void> _confirmLeave(bool didPop) async {
+    if (didPop) return;
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Discard this count?'),
+        content: Text('${_counted.length} counted '
+            'line${_counted.length == 1 ? '' : 's'} have not been applied.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep counting'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    if (leave == true && mounted) Navigator.of(context).pop();
+  }
+
+  // ── UI ───────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: _counted.isEmpty,
+      onPopInvokedWithResult: (didPop, _) => _confirmLeave(didPop),
+      child: DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text('Count: ${widget.location.name}'),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(164),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _scanField,
+                            autocorrect: false,
+                            textInputAction: TextInputAction.done,
+                            decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.qr_code_scanner),
+                              hintText: 'Scan or type a code',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onSubmitted: _handleCode,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton.filledTonal(
+                          tooltip: 'Scan with camera',
+                          icon: const Icon(Icons.photo_camera),
+                          onPressed: _openCamera,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: TextField(
+                      controller: _searchField,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Filter products',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setState(() => _search = v),
+                    ),
+                  ),
+                  const TabBar(tabs: [
+                    Tab(text: 'Checklist'),
+                    Tab(text: 'By product'),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+          body: _buildBody(),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: FilledButton(
+                onPressed:
+                    _counted.isEmpty || _applying ? null : _openReview,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 18),
+                ),
+                child: Text(_counted.isEmpty
+                    ? 'Nothing counted yet'
+                    : 'Review ${_counted.length} counted '
+                        'line${_counted.length == 1 ? '' : 's'}'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<StockLevel> _visibleRows() {
+    final rows = _rows ?? [];
+    final query = _search.trim().toLowerCase();
+    if (query.isEmpty) return rows;
+    return rows
+        .where((r) =>
+            r.displayName.toLowerCase().contains(query) ||
+            (r.barcode ?? '').toLowerCase().contains(query))
+        .toList();
+  }
+
+  Widget _buildBody() {
+    if (_loadError != null) {
+      return ErrorRetry(message: describeError(_loadError!), onRetry: _load);
+    }
+    if (_rows == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_rows!.isEmpty) {
+      return const Center(
+          child: Text('No stock has ever been at this location.'));
+    }
+    final visible = _visibleRows();
+    if (visible.isEmpty) {
+      return const Center(child: Text('No matching product'));
+    }
+    return TabBarView(
+      children: [
+        _buildChecklist(visible),
+        _buildByProduct(visible),
+      ],
+    );
+  }
+
+  Widget _buildChecklist(List<StockLevel> rows) {
+    return ListView.separated(
+      itemCount: rows.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final row = rows[i];
+        final key =
+            _checklistKeys.putIfAbsent(row.variantId, () => GlobalKey());
+        final counted = _counted[row.variantId];
+        final confirmed = counted != null && counted == row.onHand;
+        final partial = counted != null && !confirmed;
+        return ListTile(
+          key: key,
+          minTileHeight: 72,
+          selected: _lastScanHitId == row.variantId,
+          selectedTileColor:
+              Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
+          leading: Checkbox(
+            tristate: true,
+            value: confirmed ? true : (partial ? null : false),
+            onChanged: (_) =>
+                confirmed ? _clearCount(row) : _setCount(row, row.onHand),
+          ),
+          title: Text(row.displayName, style: const TextStyle(fontSize: 18)),
+          subtitle: Text(counted == null
+              ? 'system ${_fmt(row.onHand)} · not counted'
+              : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
+          trailing: SizedBox(
+            width: 72,
+            child: TextField(
+              controller: _controllerFor(row),
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.numberWithOptions(
+                  decimal: row.qtyDecimals > 0),
+              inputFormatters: _qtyFormatters(row),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+                hintText: '—',
+              ),
+            ),
+          ),
+          onTap: () =>
+              confirmed ? _clearCount(row) : _setCount(row, row.onHand),
+        );
+      },
+    );
+  }
+
+  Widget _buildByProduct(List<StockLevel> rows) {
+    return ListView.separated(
+      itemCount: rows.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final row = rows[i];
+        final key =
+            _byProductKeys.putIfAbsent(row.variantId, () => GlobalKey());
+        final counted = _counted[row.variantId];
+        final over = counted != null && counted > row.onHand;
+        return ListTile(
+          key: key,
+          minTileHeight: 72,
+          selected: _lastScanHitId == row.variantId,
+          selectedTileColor:
+              Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
+          title: Text(row.displayName, style: const TextStyle(fontSize: 18)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(counted == null
+                  ? 'system ${_fmt(row.onHand)} · not counted'
+                  : 'counted ${_fmt(counted)} of ${_fmt(row.onHand)}'),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: row.onHand <= 0
+                    ? (counted == null || counted == 0 ? 0 : 1)
+                    : ((counted ?? 0) / row.onHand).clamp(0.0, 1.0),
+                minHeight: 6,
+                color: over ? Colors.amber.shade800 : null,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ],
+          ),
+          trailing: const Icon(Icons.add),
+          onTap: () => _openCounter(row),
+        );
+      },
+    );
+  }
+
+  Future<void> _openCounter(StockLevel row) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => CountScreen(
+        target: CountTarget(
+          title: row.displayName,
+          expected: row.onHand,
+          initial: _counted[row.variantId] ?? 0,
+          allowOverage: true,
+          qtyDecimals: row.qtyDecimals,
+          onSet: (qty) async => _counted[row.variantId] = qty,
+        ),
+      ),
+    ));
+    if (mounted) setState(() => _syncController(row));
+  }
+}
+
+/// Touched rows with system → counted deltas, the required reason, and Apply.
+class _ReviewSheet extends StatelessWidget {
+  const _ReviewSheet({
+    required this.touched,
+    required this.counted,
+    required this.reason,
+    required this.fmt,
+    required this.onApply,
+  });
+
+  final List<StockLevel> touched;
+  final Map<String, num> counted;
+  final TextEditingController reason;
+  final String Function(num) fmt;
+  final Future<void> Function() onApply;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Apply ${touched.length} counted '
+                'line${touched.length == 1 ? '' : 's'}',
+                style: const TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: touched.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final row = touched[i];
+                  final qty = counted[row.variantId]!;
+                  final delta = qty - row.onHand;
+                  final color = delta == 0
+                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      : delta > 0
+                          ? Colors.green.shade700
+                          : Colors.red.shade700;
+                  return ListTile(
+                    dense: true,
+                    title: Text(row.displayName),
+                    trailing: Text(
+                      delta == 0
+                          ? '${fmt(qty)} ✓'
+                          : '${fmt(row.onHand)} → ${fmt(qty)} '
+                              '(${delta > 0 ? '+' : ''}${fmt(delta)})',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: color),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reason,
+              decoration: const InputDecoration(
+                labelText: 'Reason (required)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: onApply,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+              child: const Text('Apply adjustments'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

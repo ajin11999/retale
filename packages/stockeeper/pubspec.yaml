@@ -1,0 +1,38 @@
+name: retale_stockeeper
+description: "Retale Stockeeper — warehouse receiving and stock reconcile for the Retale GraphQL API."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # GraphQL client (same choice as the POS app).
+  graphql_flutter: ^5.2.0
+
+  # Local config + token storage.
+  shared_preferences: ^2.5.2
+  flutter_secure_storage: ^9.2.2
+
+  # Decode JWT exp claim for proactive token refresh.
+  jwt_decoder: ^2.0.1
+
+  # Camera barcode scanning (scan-field input needs no plugin).
+  mobile_scanner: ^6.0.2
+
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
