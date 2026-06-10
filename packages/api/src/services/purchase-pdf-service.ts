@@ -40,6 +40,19 @@ const TABLE_BOX = { x: 11.82, y: 85.39, w: 187.44, h: 142.86 }; // mm
 const RIGHT_EDGE = TABLE_BOX.x + TABLE_BOX.w; // 199.26mm — page content right edge
 
 /**
+ * The table box on continuation pages. There is no letterhead to clear, so the
+ * table starts at a plain top margin; the bottom edge matches page 1's so the
+ * total band and footer land at the same height regardless of which page the
+ * table ends on.
+ */
+const CONT_TABLE_BOX = {
+  x: TABLE_BOX.x,
+  y: 15,
+  w: TABLE_BOX.w,
+  h: TABLE_BOX.y + TABLE_BOX.h - 15,
+}; // mm
+
+/**
  * Table column geometry (mm). With prices: No / Item / Qty / Unit Cost /
  * Amount. Without prices: No / Item / Qty only — Qty moves to the right edge
  * and Item fills the freed space. `unitRight` / `amountRight` are null when
@@ -376,8 +389,8 @@ export async function renderPurchaseOrderPdf(
 
   // -- Items table --
   // Column rules first, so the black frame and row rules cross on top of them.
-  drawColumnRules(page, cols);
-  drawTableFrameAndHeader(page, cols, { font, bold, text, textRight, rect, hline });
+  drawColumnRules(page, cols, TABLE_BOX);
+  drawTableFrameAndHeader(page, cols, TABLE_BOX, { font, bold, text, textRight, rect, hline });
 
   // Cursor for body rows; first row sits below the header band.
   let rowTop = TABLE_BOX.y + HEADER_ROW_H; // mm, top of current row
@@ -493,6 +506,7 @@ export async function renderPurchaseOrderPdf(
 function drawTableFrameAndHeader(
   page: PDFPage,
   cols: Cols,
+  box: { x: number; y: number; w: number; h: number },
   helpers: {
     font: PDFFont;
     bold: PDFFont;
@@ -503,8 +517,8 @@ function drawTableFrameAndHeader(
   },
 ): void {
   const { bold, text, textRight, rect, hline } = helpers;
-  rect(TABLE_BOX, 0.75);
-  const hy = TABLE_BOX.y + 5.4;
+  rect(box, 0.75);
+  const hy = box.y + 5.4;
   text(cols.no + PAD, hy, "No", SIZE_TH, bold);
   text(cols.item + PAD, hy, "Item", SIZE_TH, bold);
   textRight(cols.qtyRight - PAD, hy, "Qty", SIZE_TH, bold);
@@ -512,7 +526,7 @@ function drawTableFrameAndHeader(
     textRight(cols.unitRight - PAD, hy, "Unit Cost", SIZE_TH, bold);
     textRight(cols.amountRight - PAD, hy, "Amount", SIZE_TH, bold);
   }
-  hline(TABLE_BOX.x, RIGHT_EDGE, TABLE_BOX.y + HEADER_ROW_H, 0.75);
+  hline(box.x, RIGHT_EDGE, box.y + HEADER_ROW_H, 0.75);
 }
 
 /**
@@ -570,9 +584,13 @@ function columnDividers(cols: Cols): number[] {
  * BEFORE the frame and rows so the black box border and horizontal rules cross
  * on top; the zebra stripes are translucent, so the rules show through them.
  */
-function drawColumnRules(page: PDFPage, cols: Cols): void {
-  const top = TABLE_BOX.y;
-  const bottom = TABLE_BOX.y + TABLE_BOX.h;
+function drawColumnRules(
+  page: PDFPage,
+  cols: Cols,
+  box: { x: number; y: number; w: number; h: number },
+): void {
+  const top = box.y;
+  const bottom = box.y + box.h;
   for (const xMm of columnDividers(cols)) {
     page.drawLine({
       start: { x: xMm * MM, y: PAGE_H - top * MM },
@@ -644,7 +662,7 @@ function newTablePage(
     });
   };
   // Column rules first, so the black frame and row rules cross on top of them.
-  drawColumnRules(page, cols);
-  drawTableFrameAndHeader(page, cols, { font, bold, text, textRight, rect, hline });
-  return { page, rowTop: TABLE_BOX.y + HEADER_ROW_H };
+  drawColumnRules(page, cols, CONT_TABLE_BOX);
+  drawTableFrameAndHeader(page, cols, CONT_TABLE_BOX, { font, bold, text, textRight, rect, hline });
+  return { page, rowTop: CONT_TABLE_BOX.y + HEADER_ROW_H };
 }
