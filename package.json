@@ -8,6 +8,7 @@
     "dev:console": "bun run --filter @retale/console dev",
     "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy offline-first",
     "test": "bun test",
+    "icons": "bun scripts/generate-icons.ts",
     "typecheck": "bun run --filter @retale/api typecheck",
     "db:generate": "bun run --filter @retale/api db:generate",
     "db:migrate": "bun run --filter @retale/api db:migrate",
@@ -16,5 +17,8 @@
     "schema:dump": "bun run --filter @retale/api schema:dump",
     "dev:seed-user": "bun run --filter @retale/api dev:seed-user",
     "dev:seed-products": "bun run --filter @retale/api dev:seed-products"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

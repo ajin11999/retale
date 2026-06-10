@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "retale",
+      "devDependencies": {
+        "sharp": "^0.34.5",
+      },
     },
     "packages/api": {
       "name": "@retale/api",
