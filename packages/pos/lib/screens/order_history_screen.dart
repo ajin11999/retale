@@ -13,8 +13,10 @@ enum _Scope { thisShift, all }
 
 /// Read-only history of orders, newest first. Defaults to the current shift;
 /// the "All orders" scope reaches every session/clerk so a clerk can find a
-/// sale to return against. Tap an order for its lines, payments and a return
-/// action. Needs the network — past orders are not part of the offline cache.
+/// sale to return against. On wide screens the list and the selected order's
+/// detail sit side by side; on narrow screens tapping an order pushes the
+/// detail as a route. Needs the network — past orders are not part of the
+/// offline cache.
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key, required this.posSessionId});
 
@@ -26,8 +28,18 @@ class OrderHistoryScreen extends StatefulWidget {
 }
 
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
+  /// The split layout kicks in above this width; below it the detail pushes
+  /// as a full-screen route (phones in portrait).
+  static const _wideBreakpoint = 600.0;
+
   _Scope _scope = _Scope.thisShift;
   late Future<List<Map<String, dynamic>>> _future;
+
+  /// The order shown in the right panel (wide layout only).
+  String? _selectedOrderId;
+
+  /// Set per build by the LayoutBuilder; read by the order tiles' onTap.
+  bool _wide = false;
 
   @override
   void initState() {
@@ -52,6 +64,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     if (scope == _scope) return;
     setState(() {
       _scope = scope;
+      _selectedOrderId = null;
       _future = _load();
     });
   }
@@ -60,21 +73,47 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Orders')),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SegmentedButton<_Scope>(
-              segments: const [
-                ButtonSegment(value: _Scope.thisShift, label: Text('This shift')),
-                ButtonSegment(value: _Scope.all, label: Text('All orders')),
-              ],
-              selected: {_scope},
-              onSelectionChanged: (s) => _setScope(s.first),
-            ),
-          ),
-          Expanded(child: _buildList()),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          _wide = constraints.maxWidth > _wideBreakpoint;
+          final listPane = Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: SegmentedButton<_Scope>(
+                  segments: const [
+                    ButtonSegment(
+                        value: _Scope.thisShift, label: Text('This shift')),
+                    ButtonSegment(value: _Scope.all, label: Text('All orders')),
+                  ],
+                  selected: {_scope},
+                  onSelectionChanged: (s) => _setScope(s.first),
+                ),
+              ),
+              Expanded(child: _buildList()),
+            ],
+          );
+          if (!_wide) return listPane;
+          return Row(
+            children: [
+              SizedBox(width: constraints.maxWidth * 0.4, child: listPane),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: _selectedOrderId == null
+                    ? const Center(
+                        child: Text('Select an order to view details'))
+                    : _OrderDetailPanel(
+                        // Recreate the panel (and its fetch) per order.
+                        key: ValueKey(_selectedOrderId),
+                        orderId: _selectedOrderId!,
+                        posSessionId: widget.posSessionId,
+                        embedded: true,
+                        onOrderChanged: _reload,
+                      ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -112,8 +151,14 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 
   Widget _orderTile(Map<String, dynamic> o) {
     final status = o['status'] as String;
+    final id = o['id'] as String;
     return ListTile(
-      title: Text(o['displayNumber'] as String? ?? o['id'] as String),
+      selected: _wide && _selectedOrderId == id,
+      selectedTileColor: Theme.of(context)
+          .colorScheme
+          .primaryContainer
+          .withValues(alpha: 0.3),
+      title: Text(o['displayNumber'] as String? ?? id),
       subtitle: Text(_formatTime(o['createdAt'] as String?)),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -131,9 +176,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         ],
       ),
       onTap: () async {
+        if (_wide) {
+          setState(() => _selectedOrderId = id);
+          return;
+        }
         await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => _OrderDetailScreen(
-            orderId: o['id'] as String,
+            orderId: id,
             posSessionId: widget.posSessionId,
           ),
         ));
@@ -144,19 +193,53 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 }
 
-/// Lines + payments for one past order, with a return action.
-class _OrderDetailScreen extends StatefulWidget {
+/// Route wrapper for narrow screens: the detail panel behind its own AppBar.
+class _OrderDetailScreen extends StatelessWidget {
   const _OrderDetailScreen({required this.orderId, required this.posSessionId});
 
   final String orderId;
   final String posSessionId;
 
   @override
-  State<_OrderDetailScreen> createState() => _OrderDetailScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Order')),
+      body: _OrderDetailPanel(
+        orderId: orderId,
+        posSessionId: posSessionId,
+        embedded: false,
+      ),
+    );
+  }
 }
 
-class _OrderDetailScreenState extends State<_OrderDetailScreen> {
+/// Lines + payments for one past order, with print / WhatsApp / return
+/// actions. `embedded` (the wide split layout) keeps the return flow inside
+/// this panel instead of pushing a route, and reports order-changing actions
+/// through [onOrderChanged] so the surrounding list can refresh.
+class _OrderDetailPanel extends StatefulWidget {
+  const _OrderDetailPanel({
+    super.key,
+    required this.orderId,
+    required this.posSessionId,
+    required this.embedded,
+    this.onOrderChanged,
+  });
+
+  final String orderId;
+  final String posSessionId;
+  final bool embedded;
+  final VoidCallback? onOrderChanged;
+
+  @override
+  State<_OrderDetailPanel> createState() => _OrderDetailPanelState();
+}
+
+class _OrderDetailPanelState extends State<_OrderDetailPanel> {
   late Future<Map<String, dynamic>> _future;
+
+  /// Non-null while the embedded return flow replaces the detail view.
+  List<Map<String, dynamic>>? _returnItems;
 
   @override
   void initState() {
@@ -178,11 +261,22 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
   bool _returnable(Map<String, dynamic> o) =>
       o['status'] == 'closed' && o['returnOfOrderId'] == null;
 
+  void _returnRecorded() {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Return recorded')));
+    _reload();
+    widget.onOrderChanged?.call();
+  }
+
   Future<void> _startReturn(Map<String, dynamic> o) async {
     final items = (o['items'] as List<dynamic>)
         .cast<Map<String, dynamic>>()
         .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
         .toList();
+    if (widget.embedded) {
+      setState(() => _returnItems = items);
+      return;
+    }
     final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
       builder: (_) => ReturnScreen(
         originalOrderId: widget.orderId,
@@ -190,11 +284,7 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
         items: items,
       ),
     ));
-    if (done == true && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Return recorded')));
-      _reload();
-    }
+    if (done == true && mounted) _returnRecorded();
   }
 
   /// Build a receipt from this order and offer to WhatsApp it. Prefills the
@@ -219,9 +309,19 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Order')),
-      body: FutureBuilder<Map<String, dynamic>>(
+    final returnItems = _returnItems;
+    if (returnItems != null) {
+      return ReturnScreen(
+        originalOrderId: widget.orderId,
+        posSessionId: widget.posSessionId,
+        items: returnItems,
+        onClose: (done) {
+          setState(() => _returnItems = null);
+          if (done) _returnRecorded();
+        },
+      );
+    }
+    return FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -301,9 +401,7 @@ class _OrderDetailScreenState extends State<_OrderDetailScreen> {
               ),
             ],
           );
-        },
-      ),
-    );
+        });
   }
 
   Widget _itemTile(Map<String, dynamic> it) {
@@ -339,12 +437,19 @@ class ReturnScreen extends StatefulWidget {
     required this.posSessionId,
     required this.items,
     this.prefillByVariantId,
+    this.onClose,
   });
 
   final String originalOrderId;
   final String posSessionId;
   final List<Map<String, dynamic>> items;
   final Map<String, int>? prefillByVariantId;
+
+  /// When set, the screen is embedded in a panel rather than pushed as a
+  /// route: finishing or dismissing calls this (`true` = return recorded)
+  /// instead of popping the navigator, and the app bar shows a close button
+  /// in place of the implied back arrow.
+  final void Function(bool done)? onClose;
 
   @override
   State<ReturnScreen> createState() => _ReturnScreenState();
@@ -405,7 +510,14 @@ class _ReturnScreenState extends State<ReturnScreen> {
         'items': items,
         'refundMethod': _refundMethod,
       });
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) {
+        final onClose = widget.onClose;
+        if (onClose != null) {
+          onClose(true);
+        } else {
+          Navigator.pop(context, true);
+        }
+      }
     } on GraphQLAppException catch (e) {
       setState(() => _error = e.message);
     } finally {
@@ -415,8 +527,19 @@ class _ReturnScreenState extends State<ReturnScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final onClose = widget.onClose;
     return Scaffold(
-      appBar: AppBar(title: const Text('Return items')),
+      appBar: AppBar(
+        title: const Text('Return items'),
+        automaticallyImplyLeading: onClose == null,
+        leading: onClose == null
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Back to order',
+                onPressed: () => onClose(false),
+              ),
+      ),
       body: Column(
         children: [
           Expanded(
