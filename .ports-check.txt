@@ -1,7 +1,0 @@
-﻿
-  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       18664
-  TCP    0.0.0.0:5173           0.0.0.0:0              LISTENING       1348
-  TCP    [::]:3000              [::]:0                 LISTENING       18664
-  TCP    [::]:5173              [::]:0                 LISTENING       1348
-
-
