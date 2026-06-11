@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
   import { formatMoney } from "$lib/utils";
+  import AreaChart from "$lib/components/ui/area-chart.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
@@ -226,6 +227,30 @@
   });
 
   const sales = $derived($SalesReport.data?.salesReport);
+
+  // Chart series for the sales tab: byDay only lists days that had sales
+  // (UTC date keys), so fill the gaps with zeros for a linear time axis.
+  // Ranges past ~a year would be unreadable as a daily chart — skip it.
+  const salesSeries = $derived.by(() => {
+    if (!sales || sales.byDay.length === 0) return [];
+    const byDate = new Map(sales.byDay.map((d) => [d.date, d]));
+    const end = new Date(`${sales.periodEnd}T00:00:00Z`);
+    const out: { label: string; value: number; bar: number }[] = [];
+    for (
+      let t = new Date(`${sales.periodStart}T00:00:00Z`);
+      t <= end;
+      t = new Date(t.getTime() + 86_400_000)
+    ) {
+      if (out.length > 370) return [];
+      const d = byDate.get(t.toISOString().slice(0, 10));
+      out.push({
+        label: `${t.getUTCDate()}/${t.getUTCMonth() + 1}`,
+        value: d?.revenueMinor ?? 0,
+        bar: d?.orderCount ?? 0,
+      });
+    }
+    return out;
+  });
   const profit = $derived($ProfitReport.data?.profitReport);
   const ar = $derived($ArAgingReport.data?.arAgingReport);
   const ap = $derived($ApAgingReport.data?.apAgingReport);
@@ -381,6 +406,12 @@
             </p>
           </div>
         </div>
+        {#if salesSeries.length > 0}
+          <div class="rounded-lg border bg-card p-4">
+            <p class="mb-2 text-sm text-muted-foreground">Revenue by day</p>
+            <AreaChart points={salesSeries} formatValue={formatMoney} />
+          </div>
+        {/if}
         <div class="overflow-hidden rounded-lg border bg-card">
           <table class="w-full text-sm">
             <thead class="border-b bg-muted/50 text-left text-muted-foreground">
@@ -438,6 +469,36 @@
           <p class="text-2xl font-semibold">{pct(profit.marginBps)}</p>
         </div>
       </div>
+      {#if profit.revenueMinor > 0}
+        <div class="rounded-lg border bg-card p-4">
+          <p class="mb-3 text-sm text-muted-foreground">Revenue breakdown</p>
+          {#if profit.grossMarginMinor < 0}
+            <div class="h-4 rounded-full bg-destructive"></div>
+            <p class="mt-2 text-xs text-destructive">
+              COGS exceeded revenue — negative margin of
+              {formatMoney(-profit.grossMarginMinor)}.
+            </p>
+          {:else}
+            <div class="flex h-4 overflow-hidden rounded-full">
+              <div
+                class="bg-muted-foreground/40"
+                style:width="{100 - profit.marginBps / 100}%"
+              ></div>
+              <div class="bg-primary" style:width="{profit.marginBps / 100}%"></div>
+            </div>
+            <div class="mt-2 flex gap-6 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1.5">
+                <span class="size-2.5 rounded-full bg-muted-foreground/40"></span>
+                COGS {formatMoney(profit.cogsMinor)} ({pct(10000 - profit.marginBps)})
+              </span>
+              <span class="flex items-center gap-1.5">
+                <span class="size-2.5 rounded-full bg-primary"></span>
+                Gross margin {formatMoney(profit.grossMarginMinor)} ({pct(profit.marginBps)})
+              </span>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/if}
 
     <!-- ---- AR / AP aging -------------------------------------------------- -->
