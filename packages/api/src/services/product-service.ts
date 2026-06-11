@@ -3,7 +3,7 @@
 // stock movements belong to the stock/purchase domains — this service only
 // sets initial cost/qty values. See docs/design-decisions.md.
 
-import { and, eq, isNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   bundleComponents,
@@ -12,6 +12,7 @@ import {
   productVariants,
   products,
 } from "../db/schema/products.ts";
+import { stockLocations } from "../db/schema/stock.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 
@@ -296,11 +297,31 @@ export async function updateProduct(
   assertNonNegative("taxRateBps", patch.taxRateBps);
 
   if (patch.kind !== undefined && patch.kind !== existing.kind) {
-    if (existing.kind === "physical" && patch.kind === "bundle") {
-      throw new ProductError("INVALID_KIND_CHANGE", "cannot change a physical product to a bundle — clear stock first");
+    const variantIds = (
+      await db
+        .select({ id: productVariants.id })
+        .from(productVariants)
+        .where(eq(productVariants.productId, id))
+    ).map((v) => v.id);
+    if (existing.kind === "physical" && patch.kind === "bundle" && variantIds.length) {
+      const stocked = await db
+        .select({ id: stockLocations.id })
+        .from(stockLocations)
+        .where(and(inArray(stockLocations.variantId, variantIds), ne(stockLocations.qty, 0)))
+        .limit(1);
+      if (stocked.length) {
+        throw new ProductError("INVALID_KIND_CHANGE", "cannot change a physical product to a bundle — clear stock first");
+      }
     }
-    if (existing.kind === "bundle" && patch.kind === "physical") {
-      throw new ProductError("INVALID_KIND_CHANGE", "cannot change a bundle to a physical product — remove bundle components first");
+    if (existing.kind === "bundle" && patch.kind === "physical" && variantIds.length) {
+      const components = await db
+        .select({ id: bundleComponents.id })
+        .from(bundleComponents)
+        .where(inArray(bundleComponents.bundleVariantId, variantIds))
+        .limit(1);
+      if (components.length) {
+        throw new ProductError("INVALID_KIND_CHANGE", "cannot change a bundle to a physical product — remove bundle components first");
+      }
     }
   }
   assertNonNegative("costRatioBps", patch.costRatioBps ?? undefined);
