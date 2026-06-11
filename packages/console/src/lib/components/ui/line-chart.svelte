@@ -1,31 +1,35 @@
 <script lang="ts">
-  // Hand-rolled SVG time-series chart: a smooth gradient area for a money
-  // series plus thin baseline bars for a count series (e.g. revenue + orders
-  // per day). Sized to its container via bind:clientWidth so SVG units map
-  // 1:1 to CSS pixels — pointer offsets need no scaling.
+  // Hand-rolled SVG multi-series line chart (sibling of area-chart): N money
+  // series on a shared y scale, one smooth stroke each. Sized to its container
+  // via bind:clientWidth so SVG units map 1:1 to CSS pixels.
   import { niceMax, smoothPath } from "./chart-utils";
 
-  export interface ChartPoint {
+  export interface LinePoint {
     label: string;
-    value: number;
-    bar: number;
+    /** One value per entry in `series`, same order. */
+    values: number[];
+  }
+  export interface LineSeries {
+    label: string;
+    color: string;
   }
 
   let {
     points,
+    series,
     formatValue,
-    valueLabel = "Revenue",
-    barLabel = "Orders",
+    tooltipFooter,
     height = 240,
     formatTick = new Intl.NumberFormat("id-ID", {
       notation: "compact",
       maximumFractionDigits: 1,
     }).format,
   }: {
-    points: ChartPoint[];
+    points: LinePoint[];
+    series: LineSeries[];
     formatValue: (v: number) => string;
-    valueLabel?: string;
-    barLabel?: string;
+    /** Extra muted tooltip line computed from the hovered point's values. */
+    tooltipFooter?: (values: number[]) => string;
     height?: number;
     formatTick?: (v: number) => string;
   } = $props();
@@ -36,27 +40,26 @@
   const plotH = $derived(height - PAD.top - PAD.bottom);
   const baseline = $derived(PAD.top + plotH);
 
-  const yMax = $derived(niceMax(Math.max(0, ...points.map((p) => p.value))));
-  const barMax = $derived(Math.max(1, ...points.map((p) => p.bar)));
+  const yMax = $derived(
+    niceMax(Math.max(0, ...points.flatMap((p) => p.values))),
+  );
   const step = $derived(points.length > 1 ? plotW / (points.length - 1) : plotW);
-  const barW = $derived(Math.max(1.5, Math.min(step * 0.5, 12)));
 
   const xAt = (i: number) =>
     points.length === 1 ? PAD.left + plotW / 2 : PAD.left + i * step;
-  const yAt = (v: number) => PAD.top + plotH * (1 - v / yMax);
-  // Bars use their own scale and only the bottom quarter of the plot.
-  const barH = (b: number) => (b / barMax) * plotH * 0.25;
+  // Negative day values (returns exceeding sales) draw flat on the baseline;
+  // the tooltip still shows the true number.
+  const yAt = (v: number) =>
+    Math.min(PAD.top + plotH * (1 - v / yMax), baseline);
 
-  const linePath = $derived(
-    smoothPath(
-      points.map((p, i) => [xAt(i), yAt(p.value)] as const),
-      PAD.top,
-      baseline,
+  const linePaths = $derived(
+    series.map((_, s) =>
+      smoothPath(
+        points.map((p, i) => [xAt(i), yAt(p.values[s])] as const),
+        PAD.top,
+        baseline,
+      ),
     ),
-  );
-  const areaPath = $derived(
-    linePath &&
-      `${linePath} L ${xAt(points.length - 1)} ${baseline} L ${xAt(0)} ${baseline} Z`,
   );
 
   const yTicks = $derived([0.25, 0.5, 0.75, 1].map((f) => f * yMax));
@@ -69,8 +72,6 @@
       ),
     )];
   });
-
-  const gradId = `area-grad-${Math.random().toString(36).slice(2)}`;
 
   let hover = $state<number | null>(null);
   function onMove(e: PointerEvent) {
@@ -88,17 +89,10 @@
       {height}
       class="block"
       role="img"
-      aria-label="{valueLabel} chart"
+      aria-label="{series.map((s) => s.label).join(' vs ')} chart"
       onpointermove={onMove}
       onpointerleave={() => (hover = null)}
     >
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="var(--primary)" stop-opacity="0.28" />
-          <stop offset="1" stop-color="var(--primary)" stop-opacity="0" />
-        </linearGradient>
-      </defs>
-
       <!-- gridlines + y tick labels -->
       <line x1={PAD.left} x2={width - PAD.right} y1={baseline} y2={baseline} stroke="var(--border)" />
       {#each yTicks as t (t)}
@@ -121,35 +115,21 @@
         </text>
       {/each}
 
-      <!-- count bars -->
-      {#each points as p, i (i)}
-        {#if p.bar > 0}
-          <rect
-            x={xAt(i) - barW / 2}
-            y={baseline - barH(p.bar)}
-            width={barW}
-            height={barH(p.bar)}
-            rx={Math.min(barW / 2, 2)}
-            fill="var(--muted-foreground)"
-            opacity="0.35"
+      <!-- series -->
+      {#each series as s, si (s.label)}
+        {#if points.length === 1}
+          <circle cx={xAt(0)} cy={yAt(points[0].values[si])} r="4" fill={s.color} />
+        {:else}
+          <path
+            d={linePaths[si]}
+            fill="none"
+            stroke={s.color}
+            stroke-width="2"
+            stroke-linejoin="round"
+            stroke-linecap="round"
           />
         {/if}
       {/each}
-
-      <!-- value series -->
-      {#if points.length === 1}
-        <circle cx={xAt(0)} cy={yAt(points[0].value)} r="4" fill="var(--primary)" />
-      {:else}
-        <path d={areaPath} fill="url(#{gradId})" />
-        <path
-          d={linePath}
-          fill="none"
-          stroke="var(--primary)"
-          stroke-width="2"
-          stroke-linejoin="round"
-          stroke-linecap="round"
-        />
-      {/if}
 
       <!-- crosshair -->
       {#if hover !== null && points[hover]}
@@ -161,14 +141,16 @@
           stroke="var(--muted-foreground)"
           opacity="0.4"
         />
-        <circle
-          cx={xAt(hover)}
-          cy={yAt(points[hover].value)}
-          r="3.5"
-          fill="var(--primary)"
-          stroke="var(--card)"
-          stroke-width="1.5"
-        />
+        {#each series as s, si (s.label)}
+          <circle
+            cx={xAt(hover)}
+            cy={yAt(points[hover].values[si])}
+            r="3.5"
+            fill={s.color}
+            stroke="var(--card)"
+            stroke-width="1.5"
+          />
+        {/each}
       {/if}
 
       <!-- x labels -->
@@ -185,6 +167,16 @@
       {/each}
     </svg>
 
+    <!-- legend -->
+    <div class="mt-1 flex gap-4 text-xs text-muted-foreground">
+      {#each series as s (s.label)}
+        <span class="flex items-center gap-1.5">
+          <span class="size-2.5 rounded-full" style:background={s.color}></span>
+          {s.label}
+        </span>
+      {/each}
+    </div>
+
     {#if hover !== null && points[hover]}
       <div
         class="pointer-events-none absolute top-2 z-10 rounded-md border bg-card px-2.5 py-1.5 text-xs shadow-sm"
@@ -194,8 +186,15 @@
           : "translateX(8px)"}
       >
         <p class="font-medium">{points[hover].label}</p>
-        <p>{valueLabel}: <span class="font-medium">{formatValue(points[hover].value)}</span></p>
-        <p class="text-muted-foreground">{barLabel}: {points[hover].bar}</p>
+        {#each series as s, si (s.label)}
+          <p class="flex items-center gap-1.5">
+            <span class="size-2 rounded-full" style:background={s.color}></span>
+            {s.label}: <span class="font-medium">{formatValue(points[hover].values[si])}</span>
+          </p>
+        {/each}
+        {#if tooltipFooter}
+          <p class="text-muted-foreground">{tooltipFooter(points[hover].values)}</p>
+        {/if}
       </div>
     {/if}
   </div>

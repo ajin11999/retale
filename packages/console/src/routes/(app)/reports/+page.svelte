@@ -6,7 +6,9 @@
   import AreaChart from "$lib/components/ui/area-chart.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import DonutChart from "$lib/components/ui/donut-chart.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import LineChart from "$lib/components/ui/line-chart.svelte";
 
   // Each report is its own query store, fetched on demand — a viewer may hold
   // only some report.* keys, so querying them together would error on the
@@ -34,10 +36,17 @@
   const ProfitReport = graphql(`
     query ProfitReport($periodStart: String!, $periodEnd: String!) @cache(policy: NetworkOnly) {
       profitReport(periodStart: $periodStart, periodEnd: $periodEnd) {
+        periodStart
+        periodEnd
         revenueMinor
         cogsMinor
         grossMarginMinor
         marginBps
+        byDay {
+          date
+          revenueMinor
+          cogsMinor
+        }
       }
     }
   `);
@@ -252,6 +261,29 @@
     return out;
   });
   const profit = $derived($ProfitReport.data?.profitReport);
+
+  // Daily revenue + COGS series for the profit tab, gap-filled like
+  // salesSeries (and with the same >370-day bail).
+  const profitSeries = $derived.by(() => {
+    if (!profit || profit.byDay.length === 0) return [];
+    const byDate = new Map(profit.byDay.map((d) => [d.date, d]));
+    const end = new Date(`${profit.periodEnd}T00:00:00Z`);
+    const out: { label: string; values: number[] }[] = [];
+    for (
+      let t = new Date(`${profit.periodStart}T00:00:00Z`);
+      t <= end;
+      t = new Date(t.getTime() + 86_400_000)
+    ) {
+      if (out.length > 370) return [];
+      const d = byDate.get(t.toISOString().slice(0, 10));
+      out.push({
+        label: `${t.getUTCDate()}/${t.getUTCMonth() + 1}`,
+        values: [d?.revenueMinor ?? 0, d?.cogsMinor ?? 0],
+      });
+    }
+    return out;
+  });
+
   const ar = $derived($ArAgingReport.data?.arAgingReport);
   const ap = $derived($ApAgingReport.data?.apAgingReport);
   const variance = $derived($SessionVarianceReport.data?.sessionVarianceReport);
@@ -469,6 +501,20 @@
           <p class="text-2xl font-semibold">{pct(profit.marginBps)}</p>
         </div>
       </div>
+      {#if profitSeries.length > 0}
+        <div class="rounded-lg border bg-card p-4">
+          <p class="mb-2 text-sm text-muted-foreground">Sales vs COGS by day</p>
+          <LineChart
+            points={profitSeries}
+            series={[
+              { label: "Revenue", color: "var(--primary)" },
+              { label: "COGS", color: "var(--muted-foreground)" },
+            ]}
+            formatValue={formatMoney}
+            tooltipFooter={(v) => `Gross margin: ${formatMoney(v[0] - v[1])}`}
+          />
+        </div>
+      {/if}
       {#if profit.revenueMinor > 0}
         <div class="rounded-lg border bg-card p-4">
           <p class="mb-3 text-sm text-muted-foreground">Revenue breakdown</p>
@@ -479,14 +525,17 @@
               {formatMoney(-profit.grossMarginMinor)}.
             </p>
           {:else}
-            <div class="flex h-4 overflow-hidden rounded-full">
-              <div
-                class="bg-muted-foreground/40"
-                style:width="{100 - profit.marginBps / 100}%"
-              ></div>
-              <div class="bg-primary" style:width="{profit.marginBps / 100}%"></div>
+            <div class="flex justify-center">
+              <DonutChart
+                slices={[
+                  { value: profit.cogsMinor, color: "var(--muted-foreground)", opacity: 0.4 },
+                  { value: profit.grossMarginMinor, color: "var(--primary)" },
+                ]}
+                centerLabel={pct(profit.marginBps)}
+                centerSub="margin"
+              />
             </div>
-            <div class="mt-2 flex gap-6 text-xs text-muted-foreground">
+            <div class="mt-2 flex justify-center gap-6 text-xs text-muted-foreground">
               <span class="flex items-center gap-1.5">
                 <span class="size-2.5 rounded-full bg-muted-foreground/40"></span>
                 COGS {formatMoney(profit.cogsMinor)} ({pct(10000 - profit.marginBps)})

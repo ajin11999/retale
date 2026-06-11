@@ -120,6 +120,11 @@ describe("salesReport / profitReport", () => {
     expect(profit.cogsMinor).toBe(4200);
     expect(profit.grossMarginMinor).toBe(2800);
     expect(profit.marginBps).toBe(4000); // 2800 / 7000
+    // Daily revenue + COGS, sorted by date.
+    expect(profit.byDay).toEqual([
+      { date: "2026-05-10", revenueMinor: 2000, cogsMinor: 1200 },
+      { date: "2026-05-12", revenueMinor: 5000, cogsMinor: 3000 },
+    ]);
   });
 
   test("nets tracking-account attribution out of revenue (not COGS)", async () => {

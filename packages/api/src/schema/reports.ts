@@ -24,6 +24,12 @@ export const typeDefs = /* GraphQL */ `
     byDay: [SalesReportDay!]!
   }
 
+  type ProfitReportDay {
+    date: String!
+    revenueMinor: Float!
+    cogsMinor: Float!
+  }
+
   type ProfitReport {
     periodStart: String!
     periodEnd: String!
@@ -33,6 +39,7 @@ export const typeDefs = /* GraphQL */ `
     grossMarginMinor: Float!
     "Gross margin as basis points of revenue; 0 when revenue is 0."
     marginBps: Int!
+    byDay: [ProfitReportDay!]!
   }
 
   "One party's aged outstanding balance."

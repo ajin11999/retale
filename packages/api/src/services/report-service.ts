@@ -33,7 +33,10 @@ interface PeriodAggregate {
   itemsSoldQty: number;
   revenueMinor: number;
   cogsMinor: number;
-  byDay: Map<string, { orderIds: Set<string>; revenueMinor: number }>;
+  byDay: Map<
+    string,
+    { orderIds: Set<string>; revenueMinor: number; cogsMinor: number }
+  >;
 }
 
 /**
@@ -84,9 +87,11 @@ async function aggregatePeriod(range: DateRange): Promise<PeriodAggregate> {
     orderIds.add(r.orderId);
 
     const day = (r.closedAt ?? start).toISOString().slice(0, 10);
-    const bucket = agg.byDay.get(day) ?? { orderIds: new Set(), revenueMinor: 0 };
+    const bucket =
+      agg.byDay.get(day) ?? { orderIds: new Set(), revenueMinor: 0, cogsMinor: 0 };
     bucket.orderIds.add(r.orderId);
     bucket.revenueMinor += lineRevenue;
+    bucket.cogsMinor += lineCogs;
     agg.byDay.set(day, bucket);
   }
   agg.orderCount = orderIds.size;
@@ -130,12 +135,20 @@ export interface ProfitReport {
   grossMarginMinor: number;
   /** Gross margin as basis points of revenue; 0 when revenue is 0. */
   marginBps: number;
+  byDay: { date: string; revenueMinor: number; cogsMinor: number }[];
 }
 
 /** Cost / margin: revenue vs COGS (snapshot WAC) and the resulting margin. */
 export async function profitReport(range: DateRange): Promise<ProfitReport> {
   const agg = await aggregatePeriod(range);
   const grossMarginMinor = agg.revenueMinor - agg.cogsMinor;
+  const byDay = [...agg.byDay.entries()]
+    .map(([date, b]) => ({
+      date,
+      revenueMinor: b.revenueMinor,
+      cogsMinor: b.cogsMinor,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
   return {
     periodStart: range.periodStart,
     periodEnd: range.periodEnd,
@@ -146,6 +159,7 @@ export async function profitReport(range: DateRange): Promise<ProfitReport> {
       agg.revenueMinor === 0
         ? 0
         : Math.round((grossMarginMinor / agg.revenueMinor) * 10000),
+    byDay,
   };
 }
 
