@@ -253,6 +253,20 @@
       "when": 1781064029358,
       "tag": "0035_thick_may_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1781189393168,
+      "tag": "0036_lean_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1781189465360,
+      "tag": "0037_bitter_vermin",
+      "breakpoints": true
     }
   ]
 }

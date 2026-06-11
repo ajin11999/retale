@@ -40,7 +40,7 @@ type Query {
   Latest unit cost per variant across this vendor's non-cancelled purchases — for prefilling new PO lines.
   """
   vendorLastCosts(vendorId: ID!): [VendorLastCost!]!
-  deliveries(status: DeliveryStatus): [PurchaseDelivery!]!
+  deliveries(status: DeliveryStatus, kind: DeliveryKind): [PurchaseDelivery!]!
   delivery(id: ID!): PurchaseDelivery
   customers(includeArchived: Boolean): [Customer!]!
   customer(id: ID!): Customer
@@ -292,7 +292,11 @@ type Mutation {
   Confirm a prepared send: flip it to 'sent' and capture the expected delivery date.
   """
   confirmPurchaseSend(id: ID!, expectedDeliveryDate: String): PurchaseSend!
-  createDelivery(date: String!, biller: String, targetLocationId: ID!): PurchaseDelivery!
+
+  """
+  targetLocationId is required for an arrival (the default kind) and must be absent for a transit hop.
+  """
+  createDelivery(date: String!, biller: String, targetLocationId: ID, kind: DeliveryKind): PurchaseDelivery!
   updateDelivery(id: ID!, date: String, biller: String, targetLocationId: ID): PurchaseDelivery!
 
   """Discard a draft delivery and its cost tree."""
@@ -304,16 +308,6 @@ type Mutation {
 
     """Expedition owed for this cost node (freight/customs); cost nodes only."""
     vendorId: ID
-
-    """
-    Freight leg: spread over the whole delivery's goods. Root cost nodes only.
-    """
-    deliveryWide: Boolean
-
-    """
-    Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide.
-    """
-    appliesToPurchaseId: ID
     description: String!
     qty: Float
     costMinor: Float!
@@ -331,16 +325,6 @@ type Mutation {
     vendorId: ID
 
     """
-    Freight leg: spread over the whole delivery's goods. Root cost nodes only.
-    """
-    deliveryWide: Boolean
-
-    """
-    PO scope; pass null to clear, omit to leave unchanged. Requires deliveryWide.
-    """
-    appliesToPurchaseId: ID
-
-    """
     Reparent: a cost node id to nest under, null for the root, omit to leave unchanged.
     """
     parentItemId: ID
@@ -349,12 +333,12 @@ type Mutation {
   deleteDeliveryItem(id: ID!): Boolean!
 
   """
-  Commit a draft delivery: receives stock, recomputes WAC, advances the PO.
+  Commit a draft delivery. Arrival: receives stock, recomputes WAC, advances the PO. Transit: banks freight, raises courier AP only.
   """
   commitDelivery(id: ID!): PurchaseDelivery!
 
   """
-  Reverse a delivered delivery (root only). Stock returns; WAC is not re-valued.
+  Reverse a delivered delivery (root only). Arrival: stock returns, WAC not re-valued. Transit: courier AP reversed, pool contribution dropped.
   """
   cancelDelivery(id: ID!): PurchaseDelivery!
   createCustomer(name: String!, phone: String, email: String, address: String, notes: String): Customer!
@@ -1023,6 +1007,14 @@ type PurchaseItem {
   description: String
   qtyOrdered: Float!
   qtyDelivered: Float!
+
+  """
+  Units on committed transit notes not yet arrived (largest hop − delivered, floored at 0).
+  """
+  qtyInTransit: Float!
+
+  """Freight banked against this line by committed transit hops."""
+  transitFreightMinor: Float!
   unitCostMinor: Float!
   sortOrder: Int!
 }
@@ -1088,11 +1080,24 @@ enum DeliveryStatus {
   cancelled
 }
 
+"""
+One delivery note = one delivery. A transit hop banks freight against the PO
+lines it carries (no stock); an arrival receives stock at the warehouse and
+picks up the accumulated transit cost.
+"""
+enum DeliveryKind {
+  transit
+  arrival
+}
+
 type PurchaseDelivery {
   id: ID!
+  kind: DeliveryKind!
   date: String!
   biller: String
-  targetLocationId: ID!
+
+  """Where stock lands on commit. Always null for a transit delivery."""
+  targetLocationId: ID
   targetLocation: Location
 
   """Set when this delivery is a receiving check tied to a single purchase."""
@@ -1123,6 +1128,11 @@ type DeliveryLeafLanding {
   qty: Float!
   baseCostMinor: Float!
   freightMinor: Float!
+
+  """
+  Accumulated transit-hop cost picked up on arrival (qty × pooled rate); 0 on a transit delivery.
+  """
+  transitFreightMinor: Float!
   landedCostMinor: Float!
   landedUnitCostMinor: Float!
   isStock: Boolean!
@@ -1147,16 +1157,6 @@ type PurchaseDeliveryItem {
   vendor: Vendor
 
   """
-  Freight leg: this root cost node spreads over the whole delivery's goods.
-  """
-  deliveryWide: Boolean!
-
-  """
-  PO scope for a delivery-wide leg — spreads only over that purchase's goods.
-  """
-  appliesToPurchaseId: ID
-
-  """
   The purchase line a goods leaf receives against — its ordered/delivered progress.
   """
   purchaseItem: PurchaseItem
@@ -1165,6 +1165,11 @@ type PurchaseDeliveryItem {
   """Set only on a leaf; in the variant's smallest unit."""
   qty: Float
   costMinor: Float!
+
+  """
+  Frozen freight share banked to the transit pool when a transit hop committed.
+  """
+  allocatedFreightMinor: Float
   sortOrder: Int!
 }
 

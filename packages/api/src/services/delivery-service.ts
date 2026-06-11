@@ -113,34 +113,55 @@ async function syncTotal(tx: Tx, deliveryId: string): Promise<void> {
 
 // --- Header ---
 
-export function listDeliveries(status?: Delivery["status"]): Promise<Delivery[]> {
+export function listDeliveries(
+  status?: Delivery["status"],
+  kind?: Delivery["kind"],
+): Promise<Delivery[]> {
+  const conditions = [
+    ...(status ? [eq(purchaseDeliveries.status, status)] : []),
+    ...(kind ? [eq(purchaseDeliveries.kind, kind)] : []),
+  ];
   return db
     .select()
     .from(purchaseDeliveries)
-    .where(status ? eq(purchaseDeliveries.status, status) : undefined)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(purchaseDeliveries.date), desc(purchaseDeliveries.createdAt));
 }
 
 export async function createDelivery(input: {
+  /** Immutable after creation. Defaults to arrival (the warehouse receipt). */
+  kind?: Delivery["kind"];
   date: string;
   biller?: string | null;
-  targetLocationId: string;
+  /** Required for an arrival; must be absent for a transit hop. */
+  targetLocationId?: string | null;
   /** Set only when the delivery is a receiving check for a single purchase. */
   purchaseId?: string | null;
   createdByUserId: string;
 }): Promise<Delivery> {
+  const kind = input.kind ?? "arrival";
   if (!input.date?.trim()) throw new DeliveryError("INVALID_INPUT", "date is required");
-  const location = await db.query.locations.findFirst({
-    where: eq(locations.id, input.targetLocationId),
-  });
-  if (!location) throw new DeliveryError("LOCATION_NOT_FOUND");
+  if (kind === "transit") {
+    if (input.targetLocationId != null) {
+      throw new DeliveryError("INVALID_INPUT", "a transit delivery has no target location");
+    }
+  } else {
+    if (input.targetLocationId == null) {
+      throw new DeliveryError("INVALID_INPUT", "an arrival delivery needs a target location");
+    }
+    const location = await db.query.locations.findFirst({
+      where: eq(locations.id, input.targetLocationId),
+    });
+    if (!location) throw new DeliveryError("LOCATION_NOT_FOUND");
+  }
 
   const id = ulid();
   await db.insert(purchaseDeliveries).values({
     id,
+    kind,
     date: input.date,
     biller: input.biller ?? null,
-    targetLocationId: input.targetLocationId,
+    targetLocationId: input.targetLocationId ?? null,
     purchaseId: input.purchaseId ?? null,
     createdByUserId: input.createdByUserId,
   });
@@ -159,6 +180,9 @@ export async function updateDelivery(
     throw new DeliveryError("INVALID_INPUT", "date cannot be blank");
   }
   if (patch.targetLocationId !== undefined) {
+    if (delivery.kind === "transit") {
+      throw new DeliveryError("INVALID_INPUT", "a transit delivery has no target location");
+    }
     const location = await db.query.locations.findFirst({
       where: eq(locations.id, patch.targetLocationId),
     });
@@ -206,10 +230,6 @@ export async function createDeliveryItem(input: {
   costMinor: number;
   /** Expedition this cost node is owed to. Cost nodes (no purchaseItemId) only. */
   vendorId?: string | null;
-  /** Freight leg: spread over the whole delivery's goods. Root cost nodes only. */
-  deliveryWide?: boolean;
-  /** Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide. */
-  appliesToPurchaseId?: string | null;
   sortOrder?: number;
 }): Promise<DeliveryItem> {
   const delivery = await loadDelivery(input.deliveryId);
@@ -233,11 +253,6 @@ export async function createDeliveryItem(input: {
         "cannot nest a line under a goods leaf — only cost nodes can group",
       );
     }
-    // A delivery-wide leg already spreads over everything — nesting items
-    // under it would be meaningless (and confusing for subtree scoping).
-    if (parent.deliveryWide) {
-      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
-    }
   }
   // A leaf points at a purchase line and needs a positive qty; a grouping
   // node has neither.
@@ -259,32 +274,6 @@ export async function createDeliveryItem(input: {
       "a courier (vendorId) is only valid on a cost node, not a goods leaf",
     );
   }
-  // Delivery-wide scope (a freight leg) is a root cost node property only.
-  if (input.deliveryWide) {
-    if (input.purchaseItemId) {
-      throw new DeliveryError(
-        "INVALID_INPUT",
-        "delivery-wide scope is only valid on a cost node, not a goods leaf",
-      );
-    }
-    if (input.parentItemId) {
-      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge must sit at the root");
-    }
-  }
-  if (input.appliesToPurchaseId) {
-    if (!input.deliveryWide) {
-      throw new DeliveryError(
-        "INVALID_INPUT",
-        "a PO scope (appliesToPurchaseId) requires a delivery-wide charge",
-      );
-    }
-    const purchase = await db.query.purchases.findFirst({
-      where: eq(purchases.id, input.appliesToPurchaseId),
-    });
-    if (!purchase) {
-      throw new DeliveryError("INVALID_INPUT", "appliesToPurchaseId: purchase not found");
-    }
-  }
 
   const id = ulid();
   await db.transaction(async (tx) => {
@@ -294,8 +283,6 @@ export async function createDeliveryItem(input: {
       parentItemId: input.parentItemId ?? null,
       purchaseItemId: input.purchaseItemId ?? null,
       vendorId: input.purchaseItemId ? null : (input.vendorId ?? null),
-      deliveryWide: input.deliveryWide ?? false,
-      appliesToPurchaseId: input.deliveryWide ? (input.appliesToPurchaseId ?? null) : null,
       description: input.description.trim(),
       qty: input.purchaseItemId ? (input.qty as number) : null,
       costMinor: input.costMinor,
@@ -314,10 +301,6 @@ export async function updateDeliveryItem(
     qty?: number | null;
     costMinor?: number;
     vendorId?: string | null;
-    /** Freight leg: spread over the whole delivery's goods. Root cost nodes only. */
-    deliveryWide?: boolean;
-    /** Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide. */
-    appliesToPurchaseId?: string | null;
     sortOrder?: number;
     /** Reparent this node: a cost node to group under, or null for the root. */
     parentItemId?: string | null;
@@ -342,9 +325,6 @@ export async function updateDeliveryItem(
         "INVALID_INPUT",
         "cannot nest a line under a goods leaf — only cost nodes can group",
       );
-    }
-    if (parent.deliveryWide) {
-      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
     }
     const all = await listDeliveryItems(item.deliveryId);
     const subtree = new Set<string>([id]);
@@ -386,50 +366,6 @@ export async function updateDeliveryItem(
     );
   }
 
-  // Delivery-wide / PO-scope guards, evaluated against the post-patch state so
-  // a single update cannot leave an invalid combination behind.
-  const effWide = patch.deliveryWide ?? item.deliveryWide;
-  const effParent =
-    patch.parentItemId !== undefined ? patch.parentItemId : item.parentItemId;
-  const effScope =
-    patch.appliesToPurchaseId !== undefined
-      ? patch.appliesToPurchaseId
-      : item.appliesToPurchaseId;
-  if (effWide) {
-    if (item.purchaseItemId) {
-      throw new DeliveryError(
-        "INVALID_INPUT",
-        "delivery-wide scope is only valid on a cost node, not a goods leaf",
-      );
-    }
-    if (effParent != null) {
-      throw new DeliveryError(
-        "INVALID_INPUT",
-        "clear delivery-wide scope before nesting this charge",
-      );
-    }
-    const child = await db.query.purchaseDeliveryItems.findFirst({
-      where: eq(purchaseDeliveryItems.parentItemId, id),
-    });
-    if (child) {
-      throw new DeliveryError("INVALID_INPUT", "a delivery-wide charge cannot contain items");
-    }
-  }
-  if (effScope != null && !effWide) {
-    throw new DeliveryError(
-      "INVALID_INPUT",
-      "a PO scope (appliesToPurchaseId) requires a delivery-wide charge",
-    );
-  }
-  if (patch.appliesToPurchaseId != null) {
-    const purchase = await db.query.purchases.findFirst({
-      where: eq(purchases.id, patch.appliesToPurchaseId),
-    });
-    if (!purchase) {
-      throw new DeliveryError("INVALID_INPUT", "appliesToPurchaseId: purchase not found");
-    }
-  }
-
   await db.transaction(async (tx) => {
     await tx
       .update(purchaseDeliveryItems)
@@ -438,10 +374,6 @@ export async function updateDeliveryItem(
         ...(patch.qty !== undefined && { qty: patch.qty }),
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
         ...(patch.vendorId !== undefined && { vendorId: patch.vendorId }),
-        ...(patch.deliveryWide !== undefined && { deliveryWide: patch.deliveryWide }),
-        ...(patch.appliesToPurchaseId !== undefined && {
-          appliesToPurchaseId: patch.appliesToPurchaseId,
-        }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
         ...(patch.parentItemId !== undefined && { parentItemId: patch.parentItemId }),
       })
@@ -506,7 +438,9 @@ export interface LeafLanding {
   baseCostMinor: number;
   /** This leaf's value-weighted share of the freight / customs nodes. */
   freightMinor: number;
-  /** baseCostMinor + freightMinor — the total cost capitalized into stock. */
+  /** Accumulated transit-hop cost picked up on arrival (qty × pooled rate). */
+  transitFreightMinor: number;
+  /** base + freight + transit — the total cost capitalized into stock. */
   landedCostMinor: number;
   /** landedCostMinor / qty — the unit cost that feeds WAC on commit. */
   landedUnitCostMinor: number;
@@ -514,12 +448,90 @@ export interface LeafLanding {
   isStock: boolean;
 }
 
+/** A purchase line's accumulated transit state, from committed transit hops. */
+export interface TransitSummary {
+  /** Σ over committed transit leaves of (allocatedFreight / qty) — see D2 note below. */
+  ratePerUnit: number;
+  /** Total freight banked against this line across all committed transit hops. */
+  bankedFreightMinor: number;
+  /** Largest single-hop qty — a proxy for "units currently in transit" before
+   * subtracting what has already arrived (multi-hop notes repeat the same units,
+   * so summing across hops would double-count). */
+  maxHopQty: number;
+}
+
+/**
+ * The transit cost pool: what committed (status `delivered`) transit deliveries
+ * have banked against each purchase line. The per-unit rate is the SUM of each
+ * hop-leaf's own rate (`allocatedFreight / qty`), NOT pooled-freight ÷ pooled-qty:
+ * serial hops carry the same units on every note, so pooling quantities would
+ * divide the rate by the hop count and lose freight. Known imprecision: if one
+ * purchase line is split across *parallel* transit notes, every arriving unit
+ * picks up all batches' rates (over-applied) — accepted "gist accuracy"
+ * trade-off of having no explicit transit→arrival chaining.
+ *
+ * Cancelled transit deliveries drop out via the status filter; arrivals never
+ * decrement the pool (the rate simply applies to whatever arrives).
+ */
+export async function transitRateByPurchaseItem(
+  exec: typeof db | Tx,
+  purchaseItemIds: string[],
+): Promise<Map<string, TransitSummary>> {
+  const out = new Map<string, TransitSummary>();
+  if (purchaseItemIds.length === 0) return out;
+  const rows = await exec
+    .select({
+      purchaseItemId: purchaseDeliveryItems.purchaseItemId,
+      deliveryId: purchaseDeliveryItems.deliveryId,
+      qty: purchaseDeliveryItems.qty,
+      allocatedFreightMinor: purchaseDeliveryItems.allocatedFreightMinor,
+    })
+    .from(purchaseDeliveryItems)
+    .innerJoin(
+      purchaseDeliveries,
+      eq(purchaseDeliveryItems.deliveryId, purchaseDeliveries.id),
+    )
+    .where(
+      and(
+        inArray(purchaseDeliveryItems.purchaseItemId, purchaseItemIds),
+        eq(purchaseDeliveries.kind, "transit"),
+        eq(purchaseDeliveries.status, "delivered"),
+      ),
+    );
+
+  // Per-hop qty first (a delivery may carry one line in several leaves), so
+  // maxHopQty reflects whole notes, not individual boxes.
+  const hopQty = new Map<string, Map<string, number>>(); // pid → deliveryId → qty
+  for (const r of rows) {
+    const pid = r.purchaseItemId as string;
+    const qty = r.qty ?? 0;
+    const entry = out.get(pid) ?? { ratePerUnit: 0, bankedFreightMinor: 0, maxHopQty: 0 };
+    if (qty > 0) {
+      entry.ratePerUnit += (r.allocatedFreightMinor ?? 0) / qty;
+      entry.bankedFreightMinor += r.allocatedFreightMinor ?? 0;
+    }
+    out.set(pid, entry);
+    const byDelivery = hopQty.get(pid) ?? new Map<string, number>();
+    byDelivery.set(r.deliveryId, (byDelivery.get(r.deliveryId) ?? 0) + qty);
+    hopQty.set(pid, byDelivery);
+  }
+  for (const [pid, byDelivery] of hopQty) {
+    const entry = out.get(pid);
+    if (entry) entry.maxHopQty = Math.max(...byDelivery.values(), 0);
+  }
+  return out;
+}
+
 /**
  * Compute each leaf's landed cost for the editor preview, using the exact same
  * apportionment `commitDelivery` applies — so what the clerk sees is what the
  * commit will write. Non-leaf cost nodes (freight/customs) produce no row.
+ * For an arrival the landed cost includes the transit pickup; for a transit
+ * delivery `freightMinor` is the share that will bank to the pool and the
+ * landed figures are not meaningful (the console hides them).
  */
 export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLanding[]> {
+  const delivery = await loadDelivery(deliveryId);
   const items = await db
     .select()
     .from(purchaseDeliveryItems)
@@ -533,18 +545,26 @@ export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLand
   );
 
   const freightByLeaf = allocateFreightByValue(items, leaves, lines);
+  const pool =
+    delivery.kind === "arrival"
+      ? await transitRateByPurchaseItem(db, [...lines.keys()])
+      : new Map<string, TransitSummary>();
   return leaves.map((l) => {
     const qty = l.qty ?? 0;
     const freight = freightByLeaf.get(l.id) ?? 0;
-    const landed = l.costMinor + freight;
+    const isStock = lines.get(l.purchaseItemId as string)?.variantId != null;
+    const rate = pool.get(l.purchaseItemId as string)?.ratePerUnit ?? 0;
+    const transit = isStock ? Math.round(qty * rate) : 0;
+    const landed = l.costMinor + freight + transit;
     return {
       itemId: l.id,
       qty,
       baseCostMinor: l.costMinor,
       freightMinor: freight,
+      transitFreightMinor: transit,
       landedCostMinor: landed,
       landedUnitCostMinor: qty > 0 ? Math.round(landed / qty) : 0,
-      isStock: lines.get(l.purchaseItemId as string)?.variantId != null,
+      isStock,
     };
   });
 }
@@ -568,17 +588,16 @@ function leafQtyByPurchaseItem(leaves: DeliveryItem[]): Map<string, number> {
  * landed-cost step: a product's received unit cost carries its share of the
  * delivery cost.
  *
- * Scope follows the cost tree strictly. A cost node's cost spreads only over the
- * stock leaves **in its own subtree** — so nesting goods under a "Carton freight"
- * node confines that charge to those goods (the carton's Rp40k over its 24
- * bottles). A leaf nested under several cost nodes carries each one's share.
+ * Scope follows the cost tree's shape — no flags:
  *
- * The one exception is an explicit **delivery-wide** node (a freight leg,
- * `deliveryWide = true`): it spreads over every stock leaf of the delivery —
- * or only one purchase's leaves when `appliesToPurchaseId` narrows it (multi-PO
- * deliveries where an expedition invoices per PO). Never inferred: an unflagged
- * cost node with no goods in its subtree still applies to nothing — its charge
- * is not capitalized into any stock (the console warns before commit).
+ * - A cost node **with children** spreads only over the stock leaves in its own
+ *   subtree — nesting goods under a "Carton freight" node confines that charge
+ *   to those goods (the carton's Rp40k over its 24 bottles). A leaf nested
+ *   under several cost nodes carries each one's share.
+ * - A **childless** cost node spreads over the stock leaves of its *parent's*
+ *   subtree — its siblings and their descendants. At root level that is every
+ *   stock leaf of the delivery, so a one-line "Truck freight 500k" charges the
+ *   whole note; dropped inside a goods group it charges just that group.
  *
  * Non-stock leaves (`variantId` null) are excluded everywhere — freight
  * capitalizes into goods of resale only (design-decisions.md → landed cost).
@@ -645,17 +664,15 @@ function allocateFreightByValue(
 
   for (const node of items) {
     if (node.purchaseItemId != null || node.costMinor <= 0) continue;
-    // A delivery-wide leg spreads over all stock leaves (or one PO's); anything
-    // else keeps strict subtree scope — a charge with no goods nested under it
-    // applies to nothing (spread is a no-op on an empty target set).
-    const targets = node.deliveryWide
-      ? node.appliesToPurchaseId
-        ? stockLeaves.filter(
-            (l) =>
-              lines.get(l.purchaseItemId as string)?.purchaseId === node.appliesToPurchaseId,
-          )
-        : stockLeaves
-      : subtreeStockLeaves(node.id);
+    // Shape-based scope: a grouping with children charges its own subtree; a
+    // childless cost line charges its parent's subtree (the whole delivery
+    // when it sits at the root).
+    const hasChildren = (childrenOf.get(node.id) ?? []).length > 0;
+    const targets = hasChildren
+      ? subtreeStockLeaves(node.id)
+      : node.parentItemId == null
+        ? stockLeaves
+        : subtreeStockLeaves(node.parentItemId);
     spread(node.costMinor, targets);
   }
   return out;
@@ -716,6 +733,9 @@ function addDays(date: string, days: number): string {
  * `vendorId` is owed to that expedition. Ad-hoc purchases (null vendor) and
  * untagged freight raise no AP. A charge's due date is the delivery date plus
  * the vendor's net terms. Runs inside the commit transaction.
+ *
+ * A transit hop passes `includeGoods: false`: its leaves are only the freight
+ * allocation basis — the goods themselves are billed once, at arrival.
  */
 async function postDeliveryAccountsPayable(
   tx: Tx,
@@ -724,27 +744,29 @@ async function postDeliveryAccountsPayable(
   leaves: DeliveryItem[],
   lines: Map<string, typeof purchaseItems.$inferSelect>,
   userId: string,
+  includeGoods: boolean,
 ): Promise<void> {
-  // Supplier AP: each leaf's base cost, summed by the purchase's vendor.
-  const purchaseVendor = new Map<string, string | null>();
-  const purchaseIds = [...new Set([...lines.values()].map((pi) => pi.purchaseId))];
-  if (purchaseIds.length > 0) {
-    const rows = await tx
-      .select()
-      .from(purchases)
-      .where(inArray(purchases.id, purchaseIds));
-    for (const p of rows) purchaseVendor.set(p.id, p.vendorId ?? null);
-  }
-
   const owedByVendor = new Map<string, number>();
   const add = (vendorId: string, amount: number) =>
     owedByVendor.set(vendorId, (owedByVendor.get(vendorId) ?? 0) + amount);
 
-  for (const leaf of leaves) {
-    const pi = lines.get(leaf.purchaseItemId as string);
-    if (!pi) continue;
-    const vId = purchaseVendor.get(pi.purchaseId);
-    if (vId) add(vId, leaf.costMinor);
+  if (includeGoods) {
+    // Supplier AP: each leaf's base cost, summed by the purchase's vendor.
+    const purchaseVendor = new Map<string, string | null>();
+    const purchaseIds = [...new Set([...lines.values()].map((pi) => pi.purchaseId))];
+    if (purchaseIds.length > 0) {
+      const rows = await tx
+        .select()
+        .from(purchases)
+        .where(inArray(purchases.id, purchaseIds));
+      for (const p of rows) purchaseVendor.set(p.id, p.vendorId ?? null);
+    }
+    for (const leaf of leaves) {
+      const pi = lines.get(leaf.purchaseItemId as string);
+      if (!pi) continue;
+      const vId = purchaseVendor.get(pi.purchaseId);
+      if (vId) add(vId, leaf.costMinor);
+    }
   }
 
   // Courier AP: every cost node (no purchaseItemId) tagged with an expedition.
@@ -773,11 +795,20 @@ async function postDeliveryAccountsPayable(
 }
 
 /**
- * Commit a draft delivery. In one transaction: validate the partial-delivery
- * constraint per line, emit a `purchase_receive` movement for every stock leaf
- * (non-stock lines are receipt-only), advance `qty_delivered`, complete any
- * fully-received purchase, raise accounts payable to the supplier(s) and any
- * tagged expedition, and stamp the delivery `delivered`.
+ * Commit a draft delivery — one transaction, branching on `kind`.
+ *
+ * **Transit**: validate each line's qty against `qtyOrdered` (a note cannot
+ * carry more than was ordered; hops are NOT cumulative — the same units ride
+ * every hop's note), freeze each stock leaf's freight share into
+ * `allocatedFreightMinor` (banking it to the transit pool), raise AP to the
+ * tagged expedition(s) only, and stamp `delivered`. No stock, no
+ * `qty_delivered`, no purchase completion, no goods AP.
+ *
+ * **Arrival**: validate the partial-delivery constraint per line, emit a
+ * `purchase_receive` movement for every stock leaf at the landed unit cost —
+ * base + own freight share + transit pickup (qty × pooled rate) — advance
+ * `qty_delivered`, complete any fully-received purchase, raise accounts
+ * payable to the supplier(s) and any tagged expedition, and stamp `delivered`.
  */
 export async function commitDelivery(id: string, userId: string): Promise<Delivery> {
   return db.transaction(async (tx) => {
@@ -810,6 +841,52 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       if (!lines.has(pid)) throw new DeliveryError("PURCHASE_ITEM_NOT_FOUND", pid);
     }
 
+    // Landed cost: spread the delivery's freight / customs nodes over the
+    // stock leaves by line value.
+    const freightByLeaf = allocateFreightByValue(items, leaves, lines);
+
+    if (delivery.kind === "transit") {
+      // A single note cannot carry more of a line than was ordered. Not
+      // checked against qtyDelivered or other hops: transit precedes delivery
+      // and multi-hop legitimately repeats the same units.
+      for (const [pid, sumQty] of byItem) {
+        const pi = lines.get(pid) as typeof purchaseItems.$inferSelect;
+        if (sumQty > pi.qtyOrdered) {
+          throw new DeliveryError(
+            "OVER_DELIVERY",
+            `line ${pid}: ${sumQty} exceeds ordered ${pi.qtyOrdered}`,
+          );
+        }
+      }
+
+      // Bank each stock leaf's freight share into the transit pool.
+      for (const leaf of leaves) {
+        const pi = lines.get(leaf.purchaseItemId as string);
+        if (!pi?.variantId) continue;
+        await tx
+          .update(purchaseDeliveryItems)
+          .set({ allocatedFreightMinor: freightByLeaf.get(leaf.id) ?? 0 })
+          .where(eq(purchaseDeliveryItems.id, leaf.id));
+      }
+
+      // Freight AP only — the goods are billed once, at arrival.
+      await postDeliveryAccountsPayable(tx, delivery, items, leaves, lines, userId, false);
+
+      await tx
+        .update(purchaseDeliveries)
+        .set({ status: "delivered", deliveredAt: new Date(), deliveredByUserId: userId })
+        .where(eq(purchaseDeliveries.id, id));
+      const row = await tx.query.purchaseDeliveries.findFirst({
+        where: eq(purchaseDeliveries.id, id),
+      });
+      return row as Delivery;
+    }
+
+    // --- Arrival ---
+    if (delivery.targetLocationId == null) {
+      throw new DeliveryError("INVALID_INPUT", "an arrival delivery needs a target location");
+    }
+
     // 1. Partial-delivery constraint: cannot deliver more than ordered.
     for (const [pid, sumQty] of byItem) {
       const pi = lines.get(pid) as typeof purchaseItems.$inferSelect;
@@ -821,10 +898,9 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       }
     }
 
-    // Landed cost: spread the delivery's freight / customs nodes over the
-    // stock leaves by line value, so each product's received unit cost carries
-    // its share of the delivery cost.
-    const freightByLeaf = allocateFreightByValue(items, leaves, lines);
+    // Transit pickup: the per-unit rate each line accumulated across committed
+    // transit hops (0 for direct-shipped lines absent from the pool).
+    const pool = await transitRateByPurchaseItem(tx, [...byItem.keys()]);
 
     // 2 & 3. One purchase_receive movement per stock leaf; WAC recomputes
     // inside recordMovement. Non-stock lines (variantId null) are skipped.
@@ -842,7 +918,9 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       }
 
       const qty = leaf.qty as number;
-      const landed = leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0);
+      const rate = pool.get(leaf.purchaseItemId as string)?.ratePerUnit ?? 0;
+      const landed =
+        leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0) + Math.round(qty * rate);
       await recordMovement(
         {
           variantId: pi.variantId,
@@ -871,7 +949,7 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
     await refreshPurchaseStatuses(tx, purchaseIds);
 
     // 6. Raise AP: goods to the supplier(s), tagged freight to the expedition.
-    await postDeliveryAccountsPayable(tx, delivery, items, leaves, lines, userId);
+    await postDeliveryAccountsPayable(tx, delivery, items, leaves, lines, userId, true);
 
     // 7. Stamp the delivery delivered.
     await tx
@@ -887,10 +965,18 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
 }
 
 /**
- * Cancel a delivered delivery (root only). Reverses each `purchase_receive`
- * with an `adjustment_out` — stock returns but WAC is deliberately NOT
- * re-valued (the "gist accuracy" rule; use `cost_override` if it matters).
- * `qty_delivered` is rolled back and completed purchases reopen.
+ * Cancel a delivered delivery (root only).
+ *
+ * **Transit**: reverses the freight AP and stamps `cancelled` — its pool
+ * contribution disappears via the status filter. Arrivals committed *before*
+ * the cancel keep their baked landed cost ("gist accuracy"); arrivals
+ * committed after pick up the reduced rate.
+ *
+ * **Arrival**: reverses each `purchase_receive` with an `adjustment_out` —
+ * stock returns but WAC is deliberately NOT re-valued (the "gist accuracy"
+ * rule; use `cost_override` if it matters). `qty_delivered` is rolled back and
+ * completed purchases reopen. The transit pool is NOT restored or decremented —
+ * it is rate-based, so a later re-receipt simply picks up the then-current rate.
  */
 export async function cancelDelivery(id: string, userId: string): Promise<Delivery> {
   return db.transaction(async (tx) => {
@@ -900,6 +986,18 @@ export async function cancelDelivery(id: string, userId: string): Promise<Delive
     if (!delivery) throw new DeliveryError("DELIVERY_NOT_FOUND");
     if (delivery.status !== "delivered") {
       throw new DeliveryError("NOT_DELIVERED", "only a delivered delivery can be cancelled");
+    }
+
+    if (delivery.kind === "transit") {
+      await reverseDeliveryCharges(tx, id, userId);
+      await tx
+        .update(purchaseDeliveries)
+        .set({ status: "cancelled" })
+        .where(eq(purchaseDeliveries.id, id));
+      const row = await tx.query.purchaseDeliveries.findFirst({
+        where: eq(purchaseDeliveries.id, id),
+      });
+      return row as Delivery;
     }
 
     const items = await tx

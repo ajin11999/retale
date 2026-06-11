@@ -6,6 +6,8 @@
 import { GraphQLError } from "graphql";
 import { requirePermission } from "../lib/authz.ts";
 import type { GraphQLContext } from "../lib/context.ts";
+import { db } from "../lib/db.ts";
+import { transitRateByPurchaseItem } from "../services/delivery-service.ts";
 import { buildPurchaseSendDraft } from "../services/purchase-message-service.ts";
 import * as purchases from "../services/purchase-service.ts";
 import * as vendors from "../services/vendor-service.ts";
@@ -61,6 +63,10 @@ export const typeDefs = /* GraphQL */ `
     description: String
     qtyOrdered: Float!
     qtyDelivered: Float!
+    "Units on committed transit notes not yet arrived (largest hop − delivered, floored at 0)."
+    qtyInTransit: Float!
+    "Freight banked against this line by committed transit hops."
+    transitFreightMinor: Float!
     unitCostMinor: Float!
     sortOrder: Int!
   }
@@ -202,6 +208,16 @@ const iso = (v: Date | string | null | undefined): string | null =>
 type PurchaseRow = Awaited<ReturnType<typeof purchases.getPurchase>>;
 
 export const resolvers = {
+  PurchaseItem: {
+    qtyInTransit: async (i: { id: string; qtyDelivered: number }) => {
+      const pool = await transitRateByPurchaseItem(db, [i.id]);
+      return Math.max(0, (pool.get(i.id)?.maxHopQty ?? 0) - i.qtyDelivered);
+    },
+    transitFreightMinor: async (i: { id: string }) => {
+      const pool = await transitRateByPurchaseItem(db, [i.id]);
+      return pool.get(i.id)?.bankedFreightMinor ?? 0;
+    },
+  },
   Purchase: {
     createdAt: (p: PurchaseRow) => iso(p.createdAt),
     updatedAt: (p: PurchaseRow) => iso(p.updatedAt),

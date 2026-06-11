@@ -13,11 +13,20 @@ import * as vendorService from "../services/vendor-service.ts";
 export const typeDefs = /* GraphQL */ `
   enum DeliveryStatus { draft delivered cancelled }
 
+  """
+  One delivery note = one delivery. A transit hop banks freight against the PO
+  lines it carries (no stock); an arrival receives stock at the warehouse and
+  picks up the accumulated transit cost.
+  """
+  enum DeliveryKind { transit arrival }
+
   type PurchaseDelivery {
     id: ID!
+    kind: DeliveryKind!
     date: String!
     biller: String
-    targetLocationId: ID!
+    "Where stock lands on commit. Always null for a transit delivery."
+    targetLocationId: ID
     targetLocation: Location
     "Set when this delivery is a receiving check tied to a single purchase."
     purchaseId: ID
@@ -40,6 +49,8 @@ export const typeDefs = /* GraphQL */ `
     qty: Float!
     baseCostMinor: Float!
     freightMinor: Float!
+    "Accumulated transit-hop cost picked up on arrival (qty × pooled rate); 0 on a transit delivery."
+    transitFreightMinor: Float!
     landedCostMinor: Float!
     landedUnitCostMinor: Float!
     isStock: Boolean!
@@ -56,26 +67,30 @@ export const typeDefs = /* GraphQL */ `
     vendorId: ID
     "The resolved expedition vendor for a tagged cost node, if any."
     vendor: Vendor
-    "Freight leg: this root cost node spreads over the whole delivery's goods."
-    deliveryWide: Boolean!
-    "PO scope for a delivery-wide leg — spreads only over that purchase's goods."
-    appliesToPurchaseId: ID
     "The purchase line a goods leaf receives against — its ordered/delivered progress."
     purchaseItem: PurchaseItem
     description: String!
     "Set only on a leaf; in the variant's smallest unit."
     qty: Float
     costMinor: Float!
+    "Frozen freight share banked to the transit pool when a transit hop committed."
+    allocatedFreightMinor: Float
     sortOrder: Int!
   }
 
   extend type Query {
-    deliveries(status: DeliveryStatus): [PurchaseDelivery!]!
+    deliveries(status: DeliveryStatus, kind: DeliveryKind): [PurchaseDelivery!]!
     delivery(id: ID!): PurchaseDelivery
   }
 
   extend type Mutation {
-    createDelivery(date: String!, biller: String, targetLocationId: ID!): PurchaseDelivery!
+    "targetLocationId is required for an arrival (the default kind) and must be absent for a transit hop."
+    createDelivery(
+      date: String!
+      biller: String
+      targetLocationId: ID
+      kind: DeliveryKind
+    ): PurchaseDelivery!
     updateDelivery(
       id: ID!
       date: String
@@ -91,10 +106,6 @@ export const typeDefs = /* GraphQL */ `
       purchaseItemId: ID
       "Expedition owed for this cost node (freight/customs); cost nodes only."
       vendorId: ID
-      "Freight leg: spread over the whole delivery's goods. Root cost nodes only."
-      deliveryWide: Boolean
-      "Narrow a delivery-wide leg to one purchase's goods. Requires deliveryWide."
-      appliesToPurchaseId: ID
       description: String!
       qty: Float
       costMinor: Float!
@@ -107,19 +118,15 @@ export const typeDefs = /* GraphQL */ `
       costMinor: Float
       "Expedition owed for this cost node; pass null to clear, omit to leave unchanged."
       vendorId: ID
-      "Freight leg: spread over the whole delivery's goods. Root cost nodes only."
-      deliveryWide: Boolean
-      "PO scope; pass null to clear, omit to leave unchanged. Requires deliveryWide."
-      appliesToPurchaseId: ID
       "Reparent: a cost node id to nest under, null for the root, omit to leave unchanged."
       parentItemId: ID
       sortOrder: Int
     ): PurchaseDeliveryItem!
     deleteDeliveryItem(id: ID!): Boolean!
 
-    "Commit a draft delivery: receives stock, recomputes WAC, advances the PO."
+    "Commit a draft delivery. Arrival: receives stock, recomputes WAC, advances the PO. Transit: banks freight, raises courier AP only."
     commitDelivery(id: ID!): PurchaseDelivery!
-    "Reverse a delivered delivery (root only). Stock returns; WAC is not re-valued."
+    "Reverse a delivered delivery (root only). Arrival: stock returns, WAC not re-valued. Transit: courier AP reversed, pool contribution dropped."
     cancelDelivery(id: ID!): PurchaseDelivery!
   }
 `;
@@ -142,7 +149,8 @@ export const resolvers = {
     createdAt: (d: DeliveryRow) => iso(d.createdAt),
     updatedAt: (d: DeliveryRow) => iso(d.updatedAt),
     deliveredAt: (d: DeliveryRow) => iso(d.deliveredAt),
-    targetLocation: (d: DeliveryRow) => locations.getLocation(d.targetLocationId),
+    targetLocation: (d: DeliveryRow) =>
+      d.targetLocationId ? locations.getLocation(d.targetLocationId) : null,
     items: (d: DeliveryRow) => deliveries.listDeliveryItems(d.id),
     leafLandings: (d: DeliveryRow) => deliveries.deliveryLeafLandings(d.id),
     lineCount: (d: DeliveryRow) => deliveries.deliveryLineCount(d.id),
@@ -163,11 +171,11 @@ export const resolvers = {
   Query: {
     deliveries: async (
       _: unknown,
-      args: { status?: DeliveryRow["status"] },
+      args: { status?: DeliveryRow["status"]; kind?: DeliveryRow["kind"] },
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "delivery.draft");
-      return deliveries.listDeliveries(args.status);
+      return deliveries.listDeliveries(args.status, args.kind);
     },
     delivery: async (_: unknown, args: { id: string }, ctx: GraphQLContext) => {
       await requirePermission(ctx, "delivery.draft");
@@ -185,15 +193,21 @@ export const resolvers = {
   Mutation: {
     createDelivery: async (
       _: unknown,
-      args: { date: string; biller?: string | null; targetLocationId: string },
+      args: {
+        date: string;
+        biller?: string | null;
+        targetLocationId?: string | null;
+        kind?: DeliveryRow["kind"] | null;
+      },
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "delivery.draft");
       try {
         return await deliveries.createDelivery({
+          kind: args.kind ?? "arrival",
           date: args.date,
           biller: args.biller ?? null,
-          targetLocationId: args.targetLocationId,
+          targetLocationId: args.targetLocationId ?? null,
           createdByUserId: viewer.userId,
         });
       } catch (e) {

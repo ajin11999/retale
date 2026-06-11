@@ -55,6 +55,8 @@
           description
           qtyOrdered
           qtyDelivered
+          qtyInTransit
+          transitFreightMinor
           unitCostMinor
           sortOrder
         }
@@ -1973,6 +1975,17 @@
                           </Badge>
                         {:else}
                           {i.qtyDelivered}
+                        {/if}
+                        {#if i.qtyInTransit > 0}
+                          <span
+                            class="block text-xs text-violet-700"
+                            title={`On committed transit notes, not yet arrived` +
+                              (i.transitFreightMinor > 0
+                                ? ` · ${formatMoney(i.transitFreightMinor)} freight banked`
+                                : "")}
+                          >
+                            {i.qtyInTransit} in transit
+                          </span>
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">

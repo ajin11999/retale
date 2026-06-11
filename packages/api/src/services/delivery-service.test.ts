@@ -25,6 +25,7 @@ import {
   deleteDelivery,
   DeliveryError,
   type DeliveryErrorCode,
+  updateDelivery,
   updateDeliveryItem,
 } from "./delivery-service.ts";
 
@@ -420,7 +421,7 @@ describe("commitDelivery", () => {
     expect((await getVariant(loose))?.costMinor).toBe(1000);
   });
 
-  test("a delivery-wide leg spreads over flat root leaves by value", async () => {
+  test("a childless root charge spreads over flat root leaves by value", async () => {
     const locationId = await seedLocation();
     const variantA = await seedVariant();
     const variantB = await seedVariant();
@@ -450,9 +451,8 @@ describe("commitDelivery", () => {
     });
     await createDeliveryItem({
       deliveryId: delivery.id,
-      description: "Leg 1: MKS JKT→PTK",
+      description: "Expedition: MKS JKT→PTK",
       costMinor: 100,
-      deliveryWide: true,
     });
 
     await commitDelivery(delivery.id, userId);
@@ -461,7 +461,7 @@ describe("commitDelivery", () => {
     expect((await getVariant(variantB))?.costMinor).toBe(55);
   });
 
-  test("multi-leg: an unscoped leg spreads delivery-wide, a PO-scoped leg over one PO; each courier gets its own AP", async () => {
+  test("multi-charge: a root charge spreads delivery-wide, a grouped charge over its goods; each courier gets its own AP", async () => {
     const locationId = await seedLocation();
     const variantA = await seedVariant();
     const variantB = await seedVariant();
@@ -476,8 +476,17 @@ describe("commitDelivery", () => {
       targetLocationId: locationId,
       createdByUserId: userId,
     });
+    // PO-X goods grouped under courier2's charge (invoiced for PO-X's weight
+    // alone) → that 400 lands on A only.
+    const poXCharge = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Charge 2: PO-X weight",
+      costMinor: 400,
+      vendorId: courier2,
+    });
     await createDeliveryItem({
       deliveryId: delivery.id,
+      parentItemId: poXCharge.id,
       purchaseItemId: a.itemId,
       description: "PO-X goods",
       qty: 4,
@@ -490,22 +499,12 @@ describe("commitDelivery", () => {
       qty: 4,
       costMinor: 4000,
     });
-    // Leg 1: whole delivery → 400 to each PO's goods.
+    // Charge 1: childless at root → whole delivery → 400 to each PO's goods.
     await createDeliveryItem({
       deliveryId: delivery.id,
-      description: "Leg 1: whole shipment",
+      description: "Charge 1: whole shipment",
       costMinor: 800,
-      deliveryWide: true,
       vendorId: courier1,
-    });
-    // Leg 2: invoiced for PO-X only (weight bulked per PO) → 400 to A alone.
-    await createDeliveryItem({
-      deliveryId: delivery.id,
-      description: "Leg 2: PO-X weight",
-      costMinor: 400,
-      deliveryWide: true,
-      appliesToPurchaseId: a.purchaseId,
-      vendorId: courier2,
     });
 
     await commitDelivery(delivery.id, userId);
@@ -522,7 +521,7 @@ describe("commitDelivery", () => {
     expect(ap2[0]?.amountMinor).toBe(400);
   });
 
-  test("an un-flagged childless charge still allocates nothing (root or nested)", async () => {
+  test("a childless charge spreads over its parent's scope: nested → the group, root → the whole delivery", async () => {
     const locationId = await seedLocation();
     const variantId = await seedVariant();
     const { itemId } = await seedPurchaseItem({
@@ -549,13 +548,14 @@ describe("commitDelivery", () => {
       qty: 4,
       costMinor: 4000,
     });
-    // Childless, not delivery-wide: nested and root variants both inert.
+    // Childless beside the goods → charges its siblings (the group's leaves).
     await createDeliveryItem({
       deliveryId: delivery.id,
       parentItemId: group.id,
       description: "Handling (nested, childless)",
       costMinor: 500,
     });
+    // Childless at root → charges every stock leaf of the delivery.
     await createDeliveryItem({
       deliveryId: delivery.id,
       description: "Loose charge (root, childless)",
@@ -564,23 +564,17 @@ describe("commitDelivery", () => {
 
     await commitDelivery(delivery.id, userId);
 
-    // Neither inert charge capitalizes: 4000 / 4 = 1000 flat.
-    expect((await getVariant(variantId))?.costMinor).toBe(1000);
+    // (4000 + 500 + 300) / 4 = 1200.
+    expect((await getVariant(variantId))?.costMinor).toBe(1200);
   });
 
-  test("a leg scoped to a PO absent from the delivery capitalizes nothing but still posts courier AP", async () => {
+  test("a charge grouped away from any goods capitalizes nothing but still posts courier AP", async () => {
     const locationId = await seedLocation();
     const variantId = await seedVariant();
     const present = await seedPurchaseItem({
       variantId,
       qtyOrdered: 4,
       unitCostMinor: 1000,
-    });
-    // A second purchase that ships separately — not in this delivery.
-    const absent = await seedPurchaseItem({
-      variantId: await seedVariant(),
-      qtyOrdered: 1,
-      unitCostMinor: 1,
     });
     const courier = await seedVendor({ kind: "expedition" });
 
@@ -596,12 +590,18 @@ describe("commitDelivery", () => {
       qty: 4,
       costMinor: 4000,
     });
+    // A charge that belongs to goods shipping separately: park it in an empty
+    // group so it spreads over nothing, but the courier's bill is still owed.
+    const parking = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Other shipment's charges",
+      costMinor: 0,
+    });
     await createDeliveryItem({
       deliveryId: delivery.id,
-      description: "Leg for the other PO",
+      parentItemId: parking.id,
+      description: "Freight for the other PO",
       costMinor: 400,
-      deliveryWide: true,
-      appliesToPurchaseId: absent.purchaseId,
       vendorId: courier,
     });
 
@@ -611,105 +611,6 @@ describe("commitDelivery", () => {
     const ap = await ledgerFor(courier);
     expect(ap).toHaveLength(1);
     expect(ap[0]?.amountMinor).toBe(400);
-  });
-
-  test("delivery-wide and PO-scope guard rails", async () => {
-    const locationId = await seedLocation();
-    const variantId = await seedVariant();
-    const { purchaseId, itemId } = await seedPurchaseItem({
-      variantId,
-      qtyOrdered: 4,
-      unitCostMinor: 1000,
-    });
-    const delivery = await createDelivery({
-      date: "2026-05-16",
-      targetLocationId: locationId,
-      createdByUserId: userId,
-    });
-
-    // deliveryWide on a goods leaf.
-    await expectError(
-      createDeliveryItem({
-        deliveryId: delivery.id,
-        purchaseItemId: itemId,
-        description: "Goods",
-        qty: 4,
-        costMinor: 4000,
-        deliveryWide: true,
-      }),
-      "INVALID_INPUT",
-    );
-
-    const group = await createDeliveryItem({
-      deliveryId: delivery.id,
-      description: "Group",
-      costMinor: 0,
-    });
-    // deliveryWide on a nested node.
-    await expectError(
-      createDeliveryItem({
-        deliveryId: delivery.id,
-        parentItemId: group.id,
-        description: "Nested leg",
-        costMinor: 100,
-        deliveryWide: true,
-      }),
-      "INVALID_INPUT",
-    );
-    // PO scope without deliveryWide.
-    await expectError(
-      createDeliveryItem({
-        deliveryId: delivery.id,
-        description: "Scoped but not wide",
-        costMinor: 100,
-        appliesToPurchaseId: purchaseId,
-      }),
-      "INVALID_INPUT",
-    );
-    // Unknown purchase.
-    await expectError(
-      createDeliveryItem({
-        deliveryId: delivery.id,
-        description: "Leg",
-        costMinor: 100,
-        deliveryWide: true,
-        appliesToPurchaseId: ulid(),
-      }),
-      "INVALID_INPUT",
-    );
-
-    const leg = await createDeliveryItem({
-      deliveryId: delivery.id,
-      description: "Leg",
-      costMinor: 100,
-      deliveryWide: true,
-    });
-    // Nothing can be created under a leg…
-    await expectError(
-      createDeliveryItem({
-        deliveryId: delivery.id,
-        parentItemId: leg.id,
-        description: "Inside a leg",
-        costMinor: 10,
-      }),
-      "INVALID_INPUT",
-    );
-    // …a leg cannot be nested without clearing its scope…
-    await expectError(
-      updateDeliveryItem(leg.id, { parentItemId: group.id }),
-      "INVALID_INPUT",
-    );
-    // …and a node with children cannot be flagged delivery-wide.
-    await createDeliveryItem({
-      deliveryId: delivery.id,
-      parentItemId: group.id,
-      description: "Child charge",
-      costMinor: 10,
-    });
-    await expectError(
-      updateDeliveryItem(group.id, { deliveryWide: true }),
-      "INVALID_INPUT",
-    );
   });
 
   test("rejects nesting a line under a goods leaf", async () => {
@@ -1120,5 +1021,357 @@ describe("delivery accounts payable", () => {
     expect((await getVendor(supplierId))?.balanceMinor).toBe(0);
 
     expect((await getVendor(courierId))?.balanceMinor).toBe(0);
+  });
+});
+
+describe("transit deliveries", () => {
+  const itemsOf = (deliveryId: string) =>
+    db
+      .select()
+      .from(purchaseDeliveryItems)
+      .where(eq(purchaseDeliveryItems.deliveryId, deliveryId));
+
+  /** One transit note: a goods leaf + a childless root freight charge. */
+  async function commitTransitHop(input: {
+    purchaseItemId: string;
+    qty: number;
+    lineValueMinor: number;
+    freightMinor: number;
+    courierId?: string;
+  }): Promise<string> {
+    const t = await createDelivery({
+      kind: "transit",
+      date: "2026-05-16",
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: t.id,
+      purchaseItemId: input.purchaseItemId,
+      description: "Carried goods",
+      qty: input.qty,
+      costMinor: input.lineValueMinor,
+    });
+    await createDeliveryItem({
+      deliveryId: t.id,
+      description: "Hop freight",
+      costMinor: input.freightMinor,
+      vendorId: input.courierId ?? null,
+    });
+    await commitDelivery(t.id, userId);
+    return t.id;
+  }
+
+  test("commit banks the freight pool and raises courier AP only — no stock, no qty_delivered", async () => {
+    const variantId = await seedVariant();
+    const supplierId = await seedVendor({ paymentTermsDays: 30 });
+    const courierId = await seedVendor({ kind: "expedition" });
+    const { purchaseId, itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+      vendorId: supplierId,
+    });
+
+    const transitId = await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+      courierId,
+    });
+
+    expect((await getDelivery(transitId))?.status).toBe("delivered");
+    // The whole hop charge froze onto the one stock leaf.
+    const leaves = (await itemsOf(transitId)).filter((i) => i.purchaseItemId != null);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]?.allocatedFreightMinor).toBe(1000);
+    // Courier owed; supplier NOT billed for goods in transit.
+    expect((await getVendor(courierId))?.balanceMinor).toBe(1000);
+    expect(await ledgerFor(supplierId)).toHaveLength(0);
+    // No stock anywhere, PO untouched.
+    expect(await db.select().from(stockMovements)).toHaveLength(0);
+    expect((await getPurchaseItem(itemId))?.qtyDelivered).toBe(0);
+    expect((await getPurchase(purchaseId))?.status).toBe("open");
+  });
+
+  test("arrival picks up the pooled rate on top of base + own freight", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const supplierId = await seedVendor();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+      vendorId: supplierId,
+    });
+
+    // Hop: 10 units, 1000 freight → 100/unit banked.
+    await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+    });
+
+    const arrival = await createDelivery({
+      date: "2026-05-18",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: arrival.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await commitDelivery(arrival.id, userId);
+
+    // (5000 base + 10 × 100 transit) / 10 = 600.
+    const moves = await movementsFor(variantId);
+    expect(moves).toHaveLength(1);
+    expect(moves[0]?.unitCost).toBe(600);
+    expect((await getVariant(variantId))?.costMinor).toBe(600);
+    // Goods AP raised at arrival, not in transit.
+    const supplierLedger = await ledgerFor(supplierId);
+    expect(supplierLedger).toHaveLength(1);
+    expect(supplierLedger[0]?.amountMinor).toBe(5000);
+    expect((await getPurchaseItem(itemId))?.qtyDelivered).toBe(10);
+  });
+
+  test("a partial arrival picks up rate × received qty only", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+    });
+
+    const arrival = await createDelivery({
+      date: "2026-05-18",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: arrival.id,
+      purchaseItemId: itemId,
+      description: "Widgets (first box)",
+      qty: 4,
+      costMinor: 2000,
+    });
+    await commitDelivery(arrival.id, userId);
+
+    // (2000 + 4 × 100) / 4 = 600.
+    expect((await movementsFor(variantId))[0]?.unitCost).toBe(600);
+  });
+
+  test("serial hops sum their per-unit rates — the full combined freight lands", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    // The same 10 units ride both notes: 1000 then 500 → 150/unit total.
+    await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+    });
+    await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 500,
+    });
+
+    const arrival = await createDelivery({
+      date: "2026-05-20",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: arrival.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await commitDelivery(arrival.id, userId);
+
+    // (5000 + 1000 + 500) / 10 = 650 — pooling quantities would have halved it.
+    expect((await movementsFor(variantId))[0]?.unitCost).toBe(650);
+  });
+
+  test("one note cannot carry more than ordered, but repeat hops of the full qty are fine", async () => {
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+
+    const t = await createDelivery({
+      kind: "transit",
+      date: "2026-05-16",
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: t.id,
+      purchaseItemId: itemId,
+      description: "Too many on one note",
+      qty: 11,
+      costMinor: 5500,
+    });
+    await expectError(commitDelivery(t.id, userId), "OVER_DELIVERY");
+
+    // Two full-qty hops commit fine (multi-hop repeats the same units).
+    await commitTransitHop({ purchaseItemId: itemId, qty: 10, lineValueMinor: 5000, freightMinor: 100 });
+    await commitTransitHop({ purchaseItemId: itemId, qty: 10, lineValueMinor: 5000, freightMinor: 100 });
+  });
+
+  test("cancelling a transit hop reverses its courier AP and drops it from the pool; baked arrivals keep their cost", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const courierId = await seedVendor({ kind: "expedition" });
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    const transitId = await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+      courierId,
+    });
+
+    // First arrival (6 units) bakes the 100/unit rate in.
+    const first = await createDelivery({
+      date: "2026-05-18",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: first.id,
+      purchaseItemId: itemId,
+      description: "First box",
+      qty: 6,
+      costMinor: 3000,
+    });
+    await commitDelivery(first.id, userId);
+    expect((await movementsFor(variantId))[0]?.unitCost).toBe(600);
+
+    const cancelled = await cancelDelivery(transitId, userId);
+    expect(cancelled.status).toBe("cancelled");
+    // Courier AP reversed; no stock was ever touched by the transit.
+    expect((await getVendor(courierId))?.balanceMinor).toBe(0);
+    // The first arrival's movement is untouched ("gist accuracy").
+    expect((await movementsFor(variantId))[0]?.unitCost).toBe(600);
+
+    // A later arrival sees an empty pool → no pickup.
+    const second = await createDelivery({
+      date: "2026-05-20",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: second.id,
+      purchaseItemId: itemId,
+      description: "Rest",
+      qty: 4,
+      costMinor: 2000,
+    });
+    await commitDelivery(second.id, userId);
+    const moves = await movementsFor(variantId);
+    expect(moves.find((m) => m.refId === second.id)?.unitCost).toBe(500);
+  });
+
+  test("cancelling an arrival never decrements the pool — a re-receipt picks up the same rate", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const { itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 500,
+    });
+    await commitTransitHop({
+      purchaseItemId: itemId,
+      qty: 10,
+      lineValueMinor: 5000,
+      freightMinor: 1000,
+    });
+
+    const arrival = await createDelivery({
+      date: "2026-05-18",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: arrival.id,
+      purchaseItemId: itemId,
+      description: "Widgets",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await commitDelivery(arrival.id, userId);
+    await cancelDelivery(arrival.id, userId);
+
+    const redo = await createDelivery({
+      date: "2026-05-21",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: redo.id,
+      purchaseItemId: itemId,
+      description: "Widgets (re-receipt)",
+      qty: 10,
+      costMinor: 5000,
+    });
+    await commitDelivery(redo.id, userId);
+    const moves = await movementsFor(variantId);
+    expect(moves.find((m) => m.refId === redo.id)?.unitCost).toBe(600);
+  });
+
+  test("kind drives the target-location rules at create and update", async () => {
+    const locationId = await seedLocation();
+    // A transit delivery must not have a location…
+    await expectError(
+      createDelivery({
+        kind: "transit",
+        date: "2026-05-16",
+        targetLocationId: locationId,
+        createdByUserId: userId,
+      }),
+      "INVALID_INPUT",
+    );
+    // …and an arrival must have one.
+    await expectError(
+      createDelivery({ date: "2026-05-16", createdByUserId: userId }),
+      "INVALID_INPUT",
+    );
+
+    const t = await createDelivery({
+      kind: "transit",
+      date: "2026-05-16",
+      createdByUserId: userId,
+    });
+    expect(t.kind).toBe("transit");
+    expect(t.targetLocationId).toBeNull();
+    await expectError(
+      updateDelivery(t.id, { targetLocationId: locationId }),
+      "INVALID_INPUT",
+    );
   });
 });

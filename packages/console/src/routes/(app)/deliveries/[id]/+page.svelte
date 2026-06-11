@@ -15,6 +15,7 @@
     query DeliveryDetail($id: ID!) {
       delivery(id: $id) {
         id
+        kind
         date
         biller
         targetLocationId
@@ -31,11 +32,10 @@
           purchaseItemId
           vendorId
           vendor { id name }
-          deliveryWide
-          appliesToPurchaseId
           description
           qty
           costMinor
+          allocatedFreightMinor
           sortOrder
           purchaseItem { id purchaseId qtyOrdered qtyDelivered }
         }
@@ -43,6 +43,7 @@
           itemId
           landedUnitCostMinor
           freightMinor
+          transitFreightMinor
           isStock
         }
       }
@@ -112,8 +113,6 @@
       $qty: Float
       $costMinor: Float!
       $vendorId: ID
-      $deliveryWide: Boolean
-      $appliesToPurchaseId: ID
     ) {
       createDeliveryItem(
         deliveryId: $deliveryId
@@ -123,8 +122,6 @@
         qty: $qty
         costMinor: $costMinor
         vendorId: $vendorId
-        deliveryWide: $deliveryWide
-        appliesToPurchaseId: $appliesToPurchaseId
       ) {
         id
       }
@@ -139,7 +136,6 @@
       $costMinor: Float
       $vendorId: ID
       $parentItemId: ID
-      $appliesToPurchaseId: ID
     ) {
       updateDeliveryItem(
         id: $id
@@ -148,7 +144,6 @@
         costMinor: $costMinor
         vendorId: $vendorId
         parentItemId: $parentItemId
-        appliesToPurchaseId: $appliesToPurchaseId
       ) {
         id
       }
@@ -292,7 +287,11 @@
       if (it.purchaseItemId != null) goods += it.costMinor;
       else charges += it.costMinor;
     }
-    return { goods, charges, total: goods + charges };
+    // Arrival only: cost picked up from committed transit hops (qty × pooled
+    // rate per line) — part of what lands into stock but billed on the hops.
+    let transit = 0;
+    for (const l of delivery?.leafLandings ?? []) transit += l.transitFreightMinor;
+    return { goods, charges, transit, total: goods + charges + transit };
   });
 
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -303,6 +302,7 @@
 
   const isDraft = $derived(delivery?.status === "draft");
   const editable = $derived(isDraft && canDraft);
+  const isTransit = $derived(delivery?.kind === "transit");
 
   // ---- Tree build ----------------------------------------------------------
   // Items are flat; build a parent → children map and surface roots in
@@ -329,121 +329,30 @@
     return build(null);
   });
 
-  // ---- Freight legs --------------------------------------------------------
-  // A leg is a root cost node flagged delivery-wide: one expedition's invoice
-  // for one transit (JKT→PTK, PTK→KTP, …), spread by value over the whole
-  // delivery's goods — or one PO's goods when scoped.
-  const freightLegs = $derived(
-    tree
-      .filter((n) => n.item.deliveryWide && n.item.purchaseItemId == null)
-      .map((n) => n.item),
-  );
-
-  // POs represented by this delivery's goods leaves — the leg scope choices.
-  const leafPoIds = $derived.by(() => {
-    const s = new Set<string>();
-    for (const it of items) {
-      const pid = it.purchaseItem?.purchaseId;
-      if (it.purchaseItemId != null && pid) s.add(pid);
-    }
-    return s;
-  });
-  const poLabel = $derived.by(() => {
-    const m = new Map<string, string>();
-    for (const p of openPurchases) {
-      m.set(p.id, `${p.snapshotVendorName} · #${p.id.slice(-6)}`);
-    }
-    return (id: string) => m.get(id) ?? `PO #${id.slice(-6)}`;
-  });
-  const deliveryPoOptions = $derived([
-    { value: "", label: "Whole delivery" },
-    ...[...leafPoIds].map((id) => ({ value: id, label: poLabel(id) })),
-  ]);
-
-  // Charges that will capitalize into nothing at commit: a cost node with no
-  // goods anywhere in its subtree and no delivery-wide flag, or a leg scoped
-  // to a PO that has no goods in this delivery. Courier AP still posts for
-  // them — surfaced as a warning before commit, never a blocker.
+  // ---- Charge scope (mirrors the server's shape-based allocation) ----------
+  // A cost node with children spreads over its own subtree's goods; a childless
+  // cost line spreads over its parent's subtree (the whole delivery at root).
+  // Charges that will capitalize into nothing at commit — a charge grouped
+  // where no goods sit — still post courier AP; surfaced as a warning before
+  // commit, never a blocker.
   const inertCharges = $derived.by(() => {
     const out: Item[] = [];
     const hasGoods = (n: Node): boolean =>
       n.children.some((c) => c.item.purchaseItemId != null || hasGoods(c));
-    const walk = (nodes: Node[]) => {
+    const anyGoods = items.some((it) => it.purchaseItemId != null);
+    const walk = (nodes: Node[], siblingsHaveGoods: boolean) => {
       for (const n of nodes) {
         if (n.item.purchaseItemId == null && n.item.costMinor > 0) {
-          if (n.item.deliveryWide) {
-            const scope = n.item.appliesToPurchaseId;
-            if ((scope && !leafPoIds.has(scope)) || leafPoIds.size === 0) {
-              out.push(n.item);
-            }
-          } else if (!hasGoods(n)) {
-            out.push(n.item);
-          }
+          const inert =
+            n.children.length > 0 ? !hasGoods(n) : !siblingsHaveGoods;
+          if (inert) out.push(n.item);
         }
-        walk(n.children);
+        walk(n.children, hasGoods(n));
       }
     };
-    walk(tree);
+    walk(tree, anyGoods);
     return out;
   });
-
-  // Leg add / edit form. legEditId: null = closed, "" = adding, id = editing.
-  let legEditId = $state<string | null>(null);
-  let legDesc = $state("");
-  let legCost = $state<number | null>(null);
-  let legVendorId = $state("");
-  let legPoId = $state("");
-
-  function startLegAdd() {
-    legEditId = "";
-    legDesc = "";
-    legCost = null;
-    legVendorId = "";
-    legPoId = "";
-  }
-  function startLegEdit(it: Item) {
-    legEditId = it.id;
-    legDesc = it.description;
-    legCost = it.costMinor;
-    legVendorId = it.vendorId ?? "";
-    legPoId = it.appliesToPurchaseId ?? "";
-  }
-
-  async function saveLeg() {
-    if (!delivery || legEditId === null) return;
-    if (!legDesc.trim() || legCost == null) return;
-    busy = true;
-    error = null;
-    try {
-      const res =
-        legEditId === ""
-          ? await CreateDeliveryItem.mutate({
-              deliveryId: delivery.id,
-              description: legDesc.trim(),
-              costMinor: legCost,
-              vendorId: legVendorId || null,
-              deliveryWide: true,
-              appliesToPurchaseId: legPoId || null,
-            })
-          : await UpdateDeliveryItem.mutate({
-              id: legEditId,
-              description: legDesc.trim(),
-              costMinor: legCost,
-              vendorId: legVendorId || null,
-              appliesToPurchaseId: legPoId || null,
-            });
-      if (res.errors?.length) {
-        error = res.errors[0].message;
-        return;
-      }
-      legEditId = null;
-      await refetch();
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      busy = false;
-    }
-  }
 
   // ---- Header editing ------------------------------------------------------
   let editingHeader = $state(false);
@@ -455,7 +364,7 @@
     if (!delivery) return;
     hDate = delivery.date.slice(0, 10);
     hBiller = delivery.biller ?? "";
-    hTargetLocationId = delivery.targetLocationId;
+    hTargetLocationId = delivery.targetLocationId ?? "";
     editingHeader = true;
   }
 
@@ -471,7 +380,8 @@
         id: delivery.id,
         date: hDate,
         biller: hBiller.trim() || null,
-        targetLocationId: hTargetLocationId,
+        // A transit note has no target location — never send one for it.
+        ...(isTransit ? {} : { targetLocationId: hTargetLocationId }),
       });
       if (res.errors?.length) {
         error = res.errors[0].message;
@@ -685,10 +595,7 @@
     };
     walk(editingId);
     return items
-      .filter(
-        // A delivery-wide leg cannot contain items, so it is never a target.
-        (it) => it.purchaseItemId == null && !it.deliveryWide && !blocked.has(it.id),
-      )
+      .filter((it) => it.purchaseItemId == null && !blocked.has(it.id))
       .map((it) => ({ value: it.id, label: it.description }));
   });
 
@@ -836,12 +743,12 @@
   // ---- Lifecycle: commit / cancel / delete --------------------------------
   async function commit() {
     if (!delivery) return;
-    if (
-      !confirm(
-        "Commit this delivery? Stock will be received and product costs " +
-          "may be recomputed — this cannot be edited afterwards.",
-      )
-    ) {
+    const msg = isTransit
+      ? "Commit this transit note? The freight payable is raised and its cost " +
+        "banks against the PO lines — no stock moves. This cannot be edited afterwards."
+      : "Commit this delivery? Stock will be received and product costs " +
+        "may be recomputed — this cannot be edited afterwards.";
+    if (!confirm(msg)) {
       return;
     }
     busy = true;
@@ -862,7 +769,11 @@
 
   async function cancelDelivered() {
     if (!delivery) return;
-    if (!confirm("Reverse this delivery? Stock will be returned.")) return;
+    const msg = isTransit
+      ? "Reverse this transit note? The courier payable is reversed and its " +
+        "banked cost no longer applies to future arrivals."
+      : "Reverse this delivery? Stock will be returned.";
+    if (!confirm(msg)) return;
     busy = true;
     error = null;
     try {
@@ -938,14 +849,16 @@
                 <span class="text-sm font-medium">Biller</span>
                 <Input bind:value={hBiller} />
               </label>
-              <label class="space-y-1">
-                <span class="text-sm font-medium">Target location</span>
-                <Combobox
-                  options={locationOptions}
-                  bind:value={hTargetLocationId}
-                  placeholder="Search location…"
-                />
-              </label>
+              {#if !isTransit}
+                <label class="space-y-1">
+                  <span class="text-sm font-medium">Target location</span>
+                  <Combobox
+                    options={locationOptions}
+                    bind:value={hTargetLocationId}
+                    placeholder="Search location…"
+                  />
+                </label>
+              {/if}
             </div>
             <div class="mt-3 flex gap-2">
               <Button size="sm" disabled={busy} onclick={saveHeader}>Save</Button>
@@ -958,16 +871,18 @@
             </div>
           {:else}
             <h1 class="text-xl font-semibold">
-              Delivery {fmtDate(delivery.date)}
+              {isTransit ? "Transit note" : "Delivery"}
+              {fmtDate(delivery.date)}
             </h1>
             <p class="text-sm text-muted-foreground">
-              {delivery.biller ?? "No biller"} → {locationPaths.get(
-                delivery.targetLocationId,
-              ) ??
-                delivery.targetLocation?.name ??
-                "—"}
+              {delivery.biller ?? "No biller"}{#if !isTransit}
+                &nbsp;→ {(delivery.targetLocationId
+                  ? locationPaths.get(delivery.targetLocationId)
+                  : null) ??
+                  delivery.targetLocation?.name ??
+                  "—"}{/if}
               {#if delivery.deliveredAt}
-                · delivered {fmtDate(delivery.deliveredAt)}
+                · {isTransit ? "committed" : "delivered"} {fmtDate(delivery.deliveredAt)}
               {/if}
             </p>
             {#if delivery.purchaseId}
@@ -985,9 +900,18 @@
         </div>
 
         <div class="flex flex-col items-end gap-2">
-          <Badge class={statusBadge(delivery.status)}>{delivery.status}</Badge>
+          <div class="flex gap-1">
+            {#if isTransit}
+              <Badge class="bg-violet-100 text-violet-700">transit</Badge>
+            {/if}
+            <Badge class={statusBadge(delivery.status)}>{delivery.status}</Badge>
+          </div>
           <p class="text-xs text-muted-foreground">
-            Total {formatMoney(costSummary.total)}
+            {#if isTransit}
+              Freight {formatMoney(costSummary.charges)}
+            {:else}
+              Total {formatMoney(costSummary.total)}
+            {/if}
           </p>
         </div>
       </div>
@@ -995,8 +919,8 @@
       {#if isDraft && inertCharges.length > 0}
         <div class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           These charges won't be capitalized into any goods (courier AP still
-          posts): {inertCharges.map((c) => c.description).join(", ")}. Flag a
-          charge as a freight leg, or nest goods under it.
+          posts): {inertCharges.map((c) => c.description).join(", ")}. Move a
+          charge next to the goods it belongs to, or nest goods under it.
         </div>
       {/if}
 
@@ -1011,7 +935,7 @@
           <Button
             size="sm"
             disabled={busy || !canCommit || items.length === 0}
-            onclick={commit}>Commit delivery</Button
+            onclick={commit}>{isTransit ? "Commit transit note" : "Commit delivery"}</Button
           >
           <Button
             size="sm"
@@ -1028,131 +952,6 @@
           >
         {/if}
       </div>
-    </div>
-
-    <!-- Freight legs -->
-    <div class="rounded-lg border bg-card p-4">
-      <div class="mb-1 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Freight legs</h2>
-        {#if editable}
-          <Button size="sm" variant="outline" onclick={startLegAdd}>
-            Add leg
-          </Button>
-        {/if}
-      </div>
-      <p class="mb-3 text-xs text-muted-foreground">
-        One row per transit invoice — each expedition's billed amount for its
-        stretch of the journey. A leg spreads by value over <em>all</em> goods
-        in this delivery, or only one PO's goods when scoped. Couriers get
-        their own payable on commit.
-      </p>
-
-      {#if freightLegs.length === 0 && legEditId === null}
-        <p class="text-sm text-muted-foreground">
-          No freight legs{editable ? " — add one per expedition invoice." : "."}
-        </p>
-      {:else}
-        <ul class="space-y-1">
-          {#each freightLegs as leg (leg.id)}
-            <li class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40">
-              {#if legEditId === leg.id}
-                <Input bind:value={legDesc} class="flex-1" />
-                <div class="w-40">
-                  <Combobox
-                    options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
-                    bind:value={legVendorId}
-                    placeholder="Search courier…"
-                  />
-                </div>
-                <Select bind:value={legPoId} class="w-44" title="Spread over the whole delivery or one PO's goods">
-                  {#each deliveryPoOptions as o (o.value)}
-                    <option value={o.value}>{o.label}</option>
-                  {/each}
-                </Select>
-                <MoneyInput bind:value={legCost} class="w-32" />
-                <Button size="sm" disabled={busy} onclick={saveLeg}>Save</Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  onclick={() => (legEditId = null)}>Cancel</Button
-                >
-              {:else}
-                <span class="flex-1 truncate text-sm">
-                  {leg.description}
-                  {#if leg.vendor}
-                    <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
-                      → {leg.vendor.name}
-                    </Badge>
-                  {/if}
-                </span>
-                <span class="text-xs text-muted-foreground">
-                  {leg.appliesToPurchaseId
-                    ? poLabel(leg.appliesToPurchaseId)
-                    : "Whole delivery"}
-                </span>
-                {#if leg.appliesToPurchaseId && !leafPoIds.has(leg.appliesToPurchaseId)}
-                  <span class="text-xs text-amber-600" title="No goods from this PO are in the delivery">
-                    ⚠ PO not in this delivery
-                  </span>
-                {/if}
-                <span class="w-32 text-right text-sm">{formatMoney(leg.costMinor)}</span>
-                {#if editable}
-                  <Button size="sm" variant="ghost" onclick={() => startLegEdit(leg)}>
-                    ✎
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    class="text-destructive"
-                    onclick={() => removeItem(leg.id)}>×</Button
-                  >
-                {/if}
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if legEditId === ""}
-        <div class="mt-2 flex items-end gap-2 rounded-md border bg-muted/40 p-3">
-          <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Description</span>
-            <Input bind:value={legDesc} placeholder="Leg 1: MKS Jakarta → Pontianak" />
-          </label>
-          <label class="w-40 space-y-1">
-            <span class="text-xs font-medium">Courier (AP)</span>
-            <Combobox
-              options={[{ value: "", label: "— None —" }, ...courierOptions]}
-              bind:value={legVendorId}
-              placeholder="Search courier…"
-            />
-          </label>
-          <label class="w-44 space-y-1">
-            <span class="text-xs font-medium">Applies to</span>
-            <Select bind:value={legPoId}>
-              {#each deliveryPoOptions as o (o.value)}
-                <option value={o.value}>{o.label}</option>
-              {/each}
-            </Select>
-          </label>
-          <label class="w-32 space-y-1">
-            <span class="text-xs font-medium">Billed (Rp)</span>
-            <MoneyInput bind:value={legCost} />
-          </label>
-          <Button
-            size="sm"
-            disabled={busy || !legDesc.trim() || legCost == null}
-            onclick={saveLeg}>Add</Button
-          >
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onclick={() => (legEditId = null)}>Cancel</Button
-          >
-        </div>
-      {/if}
     </div>
 
     <!-- Cost tree -->
@@ -1235,20 +1034,39 @@
           {/each}
         </ul>
 
-        <!-- Reconciliation summary: goods + charges = what lands into stock. -->
+        <!-- Reconciliation summary. Arrival: goods + charges + transit pickup
+             = what lands into stock. Transit: only the freight is billed here;
+             goods value is carried for allocation reference only. -->
         <dl class="mt-4 ml-auto w-full max-w-xs space-y-1 border-t pt-3 text-sm">
-          <div class="flex justify-between text-muted-foreground">
-            <dt>Goods value</dt>
-            <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
-          </div>
-          <div class="flex justify-between text-muted-foreground">
-            <dt>Freight &amp; customs</dt>
-            <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
-          </div>
-          <div class="flex justify-between border-t pt-1 font-semibold">
-            <dt>Total landed cost</dt>
-            <dd class="tabular-nums">{formatMoney(costSummary.total)}</dd>
-          </div>
+          {#if isTransit}
+            <div class="flex justify-between text-muted-foreground">
+              <dt>Goods value (allocation basis)</dt>
+              <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
+            </div>
+            <div class="flex justify-between border-t pt-1 font-semibold">
+              <dt>Freight banked to PO lines</dt>
+              <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
+            </div>
+          {:else}
+            <div class="flex justify-between text-muted-foreground">
+              <dt>Goods value</dt>
+              <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
+            </div>
+            <div class="flex justify-between text-muted-foreground">
+              <dt>Freight &amp; customs</dt>
+              <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
+            </div>
+            {#if costSummary.transit > 0}
+              <div class="flex justify-between text-muted-foreground">
+                <dt>Transit cost pickup</dt>
+                <dd class="tabular-nums">{formatMoney(costSummary.transit)}</dd>
+              </div>
+            {/if}
+            <div class="flex justify-between border-t pt-1 font-semibold">
+              <dt>Total landed cost</dt>
+              <dd class="tabular-nums">{formatMoney(costSummary.total)}</dd>
+            </div>
+          {/if}
         </dl>
       {/if}
     </div>
@@ -1484,13 +1302,6 @@
               → {node.item.vendor.name}
             </Badge>
           {/if}
-          {#if node.item.deliveryWide}
-            <span title="Freight leg — spreads over the whole delivery's goods">
-              <Badge class="ml-1 bg-violet-100 text-xs text-violet-700">
-                delivery-wide
-              </Badge>
-            </span>
-          {/if}
         </span>
         {#if node.item.qty != null}
           <span class="text-xs text-muted-foreground">×{node.item.qty}</span>
@@ -1500,12 +1311,24 @@
         </span>
         {#if node.item.purchaseItemId}
           {@const ld = landingByItem.get(node.item.id)}
-          {#if ld?.isStock}
+          {#if ld?.isStock && isTransit}
+            <!-- A transit leaf receives nothing — its freight share banks to
+                 the PO line's transit pool, picked up at arrival. -->
             <span
               class="w-40 text-right text-xs {ld.freightMinor > 0
+                ? 'text-violet-700'
+                : 'text-muted-foreground'}"
+              title="Freight share this line banks against its PO line"
+            >
+              banks {formatMoney(ld.freightMinor)}
+            </span>
+          {:else if ld?.isStock}
+            <span
+              class="w-40 text-right text-xs {ld.freightMinor > 0 ||
+              ld.transitFreightMinor > 0
                 ? 'text-emerald-700'
                 : 'text-muted-foreground'}"
-              title="Landed unit cost = line value + freight share"
+              title="Landed unit cost = line value + freight share + accumulated transit cost"
             >
               → {formatMoney(ld.landedUnitCostMinor)}/unit
             </span>
@@ -1516,7 +1339,7 @@
           <span class="w-40"></span>
         {/if}
         {#if editable}
-          {#if !node.item.purchaseItemId && !node.item.deliveryWide}
+          {#if !node.item.purchaseItemId}
             <Button
               size="sm"
               variant="ghost"

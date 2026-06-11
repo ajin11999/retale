@@ -173,6 +173,8 @@ describe("startReceivingCheck", () => {
     expect(check.status).toBe("draft");
     expect(check.purchaseId).toBe(purchaseId);
     expect(check.targetLocationId).toBe(locationId);
+    // A receiving check is always an arrival — committing it must move stock.
+    expect(check.kind).toBe("arrival");
   });
 
   test("resumes the existing open check instead of creating a second", async () => {

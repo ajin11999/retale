@@ -9,7 +9,6 @@
 import { relations } from "drizzle-orm";
 import {
   bigint,
-  boolean,
   date,
   foreignKey,
   index,
@@ -29,17 +28,29 @@ import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 export const DELIVERY_STATUSES = ["draft", "delivered", "cancelled"] as const;
 
 /**
- * Delivery header. Stock always lands at one `targetLocationId`. The cost tree
- * is editable only while `status = draft`; `totalCostMinor` is a denormalized
- * sum of the tree's root nodes, kept fresh on every tree edit, for list views.
+ * One delivery note = one delivery record. A `transit` delivery is an
+ * intermediate hop (expedition/forwarder): committing it raises freight AP and
+ * banks each leaf's freight share into the transit cost pool — no stock, no
+ * qtyDelivered. An `arrival` delivery is the warehouse receipt: committing it
+ * moves stock and each unit picks up its accumulated transit cost.
+ */
+export const DELIVERY_KINDS = ["transit", "arrival"] as const;
+
+/**
+ * Delivery header. For `arrival` deliveries stock lands at `targetLocationId`;
+ * `transit` deliveries have no target location. The cost tree is editable only
+ * while `status = draft`; `totalCostMinor` is a denormalized sum of the tree's
+ * root nodes, kept fresh on every tree edit, for list views.
  */
 export const purchaseDeliveries = mysqlTable("purchase_deliveries", {
   id: ulidPk(),
+  kind: mysqlEnum(DELIVERY_KINDS).notNull().default("arrival"),
   date: date({ mode: "string" }).notNull(),
   biller: varchar({ length: 200 }),
-  targetLocationId: ulidRef()
-    .notNull()
-    .references(() => locations.id, { onDelete: "restrict" }),
+  // Required for arrival deliveries, always null for transit (service-enforced).
+  targetLocationId: ulidRef().references(() => locations.id, {
+    onDelete: "restrict",
+  }),
   // Set when the delivery is a receiving check tied to a single purchase: it
   // is the resumable draft the purchase detail page reopens. Null marks a
   // hand-built delivery (e.g. a multi-purchase landed-cost receipt). SET NULL
@@ -80,18 +91,15 @@ export const purchaseDeliveryItems = mysqlTable(
     // `purchase_on_account` to this vendor. Null = freight we absorb (no AP).
     // SET NULL on vendor delete drops the AP link but keeps the landed cost.
     vendorId: ulidRef().references(() => vendors.id, { onDelete: "set null" }),
-    // Explicit delivery-wide scope: this cost node (a freight leg) spreads over
-    // every stock leaf of the delivery instead of its own subtree. Root cost
-    // nodes only; never inferred — an unflagged childless node allocates nothing.
-    deliveryWide: boolean().notNull().default(false),
-    // Narrows a deliveryWide leg to one purchase's leaves — for multi-PO
-    // deliveries where an expedition invoices per PO. Requires deliveryWide.
-    // FK declared in the table-extras below to keep the constraint name short.
-    appliesToPurchaseId: ulidRef(),
     description: varchar({ length: 300 }).notNull(),
     // Set only on leaves; in the variant's smallest unit.
     qty: bigint({ mode: "number" }),
     costMinor: bigint({ mode: "number" }).notNull(),
+    // Frozen value-weighted freight share, written per stock leaf when a
+    // *transit* delivery commits. The per-PO-item transit cost pool is derived
+    // from these rows (over delivered transit deliveries); cancelling a transit
+    // delivery removes its contribution via the status filter — never rewritten.
+    allocatedFreightMinor: bigint({ mode: "number" }),
     sortOrder: int().notNull().default(0),
   },
   (t) => [
@@ -100,11 +108,6 @@ export const purchaseDeliveryItems = mysqlTable(
       columns: [t.parentItemId],
       foreignColumns: [t.id],
     }).onDelete("restrict"),
-    foreignKey({
-      name: "pdi_applies_purchase_fk",
-      columns: [t.appliesToPurchaseId],
-      foreignColumns: [purchases.id],
-    }).onDelete("set null"),
     index("purchase_delivery_items_delivery_id_idx").on(t.deliveryId),
     index("purchase_delivery_items_purchase_item_id_idx").on(t.purchaseItemId),
   ],
