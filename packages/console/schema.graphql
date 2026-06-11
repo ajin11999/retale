@@ -35,6 +35,11 @@ type Query {
   Render a PO for sending: message body + recipient + wa.me / mailto: deep link.
   """
   purchaseSendDraft(purchaseId: ID!, channel: PurchaseSendChannel!, recipientOverride: String): PurchaseSendDraft!
+
+  """
+  Latest unit cost per variant across this vendor's non-cancelled purchases — for prefilling new PO lines.
+  """
+  vendorLastCosts(vendorId: ID!): [VendorLastCost!]!
   deliveries(status: DeliveryStatus): [PurchaseDelivery!]!
   delivery(id: ID!): PurchaseDelivery
   customers(includeArchived: Boolean): [Customer!]!
@@ -1058,6 +1063,14 @@ type PurchaseSend {
   expectedDeliveryDate: String
   note: String
   createdAt: String!
+}
+
+"""
+Most recent unit cost a vendor charged for a variant (latest non-cancelled PO).
+"""
+type VendorLastCost {
+  variantId: ID!
+  unitCostMinor: Float!
 }
 
 """One line for the bulk-add picker (reorder suggestions / by-stock)."""

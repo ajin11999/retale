@@ -3,7 +3,7 @@
 // in the same transaction. No stock is touched here — that happens at delivery
 // commit (Phase 3). See docs/design-decisions.md → "Purchases & deliveries".
 
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { productVariants } from "../db/schema/products.ts";
 import {
@@ -699,6 +699,42 @@ export async function invoiceTotalMinor(purchaseId: string): Promise<number> {
     .from(purchaseItems)
     .where(eq(purchaseItems.purchaseId, purchaseId));
   return Number(rows[0]?.total ?? 0);
+}
+
+/**
+ * Most recent unit cost per variant across a vendor's non-cancelled purchases.
+ * This is what the vendor actually charges — unlike `productVariants.costMinor`,
+ * which landed-cost delivery inflates with allocated freight. Used to prefill
+ * new PO lines. Newest purchase wins (by document date, then creation time).
+ */
+export async function lastVendorCosts(
+  vendorId: string,
+): Promise<{ variantId: string; unitCostMinor: number }[]> {
+  const rows = await db
+    .select({
+      variantId: purchaseItems.variantId,
+      unitCostMinor: purchaseItems.unitCostMinor,
+    })
+    .from(purchaseItems)
+    .innerJoin(purchases, eq(purchaseItems.purchaseId, purchases.id))
+    .where(
+      and(
+        eq(purchases.vendorId, vendorId),
+        ne(purchases.status, "cancelled"),
+        isNotNull(purchaseItems.variantId),
+      ),
+    )
+    .orderBy(
+      desc(purchases.date),
+      desc(purchases.createdAt),
+      desc(purchaseItems.id),
+    );
+  const latest = new Map<string, number>();
+  for (const r of rows) {
+    const id = r.variantId as string;
+    if (!latest.has(id)) latest.set(id, r.unitCostMinor);
+  }
+  return [...latest].map(([variantId, unitCostMinor]) => ({ variantId, unitCostMinor }));
 }
 
 /**

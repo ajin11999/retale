@@ -225,6 +225,18 @@
     }
   `);
 
+  // What this PO's vendor last charged per variant (latest non-cancelled PO).
+  // Prefills new-line unit costs — the variant's current cost is only a
+  // fallback, since landed costs inflate it past the vendor's actual price.
+  const VendorLastCostsQuery = graphql(`
+    query PurchaseVendorLastCosts($vendorId: ID!) {
+      vendorLastCosts(vendorId: $vendorId) {
+        variantId
+        unitCostMinor
+      }
+    }
+  `);
+
   // Append the checked suggestions to this PO and flip them to converted.
   const AddReorderToPurchase = graphql(`
     mutation ConsoleAddReorderSuggestionsToPurchase(
@@ -395,6 +407,32 @@
   });
   const variantLabel = (id: string | null | undefined) =>
     id ? (variantOptions.find((v) => v.value === id)?.label ?? "Unknown") : null;
+
+  // ---- Unit-cost prefill ----------------------------------------------------
+  // New lines prefill with what this vendor last charged for the variant; the
+  // variant's current cost is only a fallback (landed costs inflate it past
+  // the vendor's actual price). Ad-hoc purchases (no vendor) have no history,
+  // so they prefill straight from current cost.
+  $effect(() => {
+    const vendorId = purchase?.vendorId;
+    if (vendorId) VendorLastCostsQuery.fetch({ variables: { vendorId } });
+  });
+  const lastCostByVariant = $derived.by(() => {
+    if (!purchase?.vendorId) return new Map<string, number>();
+    return new Map(
+      ($VendorLastCostsQuery.data?.vendorLastCosts ?? []).map((c) => [
+        c.variantId,
+        c.unitCostMinor,
+      ]),
+    );
+  });
+  const currentCostByVariant = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const p of products) for (const v of p.variants) m.set(v.id, v.costMinor);
+    return m;
+  });
+  const prefillCost = (variantId: string) =>
+    lastCostByVariant.get(variantId) ?? currentCostByVariant.get(variantId) ?? 0;
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -809,6 +847,14 @@
     bulkOpen = true;
     bulkTab = "reorder";
     stockSearch = "";
+    // Refresh the vendor's last-charged costs before seeding, so the by-stock
+    // picks prefill from them rather than a stale (or still-loading) store.
+    if (purchase?.vendorId) {
+      await VendorLastCostsQuery.fetch({
+        variables: { vendorId: purchase.vendorId },
+        policy: "NetworkOnly",
+      });
+    }
     // Seed every variant's by-stock pick up front so the row's qty / cost
     // inputs have a stable object to bind to (default qty = reorder gap).
     const sp: Record<string, BulkPick> = {};
@@ -816,7 +862,7 @@
       sp[r.variantId] = {
         selected: false,
         qty: stockDefaultQty(r),
-        unitCostMinor: r.costMinor,
+        unitCostMinor: prefillCost(r.variantId),
       };
     }
     stockPicks = sp;
@@ -1696,7 +1742,10 @@
                     ? createProductForLine
                     : undefined}
                   createLabel={(q) => `Create product “${q}”`}
-                  onChange={() => focusLineField("line-qty")}
+                  onChange={(id) => {
+                    if (itemDraft && id) itemDraft.unitCostMinor = prefillCost(id);
+                    focusLineField("line-qty");
+                  }}
                 />
               </label>
               <label class="space-y-1">

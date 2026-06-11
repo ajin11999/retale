@@ -13,6 +13,7 @@ import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { lastVendorCosts } from "./purchase-service.ts";
 import { preferredVendorByVariant } from "./vendor-variant-code-service.ts";
 
 export type ReorderErrorCode =
@@ -289,6 +290,18 @@ export async function convertSuggestions(
     .where(inArray(productVariants.id, variantIds));
   const costByVariant = new Map(variantRows.map((v) => [v.id, v.costMinor]));
 
+  // Price each line at what its vendor last charged for the variant; the
+  // variant's current cost is only a fallback — landed costs inflate it past
+  // the vendor's actual price.
+  const lastCostByVendor = new Map<string, Map<string, number>>();
+  for (const vendorId of vendorIds) {
+    const last = await lastVendorCosts(vendorId);
+    lastCostByVendor.set(
+      vendorId,
+      new Map(last.map((c) => [c.variantId, c.unitCostMinor])),
+    );
+  }
+
   const today = dateStamp(new Date());
 
   return db.transaction(async (tx) => {
@@ -311,7 +324,10 @@ export async function convertSuggestions(
           purchaseId,
           variantId: r.suggestion.variantId,
           qtyOrdered: r.qty,
-          unitCostMinor: costByVariant.get(r.suggestion.variantId) ?? 0,
+          unitCostMinor:
+            lastCostByVendor.get(vendorId)?.get(r.suggestion.variantId) ??
+            costByVariant.get(r.suggestion.variantId) ??
+            0,
           sortOrder: i,
         })),
       );
@@ -345,8 +361,9 @@ type PurchaseItem = typeof purchaseItems.$inferSelect;
 
 /**
  * Append selected open suggestions as lines on an *existing* purchase — the PO
- * editor's bulk-add picker. Each line is priced at the variant's current cost
- * and appended after the PO's current max `sortOrder`. The picked suggestions
+ * editor's bulk-add picker. Each line is priced at what the PO's vendor last
+ * charged for the variant (falling back to the variant's current cost) and
+ * appended after the PO's current max `sortOrder`. The picked suggestions
  * are flipped to `converted` so the next scan won't re-suggest them. Atomic:
  * either every line is added, every suggestion converted, and the revision
  * bumped, or nothing. The suggestion's own vendor is irrelevant here — the line
@@ -384,13 +401,23 @@ export async function addSuggestionsToPurchase(
     resolved.push({ suggestion, qty });
   }
 
-  // Gather variant costs up front.
+  // Gather variant costs up front. Prefer what this PO's vendor last charged
+  // (latest non-cancelled PO line) — the variant's current cost is only a
+  // fallback, since landed costs inflate it past the vendor's actual price.
   const variantIds = [...new Set(resolved.map((r) => r.suggestion.variantId))];
   const variantRows = await db
     .select({ id: productVariants.id, costMinor: productVariants.costMinor })
     .from(productVariants)
     .where(inArray(productVariants.id, variantIds));
   const costByVariant = new Map(variantRows.map((v) => [v.id, v.costMinor]));
+  const lastCost = purchase.vendorId
+    ? new Map(
+        (await lastVendorCosts(purchase.vendorId)).map((c) => [
+          c.variantId,
+          c.unitCostMinor,
+        ]),
+      )
+    : new Map<string, number>();
 
   const ids = await db.transaction(async (tx) => {
     const [{ maxSort } = { maxSort: null }] = await tx
@@ -403,7 +430,10 @@ export async function addSuggestionsToPurchase(
       purchaseId,
       variantId: r.suggestion.variantId,
       qtyOrdered: r.qty,
-      unitCostMinor: costByVariant.get(r.suggestion.variantId) ?? 0,
+      unitCostMinor:
+        lastCost.get(r.suggestion.variantId) ??
+        costByVariant.get(r.suggestion.variantId) ??
+        0,
       sortOrder: next++,
     }));
     await tx.insert(purchaseItems).values(rows);

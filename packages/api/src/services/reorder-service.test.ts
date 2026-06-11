@@ -113,6 +113,7 @@ async function seedPurchase(opts: {
   qtyDelivered?: number;
   status?: "open" | "complete" | "cancelled";
   date?: string;
+  unitCostMinor?: number;
 }): Promise<string> {
   const purchaseId = ulid();
   await db.insert(purchases).values({
@@ -128,7 +129,7 @@ async function seedPurchase(opts: {
     variantId: opts.variantId,
     qtyOrdered: opts.qtyOrdered,
     qtyDelivered: opts.qtyDelivered ?? 0,
-    unitCostMinor: 500,
+    unitCostMinor: opts.unitCostMinor ?? 500,
   });
   return purchaseId;
 }
@@ -372,6 +373,33 @@ describe("convertSuggestions", () => {
     expect(items[0]!.qtyOrdered).toBe(99);
   });
 
+  test("prices lines at the vendor's last purchase cost over current variant cost", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant({
+      totalQty: 0,
+      reorderPoint: 10,
+      reorderQty: 20,
+      primaryVendorId: vendorId,
+      costMinor: 700, // current cost — landed costs folded in, must not win
+    });
+    // What the vendor actually charged on its latest (fully delivered) PO.
+    await seedPurchase({
+      vendorId,
+      variantId,
+      qtyOrdered: 5,
+      qtyDelivered: 5,
+      status: "complete",
+      unitCostMinor: 555,
+    });
+    const [s] = await runReorderScan();
+    const created = await convertSuggestions([{ suggestionId: s!.id }], userId);
+    const items = await db
+      .select()
+      .from(purchaseItems)
+      .where(eq(purchaseItems.purchaseId, created[0]!.id));
+    expect(items[0]!.unitCostMinor).toBe(555);
+  });
+
   test("rejects an unassigned suggestion with no vendor override", async () => {
     await seedVariant({ totalQty: 0, reorderPoint: 10 });
     const [s] = await runReorderScan();
@@ -493,6 +521,38 @@ describe("addSuggestionsToPurchase", () => {
       { suggestionId: s!.id },
     ]);
     expect(added[0]!.sortOrder).toBe(1); // existing line was sortOrder 0
+  });
+
+  test("prefers the PO vendor's last purchase cost over current variant cost", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant({
+      totalQty: 0,
+      reorderPoint: 10,
+      costMinor: 700, // current cost — landed costs folded in, must not win
+    });
+    // The vendor's latest (fully delivered) PO priced this variant at 555.
+    await seedPurchase({
+      vendorId,
+      variantId,
+      qtyOrdered: 5,
+      qtyDelivered: 5,
+      status: "complete",
+      unitCostMinor: 555,
+    });
+    const [s] = await runReorderScan();
+    // Target PO belongs to the same vendor.
+    const targetId = ulid();
+    await db.insert(purchases).values({
+      id: targetId,
+      vendorId,
+      snapshotVendorName: "Target",
+      date: "2026-02-01",
+      status: "open",
+    });
+    const added = await addSuggestionsToPurchase(targetId, [
+      { suggestionId: s!.id },
+    ]);
+    expect(added[0]!.unitCostMinor).toBe(555);
   });
 
   test("rejects adding to a cancelled purchase", async () => {

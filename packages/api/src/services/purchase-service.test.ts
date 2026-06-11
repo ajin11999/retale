@@ -23,6 +23,7 @@ import {
   createPurchase,
   createSection,
   getPurchase,
+  lastVendorCosts,
   listItems,
   listSections,
   listSends,
@@ -430,5 +431,81 @@ describe("createItems (bulk add)", () => {
       createItems({ purchaseId: purchase.id, lines: [] }),
       "INVALID_INPUT",
     );
+  });
+});
+
+describe("lastVendorCosts", () => {
+  test("returns each variant's cost from the vendor's newest purchase", async () => {
+    const vendorId = await seedVendor();
+    const v1 = await seedVariant();
+    const v2 = await seedVariant();
+    const older = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: older.id, variantId: v1, qtyOrdered: 1, unitCostMinor: 100 });
+    await createItem({ purchaseId: older.id, variantId: v2, qtyOrdered: 1, unitCostMinor: 900 });
+    const newer = await createPurchase({
+      vendorId,
+      date: "2026-02-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: newer.id, variantId: v1, qtyOrdered: 1, unitCostMinor: 150 });
+
+    const costs = new Map(
+      (await lastVendorCosts(vendorId)).map((c) => [c.variantId, c.unitCostMinor]),
+    );
+    // v1 comes from the newer purchase; v2 only appears on the older one.
+    expect(costs.get(v1)).toBe(150);
+    expect(costs.get(v2)).toBe(900);
+  });
+
+  test("ignores cancelled purchases, other vendors, and non-stock lines", async () => {
+    const vendorId = await seedVendor();
+    const otherVendorId = await seedVendor();
+    const variantId = await seedVariant();
+
+    const kept = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: kept.id, variantId, qtyOrdered: 1, unitCostMinor: 100 });
+    // A non-stock line never surfaces as a variant cost.
+    await createItem({
+      purchaseId: kept.id,
+      variantId: null,
+      description: "Freight",
+      qtyOrdered: 1,
+      unitCostMinor: 5000,
+    });
+
+    // Newer but cancelled — must not shadow the kept cost.
+    const cancelled = await createPurchase({
+      vendorId,
+      date: "2026-02-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: cancelled.id, variantId, qtyOrdered: 1, unitCostMinor: 999 });
+    await cancelPurchase(cancelled.id, userId);
+
+    // Newer but from a different vendor.
+    const other = await createPurchase({
+      vendorId: otherVendorId,
+      date: "2026-03-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: other.id, variantId, qtyOrdered: 1, unitCostMinor: 777 });
+
+    const costs = await lastVendorCosts(vendorId);
+    expect(costs).toHaveLength(1);
+    expect(costs[0]!.variantId).toBe(variantId);
+    expect(costs[0]!.unitCostMinor).toBe(100);
+  });
+
+  test("returns empty for a vendor with no purchase history", async () => {
+    const vendorId = await seedVendor();
+    expect(await lastVendorCosts(vendorId)).toHaveLength(0);
   });
 });

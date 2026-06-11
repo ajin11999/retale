@@ -94,6 +94,12 @@ export const typeDefs = /* GraphQL */ `
     createdAt: String!
   }
 
+  "Most recent unit cost a vendor charged for a variant (latest non-cancelled PO)."
+  type VendorLastCost {
+    variantId: ID!
+    unitCostMinor: Float!
+  }
+
   extend type Query {
     purchases(
       status: PurchaseStatus
@@ -107,6 +113,8 @@ export const typeDefs = /* GraphQL */ `
       channel: PurchaseSendChannel!
       recipientOverride: String
     ): PurchaseSendDraft!
+    "Latest unit cost per variant across this vendor's non-cancelled purchases — for prefilling new PO lines."
+    vendorLastCosts(vendorId: ID!): [VendorLastCost!]!
   }
 
   "One line for the bulk-add picker (reorder suggestions / by-stock)."
@@ -271,6 +279,14 @@ export const resolvers = {
       } catch (e) {
         asGraphQLError(e);
       }
+    },
+    vendorLastCosts: async (
+      _: unknown,
+      args: { vendorId: string },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.edit");
+      return purchases.lastVendorCosts(args.vendorId);
     },
   },
 
