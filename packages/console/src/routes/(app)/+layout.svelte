@@ -15,32 +15,66 @@
     label: string;
     perm?: string;
   }
-  const NAV: NavItem[] = [
-    { href: "/products", label: "Products" },
-    { href: "/categories", label: "Categories" },
-    { href: "/customers", label: "Customers" },
-    { href: "/vendors", label: "Vendors" },
-    { href: "/locations", label: "Locations" },
-    { href: "/transfers", label: "Stock transfers" },
-    { href: "/purchases", label: "Purchases" },
-    { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },
-    { href: "/reorder", label: "Reorder suggestions" },
-    { href: "/orders", label: "Orders", perm: "report.sales.view" },
-    { href: "/registers", label: "Registers", perm: "pos.create" },
-    { href: "/sessions", label: "POS sessions", perm: "session.open" },
-    { href: "/tracking", label: "Tracking accounts", perm: "tracking_account.edit" },
-    { href: "/alerts", label: "Alerts", perm: "alert.acknowledge" },
-    { href: "/catalog", label: "Catalog", perm: "catalog.manage" },
-    { href: "/reports", label: "Reports" },
-    { href: "/users", label: "Users", perm: "admin.user.manage" },
-    { href: "/roles", label: "Roles", perm: "admin.role.manage" },
-    { href: "/settings", label: "Business settings", perm: "admin.settings.manage" },
-    { href: "/account", label: "Account" },
+  interface NavGroup {
+    label: string;
+    items: NavItem[];
+  }
+  const NAV: NavGroup[] = [
+    {
+      label: "Catalog",
+      items: [
+        { href: "/products", label: "Products" },
+        { href: "/categories", label: "Categories" },
+        { href: "/catalog", label: "Catalog", perm: "catalog.manage" },
+      ],
+    },
+    {
+      label: "Inventory & Purchasing",
+      items: [
+        { href: "/locations", label: "Locations" },
+        { href: "/transfers", label: "Stock transfers" },
+        { href: "/vendors", label: "Vendors" },
+        { href: "/purchases", label: "Purchases" },
+        { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },
+        { href: "/reorder", label: "Reorder suggestions" },
+      ],
+    },
+    {
+      label: "Sales",
+      items: [
+        { href: "/orders", label: "Orders", perm: "report.sales.view" },
+        { href: "/customers", label: "Customers" },
+        { href: "/registers", label: "Registers", perm: "pos.create" },
+        { href: "/sessions", label: "POS sessions", perm: "session.open" },
+        { href: "/tracking", label: "Tracking accounts", perm: "tracking_account.edit" },
+      ],
+    },
+    {
+      label: "Insights",
+      items: [
+        { href: "/reports", label: "Reports" },
+        { href: "/alerts", label: "Alerts", perm: "alert.acknowledge" },
+      ],
+    },
+    {
+      label: "Administration",
+      items: [
+        { href: "/users", label: "Users", perm: "admin.user.manage" },
+        { href: "/roles", label: "Roles", perm: "admin.role.manage" },
+        { href: "/settings", label: "Business settings", perm: "admin.settings.manage" },
+        { href: "/account", label: "Account" },
+      ],
+    },
   ];
 
   const perms = $derived(new Set(data.user.permissions ?? []));
   const nav = $derived(
-    NAV.filter((n) => !n.perm || data.user.isRoot || perms.has(n.perm)),
+    NAV.map((g) => ({
+      ...g,
+      items: g.items.filter(
+        (n) => !n.perm || data.user.isRoot || perms.has(n.perm),
+      ),
+    })).filter((g) => g.items.length > 0),
   );
 
   const isActive = (href: string) =>
@@ -52,17 +86,26 @@
     <div class="flex h-14 items-center gap-2.5 border-b px-5 font-semibold">
       <img src="/logo.png" alt="Retale" class="h-7 w-auto" /> Console
     </div>
-    <nav class="flex-1 space-y-0.5 p-3">
-      {#each nav as item (item.href)}
-        <a
-          href={item.href}
-          class="block rounded-md px-3 py-2 text-sm transition-colors
-            {isActive(item.href)
-            ? 'bg-accent font-medium text-accent-foreground'
-            : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
+    <nav class="flex-1 overflow-y-auto p-3 pt-1">
+      {#each nav as group (group.label)}
+        <div
+          class="px-3 pt-4 pb-1 text-xs font-medium tracking-wider text-muted-foreground uppercase"
         >
-          {item.label}
-        </a>
+          {group.label}
+        </div>
+        <div class="space-y-0.5">
+          {#each group.items as item (item.href)}
+            <a
+              href={item.href}
+              class="block rounded-md px-3 py-2 text-sm transition-colors
+                {isActive(item.href)
+                ? 'bg-accent font-medium text-accent-foreground'
+                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
+            >
+              {item.label}
+            </a>
+          {/each}
+        </div>
       {/each}
     </nav>
   </aside>
