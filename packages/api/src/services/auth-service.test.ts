@@ -1,13 +1,15 @@
-// Integration tests for password brute-force lockout. Runs against the local
-// Docker MariaDB (DATABASE_URL); WIPES the auth tables between tests.
+// Integration tests for password brute-force lockout and refresh-token
+// rotation. Runs against the local Docker MariaDB (DATABASE_URL); WIPES the
+// auth tables between tests.
 //
 //   bun test src/services/auth-service.test.ts
 
 import "../lib/load-env.ts";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { AuthError, login, registerUser } from "./auth-service.ts";
+import { sessions } from "../db/schema/auth.ts";
+import { AuthError, login, refresh, registerUser } from "./auth-service.ts";
 
 const PASSWORD = "correct horse";
 
@@ -72,5 +74,63 @@ describe("password brute-force lockout", () => {
       expect(await attempt("ghost", "wrong")).toBe("INVALID_CREDENTIALS");
     }
     expect(await attempt("ghost", "wrong")).toBe("ACCOUNT_LOCKED");
+  });
+});
+
+/** Log in and return the issued tokens (no 2FA in these tests). */
+async function loginTokens(username: string) {
+  const outcome = await login({ username, password: PASSWORD });
+  if (outcome.kind !== "tokens") throw new Error("expected a tokens outcome");
+  return outcome.tokens;
+}
+
+describe("refresh token rotation", () => {
+  test("a successful refresh slides the session expiry", async () => {
+    await registerUser({ username: "alice", password: PASSWORD, name: "Alice" });
+    const tokens = await loginTokens("alice");
+
+    // Backdate the session so the slide is observable.
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const sessionId = tokens.refreshToken.split(".")[0]!;
+    await db
+      .update(sessions)
+      .set({ expiresAt: soon })
+      .where(eq(sessions.id, sessionId));
+
+    const { tokens: rotated } = await refresh({ refreshToken: tokens.refreshToken });
+
+    const in29Days = Date.now() + 29 * 24 * 60 * 60 * 1000;
+    expect(rotated.refreshExpiresAt.getTime()).toBeGreaterThan(in29Days);
+    const row = await db.query.sessions.findFirst({
+      where: eq(sessions.id, sessionId),
+    });
+    expect(new Date(row!.expiresAt).getTime()).toBeGreaterThan(in29Days);
+  });
+
+  test("reusing a rotated-away token revokes the session", async () => {
+    await registerUser({ username: "alice", password: PASSWORD, name: "Alice" });
+    const tokens = await loginTokens("alice");
+
+    const { tokens: rotated } = await refresh({ refreshToken: tokens.refreshToken });
+
+    // Presenting the pre-rotation token is treated as theft…
+    let code = "ok";
+    try {
+      await refresh({ refreshToken: tokens.refreshToken });
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      code = e.code;
+    }
+    expect(code).toBe("SESSION_INVALID");
+
+    // …and kills the whole session: even the current token is now refused.
+    code = "ok";
+    try {
+      await refresh({ refreshToken: rotated.refreshToken });
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      code = e.code;
+    }
+    expect(code).toBe("SESSION_INVALID");
   });
 });

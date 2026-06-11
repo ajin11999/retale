@@ -231,8 +231,10 @@ export async function loginTwoFactor(input: {
 }
 
 /**
- * Rotate a refresh token. Presenting a stale secret against a live session
- * (rotation already happened) is treated as theft: the session is revoked.
+ * Rotate a refresh token. Each successful refresh slides the session expiry
+ * out another REFRESH_TTL_MS, so active sessions never hit a hard deadline.
+ * Presenting a stale secret against a live session (rotation already
+ * happened) is treated as theft: the session is revoked.
  */
 export async function refresh(input: {
   refreshToken: string;
@@ -264,12 +266,15 @@ export async function refresh(input: {
   const user = await db.query.users.findFirst({ where: eq(users.id, session.userId) });
   if (!user || user.archivedAt) throw new AuthError("SESSION_INVALID");
 
-  // Rotate the refresh secret in place.
+  // Rotate the refresh secret in place and slide the expiry: every successful
+  // refresh buys another REFRESH_TTL_MS, so only true inactivity ends a session.
   const { token, secretHash } = await createRefreshToken(session.id);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
   await db
     .update(sessions)
     .set({
       refreshTokenHash: secretHash,
+      expiresAt: refreshExpiresAt,
       lastUsedAt: new Date(),
       userAgent: input.ctx?.userAgent ?? session.userAgent,
       ip: input.ctx?.ip ?? session.ip,
@@ -285,7 +290,7 @@ export async function refresh(input: {
 
   return {
     user,
-    tokens: { accessToken, refreshToken: token, refreshExpiresAt: new Date(session.expiresAt) },
+    tokens: { accessToken, refreshToken: token, refreshExpiresAt },
   };
 }
 

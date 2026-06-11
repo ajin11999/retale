@@ -35,6 +35,7 @@ Run from the **workspace root** (`C:\Users\frans\retale`).
 
 - If `svelte-check` flags fields that no longer exist or type mismatches, that's the
   point — fix the console queries/components to match the new schema.
-- The browser client and SSR both hit `GRAPHQL_URL` / `PUBLIC_GRAPHQL_URL` (see
-  `packages/console/.env.example`, default `http://localhost:3000/graphql`) at
-  runtime — but codegen does not, so step 1 works offline.
+- All runtime GraphQL (SSR and browser) flows through the console's `/graphql`
+  proxy, whose upstream is `GRAPHQL_URL` (see `packages/console/.env.example`,
+  default `http://localhost:3000/graphql`) — but codegen does not hit the
+  network, so step 1 works offline.

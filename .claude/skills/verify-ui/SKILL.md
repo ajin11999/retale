@@ -38,8 +38,9 @@ The console/catalog are useless without the API + a seeded database:
   bun run --filter @retale/catalog dev   # vite dev (next free port, e.g. 5174)
   ```
 
-Both read `GRAPHQL_URL` / `PUBLIC_GRAPHQL_URL` from their `.env`
-(default `http://localhost:3000/graphql`) — make sure the API is up first.
+Both read `GRAPHQL_URL` from their `.env` (default
+`http://localhost:3000/graphql`; the console proxies all browser GraphQL
+through its own `/graphql` route) — make sure the API is up first.
 
 ## Sign in, then verify
 

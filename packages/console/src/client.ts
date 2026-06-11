@@ -1,15 +1,8 @@
 import { HoudiniClient } from "$houdini";
-import { env } from "$env/dynamic/public";
 
-// The Houdini GraphQL client. The JWT is pulled from the session set in
-// hooks.server.ts and sent as a Bearer token on every request.
+// The Houdini GraphQL client. Requests go to the console's own /graphql proxy
+// (same-origin, so the httpOnly session cookies ride along), which attaches a
+// fresh Bearer token server-side — see src/routes/graphql/+server.ts.
 export default new HoudiniClient({
-  url: env.PUBLIC_GRAPHQL_URL ?? "http://localhost:3000/graphql",
-  fetchParams({ session }) {
-    return {
-      headers: {
-        Authorization: session?.token ? `Bearer ${session.token}` : "",
-      },
-    };
-  },
+  url: "/graphql",
 });

@@ -23,13 +23,16 @@ regenerate it:
 bun run schema:dump            # workspace root — refreshes packages/console/schema.graphql
 ```
 
-The console still needs the API reachable **at runtime** (login, the auth
-guard, and the products query) — see `GRAPHQL_URL` / `PUBLIC_GRAPHQL_URL`.
+The console still needs the API reachable **at runtime** — see `GRAPHQL_URL`.
+All GraphQL (SSR and browser) flows through the console's own `/graphql`
+proxy route, which attaches a freshly rotated access token server-side, so
+browsers never talk to the API directly.
 
 ## What's here (first slice)
 
 - **Auth** — `/login` posts the `login` mutation server-side, stores the JWT in
-  an httpOnly cookie. `hooks.server.ts` feeds it to the Houdini session.
+  an httpOnly cookie. `hooks.server.ts` refreshes it near expiry and feeds it
+  to the `/graphql` proxy via `locals`.
 - **App shell** — `(app)/+layout.svelte`: sidebar nav + topbar, guarded by
   `(app)/+layout.server.ts` (validates the token via the `me` query).
 - **Products list** — `(app)/products`: a TanStack-backed data table with

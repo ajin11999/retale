@@ -154,11 +154,15 @@ No custom envelope middleware needed. GraphQL spec provides:
   Claims: `sub` (userId), `isRoot`, `roleIds`. Do NOT lengthen the TTL — clients
   renew via refresh tokens.
 - Refresh tokens: opaque rotating tokens (`{sessionId}.{secret}`, argon2-hashed),
-  30-day expiry, stored in the `sessions` table. Rotation reuse is treated as
-  theft and revokes the session — clients must single-flight their refreshes.
+  sliding 30-day expiry (each successful refresh extends it another 30 days),
+  stored in the `sessions` table. Rotation reuse is treated as theft and
+  revokes the session — clients must single-flight their refreshes.
 - Clients refresh via the `refreshToken` GraphQL mutation: the POS in
   `auth_service.dart`, the console server-side in `$lib/server/session.ts`
-  (hooks.server.ts refreshes near-expiry tokens on every SSR request).
+  (hooks.server.ts refreshes near-expiry tokens on every request). All console
+  GraphQL — SSR and browser — flows through the console's own `/graphql` proxy
+  route, which attaches the freshly rotated token; browsers never call the API
+  directly.
 - Bootstrap: create first user (auto-assigns root) when users table is empty
 - Secret: env var `JWT_SIGNING_KEY`
 
