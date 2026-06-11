@@ -731,6 +731,136 @@
     }
   }
 
+  // ---- Bundle components editor --------------------------------------------
+  // Candidate catalog for the component picker — fetched on demand when an
+  // editor opens, so it never loads for non-bundle products.
+  const BundlePickerProducts = graphql(`
+    query ConsoleBundlePickerProducts {
+      products(includeArchived: false) {
+        id
+        name
+        kind
+        variants {
+          id
+          sku
+          label
+        }
+      }
+    }
+  `);
+
+  const SetBundleComponents = graphql(`
+    mutation ConsoleSetBundleComponents(
+      $bundleVariantId: ID!
+      $components: [BundleComponentInput!]!
+    ) {
+      setBundleComponents(
+        bundleVariantId: $bundleVariantId
+        components: $components
+      ) {
+        id
+      }
+    }
+  `);
+
+  interface BundleRow {
+    componentVariantId: string;
+    productName: string;
+    sku: string;
+    label: string | null;
+    qty: number;
+  }
+
+  let bundleDraft = $state<{ variantId: string; rows: BundleRow[] } | null>(
+    null,
+  );
+  let bundleSearch = $state("");
+  let bundlePickerOpen = $state(false);
+
+  function editBundle(v: NonNullable<typeof product>["variants"][number]) {
+    bundleDraft = {
+      variantId: v.id,
+      rows: v.bundleComponents.map((c) => ({
+        componentVariantId: c.componentVariant.id,
+        productName: c.componentVariant.product.name,
+        sku: c.componentVariant.sku,
+        label: c.componentVariant.label ?? null,
+        qty: c.qty,
+      })),
+    };
+    bundleSearch = "";
+    void BundlePickerProducts.fetch({ policy: CachePolicy.NetworkOnly });
+  }
+
+  // Pickable variants: AND-match search tokens against name/SKU/label, minus
+  // variants already in the draft, this product's own variants, and anything
+  // bundle-kind (the API rejects nested bundles).
+  const bundleCandidates = $derived.by<BundleRow[]>(() => {
+    const d = bundleDraft;
+    if (!d) return [];
+    const taken = new Set(d.rows.map((r) => r.componentVariantId));
+    const tokens = bundleSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const out: BundleRow[] = [];
+    for (const p of $BundlePickerProducts.data?.products ?? []) {
+      if (p.kind === "bundle") continue;
+      for (const v of p.variants) {
+        if (taken.has(v.id)) continue;
+        const hay = `${p.name} ${v.sku} ${v.label ?? ""}`.toLowerCase();
+        if (!tokens.every((t) => hay.includes(t))) continue;
+        out.push({
+          componentVariantId: v.id,
+          productName: p.name,
+          sku: v.sku,
+          label: v.label ?? null,
+          qty: 1,
+        });
+      }
+    }
+    return out.slice(0, 30);
+  });
+
+  function addBundleComponent(row: BundleRow) {
+    bundleDraft?.rows.push(row);
+    bundleSearch = "";
+  }
+
+  function removeBundleComponent(id: string) {
+    if (!bundleDraft) return;
+    bundleDraft.rows = bundleDraft.rows.filter(
+      (r) => r.componentVariantId !== id,
+    );
+  }
+
+  async function saveBundle() {
+    const d = bundleDraft;
+    if (!d || !product) return;
+    if (d.rows.some((r) => !Number.isInteger(r.qty) || r.qty < 1)) {
+      feedback = {
+        ok: false,
+        text: "Component quantities must be positive whole numbers.",
+      };
+      return;
+    }
+    const ok = await run("Bundle", () =>
+      SetBundleComponents.mutate({
+        bundleVariantId: d.variantId,
+        components: d.rows.map((r) => ({
+          componentVariantId: r.componentVariantId,
+          qty: r.qty,
+        })),
+      }),
+    );
+    if (ok) {
+      bundleDraft = null;
+      // The mutation returns only ids — refetch so the component table shows
+      // the new rows with their product names.
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
+    }
+  }
+
   // Live markdown preview of the description. The content is authored by
   // staff with product.edit, so it is rendered trusted.
   const descriptionHtml = $derived(
@@ -1419,15 +1549,124 @@
     </section>
 
     {#if product.kind === "bundle"}
-      <!-- Bundle components (read-only; edited via setBundleComponents) -->
       <section class="space-y-3 rounded-lg border bg-card p-5">
         <h2 class="text-sm font-semibold">Bundle components</h2>
         {#each product.variants as v (v.id)}
           <div class="space-y-1">
-            <span class="text-sm font-medium">
-              {v.label ? `${v.sku} · ${v.label}` : v.sku}
-            </span>
-            {#if v.bundleComponents.length > 0}
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium">
+                {v.label ? `${v.sku} · ${v.label}` : v.sku}
+              </span>
+              {#if bundleDraft?.variantId !== v.id}
+                <IconButton
+                  icon={Pencil}
+                  label="Edit components"
+                  variant="primary"
+                  disabled={busy || !canEdit}
+                  onclick={() => editBundle(v)}
+                />
+              {/if}
+            </div>
+
+            {#if bundleDraft?.variantId === v.id}
+              <div class="space-y-2 rounded-md border bg-background p-3">
+                {#if bundleDraft.rows.length > 0}
+                  <table class="w-full text-sm">
+                    <tbody>
+                      {#each bundleDraft.rows as row (row.componentVariantId)}
+                        <tr class="border-b last:border-0">
+                          <td class="py-1">
+                            {row.productName}
+                            {#if row.label}
+                              <span class="ml-1 text-xs text-muted-foreground">
+                                {row.label}
+                              </span>
+                            {/if}
+                          </td>
+                          <td class="py-1 font-mono text-xs text-muted-foreground">
+                            {row.sku}
+                          </td>
+                          <td class="w-20 py-1">
+                            <Input
+                              type="number"
+                              min={1}
+                              step={1}
+                              bind:value={row.qty}
+                              class="h-8 text-right"
+                            />
+                          </td>
+                          <td class="w-10 py-1 text-right">
+                            <IconButton
+                              icon={Trash2}
+                              label="Remove component"
+                              variant="destructive"
+                              onclick={() =>
+                                removeBundleComponent(row.componentVariantId)}
+                            />
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                {:else}
+                  <p class="text-sm text-muted-foreground">No components.</p>
+                {/if}
+
+                <div class="relative">
+                  <Input
+                    type="search"
+                    placeholder="Add component — search product or SKU…"
+                    bind:value={bundleSearch}
+                    onfocus={() => (bundlePickerOpen = true)}
+                    onblur={() => setTimeout(() => (bundlePickerOpen = false), 150)}
+                    autocomplete="off"
+                    class="h-8"
+                    disabled={busy}
+                  />
+                  {#if bundlePickerOpen && bundleCandidates.length > 0}
+                    <ul
+                      class="absolute top-full z-10 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover shadow-md"
+                    >
+                      {#each bundleCandidates as cand (cand.componentVariantId)}
+                        <li>
+                          <button
+                            type="button"
+                            class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/60"
+                            onmousedown={(e) => e.preventDefault()}
+                            onclick={() => addBundleComponent(cand)}
+                          >
+                            <span class="font-medium">{cand.productName}</span>
+                            <span class="font-mono text-xs text-muted-foreground">
+                              {cand.sku}{cand.label ? ` · ${cand.label}` : ""}
+                            </span>
+                          </button>
+                        </li>
+                      {/each}
+                    </ul>
+                  {:else if bundlePickerOpen && bundleSearch.trim()}
+                    <div
+                      class="absolute top-full z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
+                    >
+                      No matches.
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onclick={() => (bundleDraft = null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button size="sm" disabled={busy} onclick={saveBundle}>
+                    Save components
+                  </Button>
+                </div>
+              </div>
+            {:else if v.bundleComponents.length > 0}
               <table class="w-full text-sm">
                 <tbody>
                   {#each v.bundleComponents as comp (comp.id)}
