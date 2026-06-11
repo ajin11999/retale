@@ -751,6 +751,88 @@
     }
   }
 
+  // ---- Group selected goods under a new cost line ---------------------------
+  // Tick goods leaves in the tree, then create one charge that groups them —
+  // the one-step alternative to add-line + per-item "Move to".
+  let costSelected = $state<Set<string>>(new Set());
+  function toggleCostSelect(id: string) {
+    const next = new Set(costSelected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    costSelected = next;
+  }
+  // Drop selected ids that have vanished (deleted here or refetched away) so
+  // the toolbar count never references ghosts.
+  $effect(() => {
+    const ids = new Set(items.map((it) => it.id));
+    if ([...costSelected].some((id) => !ids.has(id))) {
+      costSelected = new Set([...costSelected].filter((id) => ids.has(id)));
+    }
+  });
+
+  let groupFormOpen = $state(false);
+  let gDesc = $state("");
+  let gCost = $state<number | null>(null);
+  let gVendorId = $state("");
+
+  function startGroupForm() {
+    groupFormOpen = true;
+    gDesc = "";
+    gCost = null;
+    gVendorId = "";
+  }
+  function clearGroupSelect() {
+    costSelected = new Set();
+    groupFormOpen = false;
+  }
+
+  async function createGroupCostLine() {
+    if (!delivery || costSelected.size === 0) return;
+    if (!gDesc.trim() || gCost == null) return;
+    // Nest the new charge under the goods' common parent so any outer charge
+    // keeps spreading over them; mixed parents fall back to the root.
+    const selected = items.filter((it) => costSelected.has(it.id));
+    const parents = new Set(selected.map((it) => it.parentItemId ?? null));
+    const parentItemId = parents.size === 1 ? [...parents][0] : null;
+    busy = true;
+    error = null;
+    try {
+      const res = await CreateDeliveryItem.mutate({
+        deliveryId: delivery.id,
+        parentItemId,
+        description: gDesc.trim(),
+        costMinor: gCost,
+        vendorId: gVendorId || null,
+      });
+      if (res.errors?.length) {
+        error = res.errors[0].message;
+        return;
+      }
+      const newId = res.data?.createDeliveryItem.id;
+      if (!newId) {
+        error = "Cost line was not created.";
+        return;
+      }
+      for (const it of selected) {
+        const r = await UpdateDeliveryItem.mutate({
+          id: it.id,
+          parentItemId: newId,
+        });
+        if (r.errors?.length) {
+          error = r.errors[0].message;
+          break;
+        }
+      }
+      groupFormOpen = false;
+      costSelected = new Set();
+      await refetch();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   // ---- Lifecycle: commit / cancel / delete --------------------------------
   async function commit() {
     if (!delivery) return;
@@ -1078,19 +1160,65 @@
       <div class="mb-1 flex items-center justify-between">
         <h2 class="text-sm font-semibold">Cost tree</h2>
         {#if editable}
-          <Button size="sm" variant="outline" onclick={() => startAdd("")}>
-            Add line
-          </Button>
+          <div class="flex items-center gap-2">
+            {#if costSelected.size > 0}
+              <span class="text-xs text-muted-foreground">
+                {costSelected.size} selected
+              </span>
+              <Button size="sm" onclick={startGroupForm}>
+                New cost line for selected
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onclick={clearGroupSelect}>
+                Clear
+              </Button>
+            {/if}
+            <Button size="sm" variant="outline" onclick={() => startAdd("")}>
+              Add line
+            </Button>
+          </div>
         {/if}
       </div>
       <p class="mb-3 text-xs text-muted-foreground">
         Add goods lines from any open PO, and freight / customs cost lines. A
         cost line spreads by value <em>only over the goods nested under it</em> —
-        edit a goods line and pick a cost line under <em>Move to</em> to apply
-        that charge to it. To spread a charge over the whole delivery, add it
-        as a freight leg above instead. Each product shows its landed unit cost
-        (→ /unit).
+        tick several goods lines and use <em>New cost line for selected</em> to
+        group them under a new charge in one step, or edit a goods line and pick
+        a cost line under <em>Move to</em>. To spread a charge over the whole
+        delivery, add it as a freight leg above instead. Each product shows its
+        landed unit cost (→ /unit).
       </p>
+
+      {#if groupFormOpen && costSelected.size > 0}
+        <div class="mb-3 flex items-center gap-2 rounded-md border bg-muted/30 p-3">
+          <span class="whitespace-nowrap text-xs text-muted-foreground">
+            New charge over {costSelected.size} line{costSelected.size === 1 ? "" : "s"}:
+          </span>
+          <Input
+            bind:value={gDesc}
+            class="flex-1"
+            placeholder="Description (e.g. Unloading fee)"
+          />
+          <MoneyInput bind:value={gCost} class="w-32" placeholder="Amount" />
+          <div class="w-40">
+            <Combobox
+              options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
+              bind:value={gVendorId}
+              placeholder="Search courier…"
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={busy || !gDesc.trim() || gCost == null}
+            onclick={createGroupCostLine}>Create</Button
+          >
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onclick={() => (groupFormOpen = false)}>Cancel</Button
+          >
+        </div>
+      {/if}
 
       {#if addingUnder === ""}
         {@render addForm()}
@@ -1325,6 +1453,15 @@
           onclick={() => (editingId = null)}>Cancel</Button
         >
       {:else}
+        {#if editable && node.item.purchaseItemId}
+          <input
+            type="checkbox"
+            class="size-4 cursor-pointer rounded border-input accent-primary"
+            checked={costSelected.has(node.item.id)}
+            onchange={() => toggleCostSelect(node.item.id)}
+            aria-label="Select goods line"
+          />
+        {/if}
         <span class="flex-1 truncate text-sm">
           {node.item.description}
           {#if node.item.purchaseItem}
