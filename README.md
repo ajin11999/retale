@@ -1,11 +1,11 @@
-# Retale
+<img src="assets/brand/wordmark.png" alt="Retale" width="320">
 
 POS and inventory management system for a retail store, served over the local
 network. A Bun + TypeScript GraphQL API backs a family of clients: a Flutter
 POS register, a SvelteKit back-office console, a product catalog, and two
 companion Flutter apps for warehouse receiving and workshop service.
 
-**100% vibe-coded by Claude.**
+**100% vibe-coded with <img src="assets/brand/claude.svg" height="14" alt=""> Claude.**
 
 ## Console highlight: landed-cost deliveries
 
