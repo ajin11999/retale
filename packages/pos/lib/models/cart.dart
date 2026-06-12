@@ -33,10 +33,14 @@ class CartLine {
   /// Per-unit cost. Open-price products derive cost from the entered price via
   /// the product's ratio (matching the API's snapshot rule); everything else
   /// uses the variant's weighted-average cost.
-  int get unitCostMinor {
+  int get unitCostMinor => unitCostForPrice(unitPriceMinor);
+
+  /// Per-unit cost at a hypothetical [priceMinor], for previewing a price edit
+  /// before it is applied. Same rule as [unitCostMinor].
+  int unitCostForPrice(int priceMinor) {
     final ratio = product.costRatioBps;
     if (product.kind == 'open_price' && ratio != null) {
-      return (unitPriceMinor * ratio / 10000).round();
+      return (priceMinor * ratio / 10000).round();
     }
     return variant.costMinor;
   }

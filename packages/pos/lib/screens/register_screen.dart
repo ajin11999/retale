@@ -871,6 +871,33 @@ class _CartLineTile extends StatelessWidget {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 8),
+            // Live cost/margin preview so the price can be tuned to a target
+            // margin without leaving the dialog.
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: priceController,
+              builder: (ctx, value, _) {
+                final price = Money.parse(value.text);
+                final cost = line.unitCostForPrice(price);
+                final margin = price - cost;
+                final pct = price == 0
+                    ? '—'
+                    : '${(margin / price * 100).toStringAsFixed(0)}%';
+                final scheme = Theme.of(ctx).colorScheme;
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Cost ${Money.format(cost)}   ·   '
+                    'Margin ${Money.format(margin)} ($pct)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          margin < 0 ? scheme.error : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: qtyController,
