@@ -66,6 +66,26 @@ bun run dev:seed-user       # creates manager / manager12345
 
 Dev data helpers: `bun run dev:seed-products`, `bun run db:seed`.
 
+## Production deployment (LAN)
+
+The whole server stack — MariaDB, API, console, and the POS web/PWA — runs on
+one LAN host with Docker Compose, behind a Caddy reverse proxy that terminates
+HTTPS with its built-in local CA (TLS is required for the POS PWA's offline
+service worker):
+
+```sh
+cp .env.prod.example .env.prod      # set HOST_IP + fresh secrets
+bun run build:pos-web               # POS web bundle (built on the host, served by Caddy)
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+Clients then reach the console at `https://<HOST_IP>`, the API at
+`https://<HOST_IP>:8443`, and the POS web app at `https://<HOST_IP>:8081`.
+Migrations apply automatically on API start. See
+[`deploy/README.md`](deploy/README.md) for client certificate trust, updates,
+and backups. The catalog is deployed separately to Vercel and is not part of
+this stack.
+
 ## Development
 
 - **Tests:** `bun test` — requires `TEST_DATABASE_URL` pointing at a separate
