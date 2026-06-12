@@ -1,0 +1,23 @@
+# Keep the image build context small and secrets out of images. The Dockerfiles
+# copy explicit paths, so this mostly guards size (node_modules, Flutter
+# packages) and safety (.env*, uploads).
+.git
+.claude
+.codegraph
+.deepseek
+node_modules
+**/node_modules
+**/build
+**/.svelte-kit
+packages/console/$houdini
+packages/pos
+packages/stockeeper
+packages/workshop
+assets
+docs
+plugins
+uploads
+**/uploads
+.env
+.env.*
+*.log

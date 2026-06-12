@@ -1,0 +1,84 @@
+# Production LAN stack: MariaDB + API + console + Caddy (TLS via local CA).
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Prereqs:
+#   - .env.prod filled in (copy from .env.prod.example, generate real secrets)
+#   - POS web built on the host: `bun run build:pos-web` (bind-mounted into
+#     caddy below; after rebuilding it, `docker compose ... restart caddy`)
+# See deploy/README.md for client cert trust and operations.
+#
+# Explicit project name so this stack never collides with the dev
+# docker-compose.yml (same directory ⇒ same default project name).
+name: retale-prod
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: retale
+      MARIADB_USER: retale
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql://retale:${MARIADB_PASSWORD}@mariadb:3306/retale
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+      TWO_FACTOR_ENC_KEY: ${TWO_FACTOR_ENC_KEY}
+      # Optional — enables catalog snapshot publishing to Vercel Blob (needs
+      # outbound internet). Empty disables it.
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      mariadb:
+        condition: service_healthy # migrations run at startup; don't race the DB
+
+  console:
+    build:
+      context: .
+      dockerfile: packages/console/Dockerfile
+    restart: unless-stopped
+    environment:
+      GRAPHQL_URL: http://api:3000/graphql
+      ORIGIN: https://${HOST_IP} # adapter-node needs ORIGIN behind a proxy
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      HOST_IP: ${HOST_IP}
+    ports: # only caddy publishes host ports
+      - "443:443"
+      - "8443:8443"
+      - "8081:8081"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./packages/pos/build/web:/srv/pos-web:ro
+      - caddy-data:/data # persists the local CA — clients only trust it once
+      - caddy-config:/config
+    depends_on:
+      - api
+      - console
+
+volumes:
+  dbdata:
+  uploads:
+  caddy-data:
+  caddy-config:

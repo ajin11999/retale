@@ -1,0 +1,41 @@
+# Reverse proxy + TLS for the Retale LAN stack. Caddy's built-in local CA
+# (local_certs) issues certificates with the LAN IP as a SAN — export
+# /data/caddy/pki/authorities/local/root.crt from the caddy container and
+# install it on every client, or browsers warn and the POS PWA service worker
+# refuses to register. HOST_IP comes from the container environment (.env.prod).
+{
+	local_certs
+}
+
+# Console (back-office admin)
+{$HOST_IP}:443, localhost:443 {
+	reverse_proxy console:3000
+}
+
+# API — GraphQL + HTTP routes (product images, PO PDF, receipts, journal CSV).
+# POS web (:8081) calls this cross-origin with Bearer tokens, so CORS is
+# answered here; doing it in Caddy also covers the non-GraphQL Elysia routes
+# that graphql-yoga's own CORS handling would miss.
+{$HOST_IP}:8443, localhost:8443 {
+	@preflight method OPTIONS
+	header {
+		Access-Control-Allow-Origin "{header.Origin}"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type"
+		Access-Control-Max-Age "86400"
+		Vary Origin
+		defer
+	}
+	handle @preflight {
+		respond 204
+	}
+	reverse_proxy api:3000
+}
+
+# POS web/PWA — static Flutter build (bind-mounted), SPA fallback so client-side
+# routes resolve to index.html.
+{$HOST_IP}:8081, localhost:8081 {
+	root * /srv/pos-web
+	try_files {path} /index.html
+	file_server
+}
