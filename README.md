@@ -49,7 +49,14 @@ bun run db:migrate
 # 4. Run
 bun run dev                 # API → http://localhost:3000 (GraphQL at /graphql)
 bun run dev:console         # console → http://localhost:5173
+
+# Flutter apps run from their package dir, e.g. the POS register:
+cd packages/pos && flutter run -d windows    # or -d chrome / -d linux
 ```
+
+The Flutter packages ship `lib/` + `pubspec` only — on first checkout run
+`flutter create . --platforms=...` and `flutter pub get` in the package dir
+(see each package's README, e.g. [`packages/pos/README.md`](packages/pos/README.md)).
 
 For a working dev login (root users require 2FA), seed a full-permission user:
 
