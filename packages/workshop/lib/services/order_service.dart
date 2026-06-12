@@ -27,9 +27,10 @@ class OrderService {
   OrderService(this.client);
   final GraphQLClient client;
 
-  /// Build the `PosOrderItemInput` list from a job's flattened leaves. Service /
-  /// open-price leaves carry the clerk's price as `priceOverrideMinor`; physical
-  /// leaves must not (the API uses the catalog price).
+  /// Build the `PosOrderItemInput` list from a job's flattened leaves. Every
+  /// leaf sends its sheet price as `priceOverrideMinor` so the API total always
+  /// matches the job sheet — except bundles, where the API rejects overrides
+  /// and prices from the catalog.
   List<Map<String, dynamic>> _buildItems(Project project) {
     final leaves = flattenLeaves(project.lines);
     return [
@@ -37,8 +38,7 @@ class OrderService {
         {
           'variantId': l.variantId,
           'qty': l.qty,
-          if (l.variantKind == 'service' || l.variantKind == 'open_price')
-            'priceOverrideMinor': l.unitPriceMinor,
+          if (l.variantKind != 'bundle') 'priceOverrideMinor': l.unitPriceMinor,
         },
     ];
   }

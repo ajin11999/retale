@@ -39,7 +39,9 @@ class _AppGateState extends State<AppGate> {
     return _Startup(apiUrl: apiUrl, hasToken: token != null, posId: posId);
   }
 
-  void _reload() => setState(() => _future = _load());
+  void _reload() => setState(() {
+        _future = _load();
+      });
 
   @override
   Widget build(BuildContext context) {

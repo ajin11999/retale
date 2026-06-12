@@ -9,6 +9,8 @@ class CatalogVariant {
     required this.name,
     required this.sku,
     required this.priceMinor,
+    required this.costMinor,
+    required this.costRatioBps,
     required this.unit,
   });
 
@@ -17,6 +19,14 @@ class CatalogVariant {
   final String name;
   final String sku;
   final int priceMinor;
+
+  /// Weighted-average unit cost from the catalog, minor units.
+  final int costMinor;
+
+  /// Product-level cost ratio (basis points) for open-price products, where
+  /// cost is a fraction of whatever price the clerk enters. Null elsewhere.
+  final int? costRatioBps;
+
   final String unit;
 
   bool get isService => kind == 'service';
@@ -24,6 +34,17 @@ class CatalogVariant {
 
   /// True when the clerk sets the price (sent as priceOverrideMinor).
   bool get priceEditable => isService || isOpenPrice;
+
+  /// Per-unit cost at [priceMinor]: open-price products derive cost from the
+  /// entered price via the product's ratio (the API's snapshot rule, same as
+  /// the POS); everything else uses the variant's weighted-average cost.
+  int costForPrice(int priceMinor) {
+    final ratio = costRatioBps;
+    if (isOpenPrice && ratio != null) {
+      return (priceMinor * ratio / 10000).round();
+    }
+    return costMinor;
+  }
 }
 
 class ProductException implements Exception {
@@ -38,7 +59,8 @@ const _productsQuery = r'''
     products(search: $search) {
       name
       kind
-      variants { id sku label priceMinor unit }
+      costRatioBps
+      variants { id sku label priceMinor costMinor unit }
     }
   }
 ''';
@@ -64,6 +86,7 @@ class ProductService {
     for (final p in products) {
       final kind = p['kind'] as String;
       final productName = p['name'] as String;
+      final costRatioBps = (p['costRatioBps'] as num?)?.round();
       final variants = (p['variants'] as List).cast<Map<String, dynamic>>();
       for (final v in variants) {
         final label = v['label'] as String?;
@@ -73,6 +96,8 @@ class ProductService {
           name: label == null || label.isEmpty ? productName : '$productName — $label',
           sku: v['sku'] as String,
           priceMinor: (v['priceMinor'] as num).round(),
+          costMinor: (v['costMinor'] as num?)?.round() ?? 0,
+          costRatioBps: costRatioBps,
           unit: v['unit'] as String,
         ));
       }

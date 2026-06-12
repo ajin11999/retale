@@ -16,7 +16,23 @@ class ProjectRepo {
       .thenByDateDesc()
       .build();
 
-  Future<Project?> get(int id) => _db.projects.get(id);
+  Future<Project?> get(int id) async {
+    final p = await _db.projects.get(id);
+    if (p == null) return null;
+    // Isar hands embedded lists back fixed-length, but the UI mutates them in
+    // place (add/remove/reorder) — copy them growable, recursively.
+    p.lines = _growable(p.lines);
+    p.payments = List.of(p.payments);
+    return p;
+  }
+
+  static List<WorkLine> _growable(List<WorkLine> lines) {
+    for (final line in lines) {
+      final children = line.children;
+      if (children != null) line.children = _growable(children);
+    }
+    return List.of(lines);
+  }
 
   Future<Project> create() async {
     final p = Project()..date = DateTime.now();

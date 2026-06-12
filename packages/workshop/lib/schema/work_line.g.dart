@@ -19,38 +19,48 @@ const WorkLineSchema = Schema(
       type: IsarType.objectList,
       target: r'WorkLine',
     ),
-    r'isGroup': PropertySchema(
+    r'costRatioBps': PropertySchema(
       id: 1,
+      name: r'costRatioBps',
+      type: IsarType.long,
+    ),
+    r'isGroup': PropertySchema(
+      id: 2,
       name: r'isGroup',
       type: IsarType.bool,
     ),
     r'note': PropertySchema(
-      id: 2,
+      id: 3,
       name: r'note',
       type: IsarType.string,
     ),
     r'qty': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'qty',
       type: IsarType.long,
     ),
     r'snapshotName': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'snapshotName',
       type: IsarType.string,
     ),
+    r'unitCostMinor': PropertySchema(
+      id: 6,
+      name: r'unitCostMinor',
+      type: IsarType.long,
+    ),
     r'unitPriceMinor': PropertySchema(
-      id: 5,
+      id: 7,
       name: r'unitPriceMinor',
       type: IsarType.long,
     ),
     r'variantId': PropertySchema(
-      id: 6,
+      id: 8,
       name: r'variantId',
       type: IsarType.string,
     ),
     r'variantKind': PropertySchema(
-      id: 7,
+      id: 9,
       name: r'variantKind',
       type: IsarType.string,
     )
@@ -109,13 +119,15 @@ void _workLineSerialize(
     WorkLineSchema.serialize,
     object.children,
   );
-  writer.writeBool(offsets[1], object.isGroup);
-  writer.writeString(offsets[2], object.note);
-  writer.writeLong(offsets[3], object.qty);
-  writer.writeString(offsets[4], object.snapshotName);
-  writer.writeLong(offsets[5], object.unitPriceMinor);
-  writer.writeString(offsets[6], object.variantId);
-  writer.writeString(offsets[7], object.variantKind);
+  writer.writeLong(offsets[1], object.costRatioBps);
+  writer.writeBool(offsets[2], object.isGroup);
+  writer.writeString(offsets[3], object.note);
+  writer.writeLong(offsets[4], object.qty);
+  writer.writeString(offsets[5], object.snapshotName);
+  writer.writeLong(offsets[6], object.unitCostMinor);
+  writer.writeLong(offsets[7], object.unitPriceMinor);
+  writer.writeString(offsets[8], object.variantId);
+  writer.writeString(offsets[9], object.variantKind);
 }
 
 WorkLine _workLineDeserialize(
@@ -131,13 +143,15 @@ WorkLine _workLineDeserialize(
     allOffsets,
     WorkLine(),
   );
-  object.isGroup = reader.readBool(offsets[1]);
-  object.note = reader.readString(offsets[2]);
-  object.qty = reader.readLong(offsets[3]);
-  object.snapshotName = reader.readString(offsets[4]);
-  object.unitPriceMinor = reader.readLong(offsets[5]);
-  object.variantId = reader.readStringOrNull(offsets[6]);
-  object.variantKind = reader.readStringOrNull(offsets[7]);
+  object.costRatioBps = reader.readLongOrNull(offsets[1]);
+  object.isGroup = reader.readBool(offsets[2]);
+  object.note = reader.readString(offsets[3]);
+  object.qty = reader.readLong(offsets[4]);
+  object.snapshotName = reader.readString(offsets[5]);
+  object.unitCostMinor = reader.readLongOrNull(offsets[6]);
+  object.unitPriceMinor = reader.readLong(offsets[7]);
+  object.variantId = reader.readStringOrNull(offsets[8]);
+  object.variantKind = reader.readStringOrNull(offsets[9]);
   return object;
 }
 
@@ -156,18 +170,22 @@ P _workLineDeserializeProp<P>(
         WorkLine(),
       )) as P;
     case 1:
-      return (reader.readBool(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 2:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 3:
-      return (reader.readLong(offset)) as P;
-    case 4:
       return (reader.readString(offset)) as P;
-    case 5:
+    case 4:
       return (reader.readLong(offset)) as P;
+    case 5:
+      return (reader.readString(offset)) as P;
     case 6:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 7:
+      return (reader.readLong(offset)) as P;
+    case 8:
+      return (reader.readStringOrNull(offset)) as P;
+    case 9:
       return (reader.readStringOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -275,6 +293,77 @@ extension WorkLineQueryFilter
         upper,
         includeUpper,
       );
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> costRatioBpsIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'costRatioBps',
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition>
+      costRatioBpsIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'costRatioBps',
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> costRatioBpsEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'costRatioBps',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition>
+      costRatioBpsGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'costRatioBps',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> costRatioBpsLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'costRatioBps',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> costRatioBpsBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'costRatioBps',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
     });
   }
 
@@ -601,6 +690,78 @@ extension WorkLineQueryFilter
       return query.addFilterCondition(FilterCondition.greaterThan(
         property: r'snapshotName',
         value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition>
+      unitCostMinorIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'unitCostMinor',
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition>
+      unitCostMinorIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'unitCostMinor',
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> unitCostMinorEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'unitCostMinor',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition>
+      unitCostMinorGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'unitCostMinor',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> unitCostMinorLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'unitCostMinor',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<WorkLine, WorkLine, QAfterFilterCondition> unitCostMinorBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'unitCostMinor',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
       ));
     });
   }

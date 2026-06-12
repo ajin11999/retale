@@ -27,7 +27,9 @@ class _PosSelectionScreenState extends State<PosSelectionScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _reload());
   }
 
-  void _reload() => setState(() => _future = _pos.listPointsOfSale());
+  void _reload() => setState(() {
+        _future = _pos.listPointsOfSale();
+      });
 
   Future<void> _select(PosOption pos) async {
     await AppConfig.setPosId(pos.id);

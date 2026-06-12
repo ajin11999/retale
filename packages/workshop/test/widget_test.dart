@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:retale_workshop/schema/project.dart';
 import 'package:retale_workshop/util/money.dart';
@@ -14,6 +15,34 @@ void main() {
       expect(parseMinor('150.000'), 150000);
       expect(parseMinor('150000'), 150000);
       expect(parseMinor(''), isNull);
+    });
+  });
+
+  group('ThousandsInputFormatter', () {
+    TextEditingValue fmt(String text, int caret) =>
+        const ThousandsInputFormatter().formatEditUpdate(
+          TextEditingValue.empty,
+          TextEditingValue(
+              text: text, selection: TextSelection.collapsed(offset: caret)),
+        );
+
+    test('groups digits as typed and keeps the caret at the end', () {
+      final v = fmt('150000', 6);
+      expect(v.text, '150.000');
+      expect(v.selection.baseOffset, 7);
+    });
+
+    test('mid-string insert keeps the caret anchored to its digit', () {
+      // '159|0000' (just typed the 9) regroups to '1.59|0.000'.
+      final v = fmt('1590000', 3);
+      expect(v.text, '1.590.000');
+      expect(v.selection.baseOffset, 4);
+    });
+
+    test('strips non-digits and leading zeros; blank stays blank', () {
+      expect(fmt('0042', 4).text, '42');
+      expect(fmt('12a3', 4).text, '123');
+      expect(fmt('', 0).text, '');
     });
   });
 

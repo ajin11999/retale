@@ -1,28 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:retale_workshop/component/margin_pill.dart';
 import 'package:retale_workshop/schema/project.dart';
-import 'package:retale_workshop/services/product_service.dart';
 import 'package:retale_workshop/util/money.dart';
+import 'package:retale_workshop/util/project_calc.dart';
 
-/// Capture qty / price / note for a leaf line. Pass [variant] for a new line or
-/// [existing] to edit one (its variant + kind are fixed). Returns the new/edited
-/// [WorkLine], or null if cancelled.
+/// Edit qty / price / note of an [existing] leaf line (its variant + kind are
+/// fixed). Returns the edited [WorkLine], or null if cancelled. Adding a new
+/// line goes through the inline form instead (see inline_line_forms.dart).
 Future<WorkLine?> showLeafEditor(
   BuildContext context, {
-  CatalogVariant? variant,
-  WorkLine? existing,
+  required WorkLine existing,
 }) {
-  assert(variant != null || existing != null);
   return showDialog<WorkLine>(
     context: context,
-    builder: (_) => _LeafEditor(variant: variant, existing: existing),
+    builder: (_) => _LeafEditor(existing: existing),
   );
 }
 
 class _LeafEditor extends StatefulWidget {
-  const _LeafEditor({this.variant, this.existing});
-  final CatalogVariant? variant;
-  final WorkLine? existing;
+  const _LeafEditor({required this.existing});
+  final WorkLine existing;
 
   @override
   State<_LeafEditor> createState() => _LeafEditorState();
@@ -32,27 +30,31 @@ class _LeafEditorState extends State<_LeafEditor> {
   late final TextEditingController _qty;
   late final TextEditingController _price;
   late final TextEditingController _note;
-
-  late final String _variantId;
-  late final String _kind;
-  late final String _name;
   late final bool _priceEditable;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
-    final v = widget.variant;
-    _variantId = e?.variantId ?? v!.variantId;
-    _kind = e?.variantKind ?? v!.kind;
-    _name = e?.snapshotName ?? v!.name;
-    _priceEditable = _kind == 'service' || _kind == 'open_price';
-
-    final initialPrice = e?.unitPriceMinor ?? v!.priceMinor;
-    _qty = TextEditingController(text: '${e?.qty ?? 1}');
+    // The clerk may reprice any line; only bundles are locked (the API
+    // rejects price overrides on bundles).
+    _priceEditable = e.variantKind != 'bundle';
+    _qty = TextEditingController(text: '${e.qty}');
     _price = TextEditingController(
-        text: initialPrice == 0 ? '' : '$initialPrice');
-    _note = TextEditingController(text: e?.note ?? '');
+        text: e.unitPriceMinor == 0 ? '' : groupMinor(e.unitPriceMinor));
+    _note = TextEditingController(text: e.note);
+    // The margin pill in the price field previews live as the price is typed.
+    _price.addListener(() => setState(() {}));
+  }
+
+  /// Live margin preview at the currently typed price, from the line's cost
+  /// snapshot. Null (no pill) when the cost is unknown or there is no price.
+  double? get _previewMarginFraction {
+    final price = parseMinor(_price.text) ?? 0;
+    if (price <= 0) return null;
+    final cost = widget.existing.unitCostAt(price);
+    if (cost == null) return null;
+    return (price - cost) / price;
   }
 
   @override
@@ -68,13 +70,9 @@ class _LeafEditorState extends State<_LeafEditor> {
     if (qty <= 0) return;
     final price = _priceEditable
         ? (parseMinor(_price.text) ?? 0)
-        : (widget.existing?.unitPriceMinor ?? widget.variant!.priceMinor);
+        : widget.existing.unitPriceMinor;
 
-    final line = widget.existing ?? WorkLine()
-      ..variantId = _variantId
-      ..variantKind = _kind
-      ..snapshotName = _name;
-    line
+    final line = widget.existing
       ..qty = qty
       ..unitPriceMinor = price
       ..note = _note.text.trim();
@@ -85,7 +83,8 @@ class _LeafEditorState extends State<_LeafEditor> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_name, style: Theme.of(context).textTheme.titleMedium),
+      title: Text(widget.existing.snapshotName,
+          style: Theme.of(context).textTheme.titleMedium),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -108,10 +107,21 @@ class _LeafEditorState extends State<_LeafEditor> {
                     controller: _price,
                     enabled: _priceEditable,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    inputFormatters: const [ThousandsInputFormatter()],
                     decoration: InputDecoration(
-                      labelText: _priceEditable ? 'Price' : 'Catalog price',
+                      labelText: _priceEditable ? 'Price' : 'Bundle price',
                       prefixText: 'Rp ',
+                      // Live margin preview from the line's cost snapshot.
+                      suffixIcon: Center(
+                        widthFactor: 1,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child:
+                              MarginPill(fraction: _previewMarginFraction),
+                        ),
+                      ),
+                      suffixIconConstraints:
+                          const BoxConstraints(minWidth: 0, minHeight: 0),
                       border: const OutlineInputBorder(),
                     ),
                   ),
@@ -124,7 +134,7 @@ class _LeafEditorState extends State<_LeafEditor> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Stock items use the catalog price.',
+                    'Bundles use the catalog price.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),

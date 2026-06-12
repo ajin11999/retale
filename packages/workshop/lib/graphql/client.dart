@@ -1,17 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:retale_workshop/config.dart';
+import 'package:retale_workshop/graphql/token_refresh.dart';
 
-/// Builds the [GraphQLClient] for a given API base URL. The auth link reads the
-/// access token from secure storage on every request, so the same client keeps
-/// working across login/logout without a rebuild — only a base-URL change needs
-/// a new client.
+/// Builds the [GraphQLClient] for a given API base URL. The auth link gets the
+/// access token (refreshed when near expiry — see [TokenRefresh]) on every
+/// request, so the same client keeps working across login/logout and hour-long
+/// sessions without a rebuild — only a base-URL change needs a new client.
 GraphQLClient buildClient(String apiUrl) {
   final httpLink = HttpLink(AppConfig.graphqlEndpoint(apiUrl));
 
   final authLink = AuthLink(
     getToken: () async {
-      final token = await AppConfig.getAccessToken();
+      final token = await TokenRefresh.bearerToken();
       return token == null ? null : 'Bearer $token';
     },
   );

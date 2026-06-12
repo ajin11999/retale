@@ -7,10 +7,11 @@ part 'work_line.g.dart';
 ///
 /// Groups are a workshop-UI concept; they never reach the API. A leaf carries
 /// the catalog `variantId` plus a snapshot of the variant's name (so the sheet
-/// renders offline) and the chosen `unitPriceMinor`. For `service` / `open_price`
-/// variants that price is sent as `priceOverrideMinor`; for `physical` variants
-/// it is display-only (the API uses the variant's own price). `note` is extra
-/// free text that stays local — it is not sent to the backend.
+/// renders offline) and the chosen `unitPriceMinor`. The sheet price is
+/// authoritative: it is sent as `priceOverrideMinor` on submit for every kind
+/// except `bundle` (the API rejects overrides there and prices bundles from
+/// the catalog). `note` is extra free text that stays local — it is not sent
+/// to the backend.
 @embedded
 class WorkLine {
   bool isGroup = false;
@@ -29,9 +30,19 @@ class WorkLine {
 
   int qty = 1;
 
-  /// Chosen unit price, minor units. Override for service/open_price; display
-  /// for physical.
+  /// Chosen unit price, minor units. Sent as the price override on submit
+  /// (except bundles, which always use the catalog price).
   int unitPriceMinor = 0;
+
+  /// The variant's weighted-average unit cost at pick time, minor units —
+  /// local-only, feeds the margin pill. Null on groups and on lines saved
+  /// before cost snapshots existed (those simply show no margin).
+  int? unitCostMinor;
+
+  /// Cost ratio (basis points) snapshot for open-price variants, where cost is
+  /// a fraction of the entered price — kept so the margin pill stays correct
+  /// when the line is repriced later. Null elsewhere. Local-only.
+  int? costRatioBps;
 
   /// Children of a group. Null/empty on a leaf. Self-referential embedding —
   /// Isar supports this (see the ProDuck Workshop reference).

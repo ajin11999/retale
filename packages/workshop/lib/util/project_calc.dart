@@ -23,6 +23,30 @@ int paymentsTotalMinor(List<WorkPayment>? payments) {
 int remainingMinor(Project p) =>
     linesTotalMinor(p.lines) - paymentsTotalMinor(p.payments);
 
+/// Margin math over a [WorkLine]'s cost snapshot. Lives here (not on the Isar
+/// class) so the computed values stay out of the generated schema.
+extension WorkLineMargin on WorkLine {
+  /// Per-unit cost at a hypothetical [priceMinor]: open-price lines derive
+  /// cost from the price via the snapshotted ratio (the API's snapshot rule);
+  /// everything else uses the cost captured at pick time. Null when the line
+  /// predates cost snapshots.
+  int? unitCostAt(int priceMinor) {
+    final ratio = costRatioBps;
+    if (variantKind == 'open_price' && ratio != null) {
+      return (priceMinor * ratio / 10000).round();
+    }
+    return unitCostMinor;
+  }
+
+  /// Per-unit margin as a fraction of unit price (0.25 = 25%). Null when the
+  /// cost is unknown or there is no price to measure against.
+  double? get marginFraction {
+    final cost = unitCostAt(unitPriceMinor);
+    if (cost == null || unitPriceMinor <= 0) return null;
+    return (unitPriceMinor - cost) / unitPriceMinor;
+  }
+}
+
 /// All leaf (non-group) lines anywhere in the tree, depth-first — the flattened
 /// form submitted to the API.
 List<WorkLine> flattenLeaves(List<WorkLine>? lines) {

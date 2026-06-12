@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:retale_workshop/schema/project.dart';
@@ -200,7 +199,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   void initState() {
     super.initState();
     final preset = widget.remaining > 0 ? widget.remaining : 0;
-    _amount = TextEditingController(text: preset == 0 ? '' : '$preset');
+    _amount = TextEditingController(text: preset == 0 ? '' : groupMinor(preset));
   }
 
   @override
@@ -226,7 +225,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
             controller: _amount,
             autofocus: true,
             keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            inputFormatters: const [ThousandsInputFormatter()],
             decoration: const InputDecoration(
               labelText: 'Amount',
               prefixText: 'Rp ',
