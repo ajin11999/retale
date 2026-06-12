@@ -371,6 +371,15 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
+  // Cross-tab freshness: a courier/vendor (or PO line) created in another
+  // browser tab only exists on the server — this tab's Houdini cache never
+  // hears about it. Re-pull when the user comes back to this tab so the
+  // cost-line courier pickers list it. Skipped mid-mutation: the mutation's
+  // own refetch() is about to run anyway.
+  function onWindowFocus() {
+    if (!busy) refetch();
+  }
+
   async function saveHeader() {
     if (!delivery) return;
     busy = true;
@@ -820,6 +829,7 @@
 </script>
 
 <svelte:head><title>Delivery · Retale Console</title></svelte:head>
+<svelte:window onfocus={onWindowFocus} />
 
 <div class="space-y-4">
   <a href="/deliveries" class="text-sm text-primary hover:underline">← All deliveries</a>
