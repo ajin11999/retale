@@ -128,6 +128,8 @@ Future<Uint8List> buildReceiptPdf(
     if (receipt.paidMinor != null) costRow('Cash', receipt.paidMinor!),
     if (receipt.changeMinor != null && receipt.changeMinor! > 0)
       costRow('CHANGE', receipt.changeMinor!, strong: true),
+    if (receipt.onAccountMinor != null && receipt.onAccountMinor! > 0)
+      costRow('ON ACCOUNT', receipt.onAccountMinor!, strong: true),
     pw.SizedBox(height: 14),
     if (receipt.displayNumber != null)
       pw.Center(

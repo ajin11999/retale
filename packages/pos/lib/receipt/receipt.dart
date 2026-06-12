@@ -44,6 +44,7 @@ class Receipt {
     this.createdAt,
     this.paidMinor,
     this.changeMinor,
+    this.onAccountMinor,
     this.customerName,
   });
 
@@ -54,6 +55,10 @@ class Receipt {
   final DateTime? createdAt;
   final int? paidMinor;
   final int? changeMinor;
+
+  /// Unpaid remainder charged to the customer's account; null when paid in
+  /// full.
+  final int? onAccountMinor;
   final String? customerName;
 
   static final _dateFmt = DateFormat('yyyy-MM-dd HH:mm');
@@ -90,6 +95,7 @@ class Receipt {
       createdAt: DateTime.tryParse(order['createdAt'] as String? ?? ''),
       paidMinor: paid > 0 ? paid : null,
       changeMinor: paid > total ? paid - total : null,
+      onAccountMinor: paid < total ? total - paid : null,
       customerName: customer?['name'] as String? ??
           order['snapshotCustomerName'] as String?,
     );
@@ -118,6 +124,9 @@ class Receipt {
     if (paidMinor != null) b.writeln('Cash: ${Money.format(paidMinor!)}');
     if (changeMinor != null && changeMinor! > 0) {
       b.writeln('Change: ${Money.format(changeMinor!)}');
+    }
+    if (onAccountMinor != null && onAccountMinor! > 0) {
+      b.writeln('On account: ${Money.format(onAccountMinor!)}');
     }
     b.writeln();
     b.write('Thank you!');

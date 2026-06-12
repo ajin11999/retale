@@ -160,7 +160,7 @@ class Ops {
   static const posCustomerSearch = '''
     query PosCustomerSearch(\$search: String, \$limit: Int) {
       posCustomerSearch(search: \$search, limit: \$limit) {
-        id name phone
+        id name phone balanceMinor creditLimitMinor
       }
     }
   ''';

@@ -47,12 +47,17 @@ class SyncService extends ChangeNotifier {
 
   /// Submit a sale. Tries the API first; on a network failure the order is
   /// queued durably and [SubmitStatus.queued] is returned.
+  ///
+  /// Pass [queueWhenOffline] false for on-account sales: a queued order the
+  /// server later rejects (e.g. credit limit) is silently dropped at flush,
+  /// which must never happen to a debt record — surface the failure instead.
   Future<SubmitResult> submitOrder({
     required String posSessionId,
     String? customerId,
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> payments,
     required int totalMinor,
+    bool queueWhenOffline = true,
   }) async {
     try {
       final data = await _gql.mutate(Ops.createPosOrder, variables: {
@@ -68,6 +73,7 @@ class SyncService extends ChangeNotifier {
       );
     } on GraphQLAppException catch (e) {
       if (!e.isNetworkError) rethrow; // a real validation error must surface.
+      if (!queueWhenOffline) rethrow;
       await _queue.enqueue(QueuedOrder(
         localId: DateTime.now().microsecondsSinceEpoch.toString(),
         posSessionId: posSessionId,

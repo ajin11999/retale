@@ -520,6 +520,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         lines: lines,
         totalMinor: totalMinor,
         paidMinor: outcome.paidMinor,
+        onAccountMinor: outcome.onAccountMinor,
         customer: outcome.customer,
         createdAt: DateTime.now(),
       );
@@ -601,6 +602,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       createdAt: sale.createdAt,
       paidMinor: sale.paidMinor,
       changeMinor: changeMinor,
+      onAccountMinor: sale.onAccountMinor,
       customerName: sale.customer?.name,
     );
   }
@@ -1080,21 +1082,27 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     setState(() => _customer = identical(picked, _walkIn) ? null : picked);
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit({required bool onAccount}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       final tendered = Money.parse(_tendered.text);
+      final total = widget.cart.totalMinor;
+      // Change isn't a payment — record only the cash applied to the sale.
+      final applied = tendered > total ? total : tendered;
       final result = await SyncService.instance.submitOrder(
         posSessionId: widget.session.id,
         customerId: _customer?.id,
         items: widget.cart.toOrderItemsInput(),
         payments: [
-          {'method': 'cash', 'amountMinor': widget.cart.totalMinor},
+          if (applied > 0) {'method': 'cash', 'amountMinor': applied},
         ],
-        totalMinor: widget.cart.totalMinor,
+        totalMinor: total,
+        // A queued on-account order the server later rejects (e.g. credit
+        // limit) is silently dropped at flush — never queue a debt record.
+        queueWhenOffline: !onAccount,
       );
       if (mounted) {
         Navigator.pop(
@@ -1103,11 +1111,21 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
             result: result,
             customer: _customer,
             paidMinor: tendered > 0 ? tendered : null,
+            onAccountMinor: onAccount ? total - applied : null,
           ),
         );
       }
     } on GraphQLAppException catch (e) {
-      setState(() => _error = e.message);
+      setState(() {
+        if (onAccount && e.isNetworkError) {
+          _error =
+              'On-account sales need a connection — retry once online, or take cash.';
+        } else if (e.message.contains('CREDIT_LIMIT_EXCEEDED')) {
+          _error = "This would exceed the customer's credit limit.";
+        } else {
+          _error = e.message;
+        }
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1144,6 +1162,16 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
               ),
             ),
           ),
+          if (_customer != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 28),
+              child: Text(
+                'Balance ${Money.format(_customer!.balanceMinor)}'
+                '${_customer!.creditLimitMinor != null ? '  ·  Limit ${Money.format(_customer!.creditLimitMinor!)}' : ''}',
+                style: TextStyle(
+                    fontSize: 12, color: Theme.of(context).hintColor),
+              ),
+            ),
           const Divider(),
           Row(
             children: [
@@ -1162,9 +1190,10 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
             inputFormatters: [ThousandsSeparatorInputFormatter()],
             onChanged: (_) => setState(() {}),
             // Enter completes the sale, so the cashier never has to reach for
-            // the mouse after counting cash.
+            // the mouse after counting cash. Same gate as the button: only
+            // when the tendered cash covers the total.
             onSubmitted: (_) {
-              if (!_busy) _submit();
+              if (!_busy && _balanceMinor >= 0) _submit(onAccount: false);
             },
             decoration: const InputDecoration(
               labelText: 'Cash tendered',
@@ -1199,9 +1228,24 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
           onPressed: _busy ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
+        // Under-tendered with a customer attached: the remainder can go on
+        // their account (the server posts a sale_on_account ledger entry and
+        // enforces the credit limit). Walk-ins must pay in full.
+        if (_customer != null && _balanceMinor < 0)
+          FilledButton.tonal(
+            onPressed: _busy ? null : () => _submit(onAccount: true),
+            child: _busy
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Text('Put ${Money.format(-_balanceMinor)} on account'),
+          ),
         FilledButton(
-          onPressed: _busy ? null : _submit,
-          child: _busy
+          onPressed: _busy || _balanceMinor < 0
+              ? null
+              : () => _submit(onAccount: false),
+          child: _busy && _balanceMinor >= 0
               ? const SizedBox(
                   height: 18,
                   width: 18,
@@ -1221,6 +1265,7 @@ class _CompletedSale {
     required this.lines,
     required this.totalMinor,
     required this.paidMinor,
+    required this.onAccountMinor,
     required this.customer,
     required this.createdAt,
   });
@@ -1229,6 +1274,7 @@ class _CompletedSale {
   final List<ReceiptLine> lines;
   final int totalMinor;
   final int? paidMinor;
+  final int? onAccountMinor;
   final Customer? customer;
   final DateTime createdAt;
 }
@@ -1241,11 +1287,15 @@ class _CheckoutOutcome {
     required this.result,
     required this.customer,
     required this.paidMinor,
+    required this.onAccountMinor,
   });
 
   final SubmitResult result;
   final Customer? customer;
   final int? paidMinor;
+
+  /// The remainder charged to the customer's account; null when paid in full.
+  final int? onAccountMinor;
 }
 
 /// The "Walk-in customer" sentinel the picker returns to clear an attached
