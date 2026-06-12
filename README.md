@@ -5,11 +5,7 @@ network. A Bun + TypeScript GraphQL API backs a family of clients: a Flutter
 POS register, a SvelteKit back-office console, a product catalog, and two
 companion Flutter apps for warehouse receiving and workshop service.
 
-Retale is a ground-up rewrite of ProDuck (ASP.NET Core 7); ProDuck is only a
-one-time data source via the importer, not a schema constraint. The locked
-architectural decisions (ULID IDs, integer minor units, stock ledger, order
-snapshots, wipe-and-restore importer) live in
-[`docs/design-decisions.md`](docs/design-decisions.md).
+**100% vibe-coded by Claude.**
 
 ## Console highlight: landed-cost deliveries
 
