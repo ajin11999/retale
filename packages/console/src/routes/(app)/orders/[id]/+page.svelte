@@ -1,10 +1,11 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
@@ -299,6 +300,12 @@
   let { data }: { data: PageData } = $props();
   const OrderDetail = $derived(data.OrderDetail);
   const OrderEditorProducts = $derived(data.OrderEditorProducts);
+
+  // A product created in another tab won't appear in the item picker —
+  // Houdini serves the cached catalog. Re-pull when the tab becomes visible.
+  refetchOnVisible(() =>
+    OrderEditorProducts.fetch({ policy: CachePolicy.NetworkOnly }),
+  );
   const order = $derived($OrderDetail.data?.order ?? null);
   const products = $derived($OrderEditorProducts.data?.products ?? []);
   const isOpen = $derived(order?.status === "open");

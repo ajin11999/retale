@@ -4,6 +4,7 @@
   import { marked } from "marked";
   import { Pencil, SlidersHorizontal, Trash2 } from "@lucide/svelte";
   import { formatMoney, treePathMap } from "$lib/utils";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -111,21 +112,13 @@
 
   // A category created in another tab — e.g. the Categories screen — won't
   // appear in the category picker here, since Houdini serves the cached query.
-  // Refetch when this tab regains visibility so returning here picks up
-  // categories created elsewhere. Edits in progress are plain component state,
-  // so the refetch doesn't disturb them.
-  $effect(() => {
-    const onVisible = () => {
-      const id = page.params.id;
-      if (id && document.visibilityState === "visible") {
-        ProductDetail.fetch({
-          variables: { id },
-          policy: CachePolicy.NetworkOnly,
-        });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+  // Edits in progress are plain component state, so the refetch doesn't
+  // disturb them.
+  refetchOnVisible(() => {
+    const id = page.params.id;
+    if (id) {
+      ProductDetail.fetch({ variables: { id }, policy: CachePolicy.NetworkOnly });
+    }
   });
 
   const UpdateProduct = graphql(`

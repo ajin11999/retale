@@ -4,6 +4,7 @@
   import { page } from "$app/state";
   import { Check, Pencil, X } from "@lucide/svelte";
   import { formatMoney, matchesTokens, searchTokens, treePathMap } from "$lib/utils";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -92,19 +93,10 @@
   );
 
   // A category (or product) created in another tab — e.g. the Categories
-  // screen — won't appear here, since Houdini serves the cached query. Refetch
-  // when this tab regains visibility so the category picker and list pick up
-  // records created elsewhere. The in-progress new-product form is plain
-  // component state, so the refetch doesn't disturb it.
-  $effect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        ProductList.fetch({ policy: CachePolicy.NetworkOnly });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  });
+  // screen — won't appear here, since Houdini serves the cached query. The
+  // in-progress new-product form is plain component state, so the refetch
+  // doesn't disturb it.
+  refetchOnVisible(() => ProductList.fetch({ policy: CachePolicy.NetworkOnly }));
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);

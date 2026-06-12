@@ -6,6 +6,7 @@
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import {
     ArrowDown,
     ArrowUp,
@@ -382,6 +383,13 @@
   const RefData = $derived(data.PurchaseEditorRefData);
 
   const purchase = $derived($PurchaseDetail.data?.purchase);
+
+  // A vendor or product created in another tab won't appear in the pickers —
+  // Houdini serves the cached ref data. Re-pull it when the tab becomes
+  // visible again. Line/section edits in progress are plain component state,
+  // so the refetch doesn't disturb them.
+  refetchOnVisible(() => RefData.fetch({ policy: "NetworkOnly" }));
+
   const vendors = $derived($RefData.data?.vendors ?? []);
   // Searchable Combobox options for the header vendor; the leading empty row
   // keeps the "ad-hoc vendor" (no vendor on file) choice.

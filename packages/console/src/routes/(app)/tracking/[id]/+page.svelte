@@ -4,6 +4,7 @@
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney } from "$lib/utils";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
@@ -157,6 +158,11 @@
 
   let { data }: { data: PageData } = $props();
   const Detail = $derived(data.TrackingAccountDetail);
+
+  // Variants created in another tab won't appear in the assignment picker —
+  // Houdini serves the cached query. Re-pull when the tab becomes visible.
+  refetchOnVisible(() => Detail.fetch({ policy: CachePolicy.NetworkOnly }));
+
   const account = $derived($Detail.data?.trackingAccount ?? null);
   const ledger = $derived($Detail.data?.trackingAccountLedger ?? []);
   const assignable = $derived(

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { graphql } from "$houdini";
+  import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
+  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -62,6 +63,13 @@
 
   let { data }: { data: PageData } = $props();
   const ReorderSuggestions = $derived(data.ReorderSuggestions);
+
+  // A vendor created in another tab won't appear in the assignment picker —
+  // Houdini serves the cached query. Re-pull when the tab becomes visible;
+  // the per-row review map only re-syncs if the suggestion id set changed.
+  refetchOnVisible(() =>
+    ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly }),
+  );
 
   const suggestions = $derived($ReorderSuggestions.data?.reorderSuggestions ?? []);
   const vendors = $derived($ReorderSuggestions.data?.vendors ?? []);
