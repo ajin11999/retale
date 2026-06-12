@@ -15,6 +15,9 @@ build/
 # Locally-stored uploads (business logo, etc.)
 uploads/
 
+# Local database/uploads backups (bun run backup)
+backups/
+
 # Environment & secrets
 .env
 .env.*

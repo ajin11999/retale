@@ -56,11 +56,45 @@ part of this stack.
 - **Logs:** `docker compose -p retale-prod logs -f api` (or `console`, `caddy`).
 - **Stop:** `docker compose -p retale-prod down` — data persists in named
   volumes (`dbdata`, `uploads`, `caddy-data`). Never `down -v` in production.
-- **Backups:** the database has no cloud copy. Dump it on a schedule, e.g.:
+- **Backups:** see the next section — the database has no cloud copy, so
+  schedule `bun run backup` on the host.
 
-  ```
-  docker compose -p retale-prod exec mariadb mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" retale > backup.sql
-  ```
+## Backup & restore
+
+`bun run backup` snapshots everything stateful — a gzipped `mariadb-dump` of
+the database plus the uploads volume — into a timestamped folder under
+`backups/` (gitignored), with a `manifest.json`. It reads credentials from
+`.env.prod`, so run it from the repo checkout on the host:
+
+```
+bun run backup --keep 30                 # prod stack; prune to the 30 newest
+bun run backup --dev                     # dev docker-compose DB instead
+bun run backup --out D:/retale-backups   # write to another drive (recommended)
+```
+
+Schedule it (backups on the same disk as the database don't survive a dead
+disk — point `--out` at a second drive or a network share):
+
+- Linux host: `crontab -e` →
+  `0 2 * * * cd /path/to/retale && bun run backup --keep 30 --out /mnt/backups`
+- Windows host: Task Scheduler → daily → program `bun`, arguments
+  `run backup --keep 30 --out D:\retale-backups`, "Start in" = the repo dir.
+
+`bun run restore <backup-dir>` puts a backup back. It stops `api` + `console`,
+drops and reloads the database, replaces the uploads volume, then starts the
+services again (the api re-applies migrations at startup, so restoring an
+older backup onto newer code is fine):
+
+```
+bun run restore backups/retale-prod-20260612-020000          # prompts y/N
+bun run restore backups/retale-prod-20260612-020000 --yes    # non-interactive
+bun run restore backup.sql.gz --db-only                      # bare dump, DB only
+bun run restore backups/retale-prod-20260612-020000 --dev    # load prod data into dev
+```
+
+Restore is destructive (the current database is dropped); it refuses to run
+non-interactively without `--yes`. Test the restore path on the dev stack
+(`--dev`) before you need it in anger.
 
 ## Notes
 

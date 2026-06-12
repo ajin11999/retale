@@ -9,6 +9,8 @@
     "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy offline-first",
     "build:stockeeper-apk": "cd packages/stockeeper && flutter build apk --release",
     "test": "bun test",
+    "backup": "bun scripts/backup.ts",
+    "restore": "bun scripts/restore.ts",
     "icons": "bun scripts/generate-icons.ts",
     "typecheck": "bun run --filter @retale/api typecheck",
     "db:generate": "bun run --filter @retale/api db:generate",
