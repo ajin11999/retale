@@ -12,7 +12,7 @@ import '../count_screen.dart';
 
 /// Count incoming goods against one purchase order. Every change saves
 /// straight into the open draft receiving check — the app never commits;
-/// freight legs and the commit happen in the web console.
+/// freight / cost lines and the commit happen in the web console.
 class ReceivingScreen extends StatefulWidget {
   const ReceivingScreen({super.key, required this.purchase, required this.check});
 
@@ -310,8 +310,8 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Text(
-                'Counts save automatically. Commit in the console after '
-                'adding freight.',
+                'Counts save automatically. Review costs and commit in '
+                'the console.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13),
               ),

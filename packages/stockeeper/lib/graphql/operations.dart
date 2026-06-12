@@ -3,7 +3,7 @@
 /// graphql_flutter takes hand-written document strings; these are the only
 /// operations the app issues. Deliberately NO commitReceivingCheck — counts
 /// stage into the draft check and the commit happens in the web console
-/// after freight legs are added.
+/// after freight / cost lines are added to the delivery's cost tree.
 class Ops {
   Ops._();
 

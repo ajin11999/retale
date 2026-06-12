@@ -18,9 +18,10 @@ This app is for **counting only**:
   scanner-gun / typed / camera barcode entry
 - Reconcile: pick a location, count, review the deltas, apply
 
-It **never commits a receiving check** — freight legs/costs are added and the
-delivery is committed in the web console (`packages/console`). PO management,
-costing, and reporting also stay in the console.
+It **never commits a receiving check** — freight / cost lines are added to the
+delivery's cost tree and the delivery is committed in the web console
+(`packages/console`). PO management, costing, and reporting also stay in the
+console.
 
 Reconcile sends **only touched lines** (`bulkAdjustStock`), so partial / spot
 counts are safe: untouched stock is never adjusted.
