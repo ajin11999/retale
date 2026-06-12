@@ -4,6 +4,7 @@
   import { X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
+  import { statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -220,7 +221,7 @@
     <div class="flex items-center gap-3">
       <div class="w-40">
         <Select bind:value={statusFilter}>
-          {#each STATUSES as s (s)}<option value={s}>{s}</option>{/each}
+          {#each STATUSES as s (s)}<option value={s}>{statusLabel(s)}</option>{/each}
         </Select>
       </div>
       <Button size="sm" disabled={busy || !canAct} onclick={runScan}>
@@ -312,7 +313,7 @@
               </td>
               {#if statusFilter !== "open"}
                 <td class="px-4 py-2">
-                  <Badge class={statusClass(s.status)}>{s.status}</Badge>
+                  <Badge class={statusClass(s.status)}>{statusLabel(s.status)}</Badge>
                 </td>
               {/if}
               <td class="px-4 py-2 text-right">

@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
@@ -773,7 +773,7 @@
                   <td class="whitespace-nowrap py-1.5 pr-4">
                     {fmtDateTime(e.createdAt)}
                   </td>
-                  <td class="py-1.5 pr-4">{e.type}</td>
+                  <td class="py-1.5 pr-4">{statusLabel(e.type)}</td>
                   <td
                     class="whitespace-nowrap py-1.5 pl-4 text-right tabular-nums {e.amountMinor <
                     0

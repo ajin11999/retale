@@ -4,7 +4,7 @@
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
-  import { treePathMap } from "$lib/utils";
+  import { statusLabel, treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -206,7 +206,7 @@
           Created {fmtDateTime(transfer.createdAt)}
         </p>
       </div>
-      <Badge class={statusClass(transfer.status)}>{transfer.status}</Badge>
+      <Badge class={statusClass(transfer.status)}>{statusLabel(transfer.status)}</Badge>
     </div>
 
     {#if feedback}

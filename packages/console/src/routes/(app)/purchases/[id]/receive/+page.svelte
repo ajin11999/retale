@@ -6,7 +6,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import { treePathMap } from "$lib/utils";
+  import { statusLabel, treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // The receiving state that changes as the check is worked: purchase header
@@ -545,7 +545,7 @@
                 </td>
                 <td class="px-4 py-2">
                   <Badge class={statusClass(l.provisionalStatus)}>
-                    {l.provisionalStatus}
+                    {statusLabel(l.provisionalStatus)}
                   </Badge>
                 </td>
               </tr>

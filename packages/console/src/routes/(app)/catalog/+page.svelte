@@ -303,9 +303,9 @@
               </td>
               <td class="px-4 py-2">
                 {#if p.onlineVisible}
-                  <Badge class="bg-emerald-100 text-emerald-700">visible</Badge>
+                  <Badge class="bg-emerald-100 text-emerald-700">Visible</Badge>
                 {:else}
-                  <Badge class="bg-muted text-muted-foreground">hidden</Badge>
+                  <Badge class="bg-muted text-muted-foreground">Hidden</Badge>
                 {/if}
               </td>
               <td class="px-4 py-2 font-mono text-xs">{p.onlinePriceMode}</td>

@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, statusLabel } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -839,7 +839,7 @@
           </p>
         {/if}
       </div>
-      <Badge class={statusBadge(order.status)}>{order.status}</Badge>
+      <Badge class={statusBadge(order.status)}>{statusLabel(order.status)}</Badge>
     </div>
 
     {#if order.cancellationReason}
@@ -1030,23 +1030,27 @@
           {/if}
         </tbody>
         <tfoot class="bg-muted/30">
+          <!-- The lines total and the order's stored total should always agree;
+               surface both only when they drift so the mismatch is visible. -->
+          {#if computed !== order.totalMinor}
+            <tr>
+              <td
+                colspan={isOpen ? 6 : 5}
+                class="px-4 py-2 text-right font-medium"
+              >
+                Lines total
+              </td>
+              <td class="px-4 py-2 text-right font-medium">
+                {formatMoney(computed)}
+              </td>
+            </tr>
+          {/if}
           <tr>
             <td
               colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium"
             >
-              Live lines total
-            </td>
-            <td class="px-4 py-2 text-right font-medium">
-              {formatMoney(computed)}
-            </td>
-          </tr>
-          <tr>
-            <td
-              colspan={isOpen ? 6 : 5}
-              class="px-4 py-2 text-right font-medium"
-            >
-              Cached order total
+              Total
             </td>
             <td
               class="px-4 py-2 text-right font-medium

@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
@@ -279,7 +279,7 @@
               </td>
               <td class="px-4 py-2 text-right">{formatMoney(o.totalMinor)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusBadge(o.status)}>{o.status}</Badge>
+                <Badge class={statusBadge(o.status)}>{statusLabel(o.status)}</Badge>
               </td>
             </tr>
           {/each}

@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, treePathMap } from "$lib/utils";
+  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -242,7 +242,7 @@
                   {fmtDate(d.date)}
                 </a>
                 {#if d.kind === "transit"}
-                  <Badge class="ml-1 bg-violet-100 text-violet-700">transit</Badge>
+                  <Badge class="ml-1 bg-violet-100 text-violet-700">Transit</Badge>
                 {/if}
               </td>
               <td class="px-4 py-2">{d.biller ?? "—"}</td>
@@ -274,7 +274,7 @@
               </td>
               <td class="px-4 py-2 text-right tabular-nums">{formatMoney(d.totalCostMinor)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusBadge(d.status)}>{d.status}</Badge>
+                <Badge class={statusBadge(d.status)}>{statusLabel(d.status)}</Badge>
                 {#if d.deliveredAt}
                   <span class="ml-1 block text-xs text-muted-foreground">
                     {fmtDate(d.deliveredAt)}

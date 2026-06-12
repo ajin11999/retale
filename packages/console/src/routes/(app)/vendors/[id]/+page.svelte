@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -710,12 +710,14 @@
           </Select>
         </label>
       </div>
-      <label class="space-y-1">
+      <!-- `block` matters on these section-level labels: a bare <label> is
+           inline, so consecutive ones would flow onto the same line. -->
+      <label class="block space-y-1">
         <span class="text-sm font-medium">Address</span>
         <Input bind:value={form.address} disabled={!canEdit} />
       </label>
       {#if canPickShipTo}
-        <label class="space-y-1">
+        <label class="block space-y-1">
           <span class="text-sm font-medium">Default ship-to (our address)</span>
           <Select bind:value={form.defaultShipToAddressId} disabled={!canEdit}>
             <option value="">— Use default address —</option>
@@ -731,7 +733,7 @@
           </span>
         </label>
       {/if}
-      <label class="space-y-1">
+      <label class="block space-y-1">
         <span class="text-sm font-medium">Notes</span>
         <Textarea
           bind:value={form.notes}
@@ -833,11 +835,11 @@
                     />
                   </th>
                 {/if}
-                <th class="py-1.5 font-medium">When</th>
-                <th class="py-1.5 font-medium">Type</th>
+                <th class="py-1.5 pr-4 font-medium">When</th>
+                <th class="py-1.5 pr-4 font-medium">Type</th>
                 <th class="py-1.5 text-right font-medium">Amount</th>
-                <th class="py-1.5 font-medium">Due</th>
-                <th class="py-1.5 font-medium">Note</th>
+                <th class="py-1.5 pl-4 font-medium">Due</th>
+                <th class="py-1.5 pl-4 font-medium">Note</th>
               </tr>
             </thead>
             <tbody>
@@ -860,8 +862,8 @@
                       {/if}
                     </td>
                   {/if}
-                  <td class="py-1.5">{fmtDateTime(e.createdAt)}</td>
-                  <td class="py-1.5">{e.type}</td>
+                  <td class="py-1.5 pr-4">{fmtDateTime(e.createdAt)}</td>
+                  <td class="py-1.5 pr-4">{statusLabel(e.type)}</td>
                   <td
                     class="py-1.5 text-right {e.amountMinor < 0
                       ? 'text-emerald-700'
@@ -869,8 +871,8 @@
                   >
                     {formatMoney(e.amountMinor)}
                   </td>
-                  <td class="py-1.5 text-muted-foreground">{e.dueDate ?? "—"}</td>
-                  <td class="py-1.5 text-muted-foreground">{e.note ?? "—"}</td>
+                  <td class="py-1.5 pl-4 text-muted-foreground">{e.dueDate ?? "—"}</td>
+                  <td class="py-1.5 pl-4 text-muted-foreground">{e.note ?? "—"}</td>
                 </tr>
               {/each}
               {#if ledger.length === 0}

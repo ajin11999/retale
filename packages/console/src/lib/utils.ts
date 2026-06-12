@@ -16,6 +16,16 @@ export function formatMoney(minor: number): string {
 }
 
 /**
+ * Human label for a status/enum value: "in_transit" → "In transit".
+ * Use wherever a raw API enum is shown to the user (status badges,
+ * ledger type cells) so casing stays consistent across pages.
+ */
+export function statusLabel(value: string): string {
+  const text = value.replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
  * Collapse a name to a comparison key for duplicate detection: lowercase and
  * strip everything but letters/digits. Catches the common real-world variants
  * ("Coca-Cola" / "coca cola" / "cocacola") without a fuzzy-match dependency.

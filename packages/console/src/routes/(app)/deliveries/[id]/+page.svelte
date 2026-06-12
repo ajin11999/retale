@@ -2,7 +2,7 @@
   import { graphql, CachePolicy } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, treePathMap } from "$lib/utils";
+  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -912,9 +912,9 @@
         <div class="flex flex-col items-end gap-2">
           <div class="flex gap-1">
             {#if isTransit}
-              <Badge class="bg-violet-100 text-violet-700">transit</Badge>
+              <Badge class="bg-violet-100 text-violet-700">Transit</Badge>
             {/if}
-            <Badge class={statusBadge(delivery.status)}>{delivery.status}</Badge>
+            <Badge class={statusBadge(delivery.status)}>{statusLabel(delivery.status)}</Badge>
           </div>
           <p class="text-xs text-muted-foreground">
             {#if isTransit}

@@ -2,7 +2,7 @@
   import { graphql } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import type { PageData } from "./$types";
 
@@ -84,7 +84,9 @@
       <div>
         <h1 class="text-xl font-semibold">Session {session.id.slice(-8)}</h1>
         <p class="text-sm text-muted-foreground">
-          Opened {fmt(session.openedAt)} · closed {fmt(session.closedAt)}
+          Opened {fmt(session.openedAt)}{session.closedAt
+            ? ` · closed ${fmt(session.closedAt)}`
+            : ""}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -175,7 +177,7 @@
                 <td class="px-4 py-2">{fmt(o.closedAt ?? o.cancelledAt)}</td>
                 <td class="px-4 py-2 text-right">{formatMoney(o.totalMinor)}</td>
                 <td class="px-4 py-2">
-                  <Badge class={statusBadge(o.status)}>{o.status}</Badge>
+                  <Badge class={statusBadge(o.status)}>{statusLabel(o.status)}</Badge>
                 </td>
               </tr>
             {/each}

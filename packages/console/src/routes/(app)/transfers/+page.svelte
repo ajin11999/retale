@@ -9,7 +9,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import { treePathMap } from "$lib/utils";
+  import { statusLabel, treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -293,7 +293,7 @@
               <td class="px-4 py-2 text-right">{t.items.length}</td>
               <td class="px-4 py-2">{fmtDate(t.createdAt)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusClass(t.status)}>{t.status}</Badge>
+                <Badge class={statusClass(t.status)}>{statusLabel(t.status)}</Badge>
               </td>
             </tr>
           {/each}

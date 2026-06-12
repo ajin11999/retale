@@ -5,7 +5,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import {
     ArrowDown,
@@ -1496,7 +1496,7 @@
         </p>
       </div>
       <div class="flex items-center gap-3">
-        <Badge class={statusClass(purchase.status)}>{purchase.status}</Badge>
+        <Badge class={statusClass(purchase.status)}>{statusLabel(purchase.status)}</Badge>
         {#if has("delivery.draft") && purchase.status !== "cancelled"}
           <a
             href="/purchases/{purchase.id}/receive"

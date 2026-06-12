@@ -3,7 +3,7 @@
   import { page } from "$app/state";
   import { marked } from "marked";
   import { Pencil, SlidersHorizontal, Trash2 } from "@lucide/svelte";
-  import { formatMoney, treePathMap } from "$lib/utils";
+  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -635,7 +635,7 @@
   }
 
   const categoryName = (id: string | null | undefined) =>
-    id ? (categoryPaths.get(id) ?? "Unknown") : "—";
+    id ? (categoryPaths.get(id) ?? "Unknown") : "Uncategorized";
 
   // ---- Variant margin pill -------------------------------------------------
   // Gross margin = (price − cost) / price, ignoring tax. Computed live: when a
@@ -999,7 +999,7 @@
       <div>
         <h1 class="text-xl font-semibold">{product.name}</h1>
         <p class="text-sm text-muted-foreground">
-          {categoryName(product.categoryId)} · {product.kind}
+          {categoryName(product.categoryId)} · {statusLabel(product.kind)}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -1081,7 +1081,7 @@
         <label class="space-y-1">
           <span class="text-sm font-medium">Kind</span>
           <Select bind:value={form.kind} disabled={!canEdit}>
-            {#each KINDS as k (k)}<option value={k}>{k}</option>{/each}
+            {#each KINDS as k (k)}<option value={k}>{statusLabel(k)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
@@ -1096,7 +1096,7 @@
         <label class="space-y-1">
           <span class="text-sm font-medium">Price mode</span>
           <Select bind:value={form.priceMode} disabled={!canEdit || !canEditTax}>
-            {#each PRICE_MODES as m (m)}<option value={m}>{m}</option>{/each}
+            {#each PRICE_MODES as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
@@ -1186,7 +1186,7 @@
                 (e.currentTarget as HTMLSelectElement).value,
               )}
           >
-            {#each PRICE_MODES_ONLINE as m (m)}<option value={m}>{m}</option>{/each}
+            {#each PRICE_MODES_ONLINE as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
@@ -1199,7 +1199,7 @@
                 (e.currentTarget as HTMLSelectElement).value,
               )}
           >
-            {#each STOCK_MODES_ONLINE as m (m)}<option value={m}>{m}</option>{/each}
+            {#each STOCK_MODES_ONLINE as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
           </Select>
         </label>
       </div>

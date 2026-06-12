@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -237,7 +237,7 @@
                 {formatMoney(p.totalInvoiceCost)}
               </td>
               <td class="px-4 py-2">
-                <Badge class={statusClass(p.status)}>{p.status}</Badge>
+                <Badge class={statusClass(p.status)}>{statusLabel(p.status)}</Badge>
               </td>
               <td class="px-4 py-2">
                 {#if p.lastSentAt}

@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Check, Pencil, X } from "@lucide/svelte";
-  import { formatMoney, matchesTokens, searchTokens, treePathMap } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, statusLabel, treePathMap } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -602,7 +602,7 @@
                 {/if}
               </td>
               <td class="px-4 py-2">{row.category}</td>
-              <td class="px-4 py-2">{row.kind}</td>
+              <td class="px-4 py-2">{statusLabel(row.kind)}</td>
               <td class="px-4 py-2">{row.variants}</td>
               <td class="px-4 py-2">
                 {#if quick?.id === row.id}
