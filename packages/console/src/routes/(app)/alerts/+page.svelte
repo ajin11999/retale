@@ -282,7 +282,7 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Product</th>
+              <th class="min-w-48 px-4 py-2 font-medium">Product</th>
               <th class="px-4 py-2 font-medium">Type</th>
               <th class="px-4 py-2 font-medium">Triggered</th>
               <th class="px-4 py-2 font-medium">Context</th>
@@ -313,9 +313,13 @@
                     {a.type.replace("_", " ")}
                   </Badge>
                 </td>
-                <td class="px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
+                <td class="whitespace-nowrap px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
                 <td class="px-4 py-2 text-xs text-muted-foreground">
-                  {summary(a.triggerContext) || "—"}
+                  <!-- The inner cap keeps a long context dump from starving the
+                       product column under the table's auto layout. -->
+                  <div class="max-w-md break-words">
+                    {summary(a.triggerContext) || "—"}
+                  </div>
                 </td>
                 <td class="px-4 py-2">
                   {#if a.acknowledgedAt}
@@ -389,7 +393,7 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">PO</th>
+              <th class="min-w-48 px-4 py-2 font-medium">PO</th>
               <th class="px-4 py-2 font-medium">Type</th>
               <th class="px-4 py-2 font-medium">Triggered</th>
               <th class="px-4 py-2 font-medium">Context</th>
@@ -416,9 +420,11 @@
                     {a.type.replace("_", " ")}
                   </Badge>
                 </td>
-                <td class="px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
+                <td class="whitespace-nowrap px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
                 <td class="px-4 py-2 text-xs text-muted-foreground">
-                  {summary(a.triggerContext) || "—"}
+                  <div class="max-w-md break-words">
+                    {summary(a.triggerContext) || "—"}
+                  </div>
                 </td>
                 <td class="px-4 py-2">
                   {#if a.acknowledgedAt}
