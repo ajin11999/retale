@@ -1,4 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:retale_workshop/util/money.dart';
+
+/// One-line cost readout under a price field: "Cost Rp 30.000 · Margin Rp
+/// 20.000", recomputed by the caller as the price is typed. The margin amount
+/// complements the [MarginPill]'s percentage; the whole line turns the error
+/// color when [priceMinor] is below [costMinor]. Mirrors the POS edit-cart
+/// dialog's cost/margin preview.
+class CostMarginLine extends StatelessWidget {
+  const CostMarginLine({
+    super.key,
+    required this.costMinor,
+    required this.priceMinor,
+  });
+
+  final int costMinor;
+  final int priceMinor;
+
+  @override
+  Widget build(BuildContext context) {
+    final margin = priceMinor - costMinor;
+    final scheme = Theme.of(context).colorScheme;
+    return Text(
+      'Cost ${formatMinor(costMinor)} · Margin ${formatMinor(margin)}',
+      style: TextStyle(
+        fontSize: 12,
+        color: margin < 0 ? scheme.error : scheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
 
 /// Compact margin badge: "32%" in a tinted pill, error-tinted when selling
 /// below cost. Renders nothing when [fraction] is null (cost unknown / no

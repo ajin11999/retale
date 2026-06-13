@@ -21,6 +21,7 @@
     "jobs:run": "bun run scripts/run-scheduled-jobs.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.0",
     "@node-rs/argon2": "^2.0.2",
     "@vercel/blob": "^2.3.3",
     "drizzle-orm": "^0.45.2",
@@ -30,7 +31,10 @@
     "jose": "^6.2.3",
     "mysql2": "^3.22.3",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.0.227",
     "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0",
+    "tesseract.js-core": "^7.0.0",
     "ulid": "^3.0.2"
   },
   "devDependencies": {

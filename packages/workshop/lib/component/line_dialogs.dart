@@ -82,6 +82,9 @@ class _LeafEditorState extends State<_LeafEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final price = parseMinor(_price.text) ?? 0;
+    // Null on legacy lines saved before cost snapshots — then no cost line.
+    final cost = widget.existing.unitCostAt(price);
     return AlertDialog(
       title: Text(widget.existing.snapshotName,
           style: Theme.of(context).textTheme.titleMedium),
@@ -92,7 +95,9 @@ class _LeafEditorState extends State<_LeafEditor> {
           children: [
             Row(
               children: [
-                Expanded(
+                SizedBox(
+                  // Qty needs little room; give the rest to the price field.
+                  width: 96,
                   child: TextField(
                     controller: _qty,
                     keyboardType: TextInputType.number,
@@ -128,6 +133,14 @@ class _LeafEditorState extends State<_LeafEditor> {
                 ),
               ],
             ),
+            if (cost != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: CostMarginLine(costMinor: cost, priceMinor: price),
+                ),
+              ),
             if (!_priceEditable)
               const Padding(
                 padding: EdgeInsets.only(top: 8),

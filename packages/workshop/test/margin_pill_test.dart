@@ -218,4 +218,82 @@ void main() {
       expect(submitted!.marginFraction, closeTo(0.4, 1e-9));
     });
   });
+
+  group('cost line in the edit dialog', () {
+    testWidgets('shows cost and margin under the price, live', (tester) async {
+      final line = WorkLine()
+        ..variantId = 'v1'
+        ..variantKind = 'physical'
+        ..snapshotName = 'Part'
+        ..qty = 1
+        ..unitPriceMinor = 50000
+        ..unitCostMinor = 30000;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showLeafEditor(context, existing: line),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      // 50.000 price − 30.000 cost = 20.000 margin.
+      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp 20.000'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Price'), '25000');
+      await tester.pump();
+      // Physical cost is fixed; margin goes negative below cost.
+      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp -5.000'), findsOneWidget);
+    });
+
+    testWidgets('legacy line (no cost snapshot) shows no cost line',
+        (tester) async {
+      final legacy = WorkLine()
+        ..variantId = 'v2'
+        ..variantKind = 'physical'
+        ..snapshotName = 'Old line'
+        ..qty = 1
+        ..unitPriceMinor = 5000;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showLeafEditor(context, existing: legacy),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Cost'), findsNothing);
+    });
+  });
+
+  group('cost line in the add-line form', () {
+    testWidgets('appears on pick with the catalog cost', (tester) async {
+      await tester.pumpWidget(_withClient(
+        InlineLeafForm(onSubmit: (_) {}, onCancel: () {}),
+      ));
+      await tester.pump();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Search products…'), 'oli');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Oli Mesin').last);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      // Catalog cost 30.000 against the seeded 50.000 price.
+      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp 20.000'), findsOneWidget);
+    });
+  });
 }
