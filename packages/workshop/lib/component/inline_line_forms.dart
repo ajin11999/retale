@@ -42,10 +42,11 @@ class _InlineFormFrame extends StatelessWidget {
   }
 }
 
-/// Inline add-line form, one fixed-height row: a product combobox (catalog
-/// search with a floating result overlay), qty, price, note, submit. The price
-/// is the clerk's to set on any kind except bundles (the API rejects overrides
-/// there) and is sent as `priceOverrideMinor` on submit.
+/// Inline add-line form: one row — a product combobox (catalog search with a
+/// floating result overlay), qty, price, note, submit — with a live cost/margin
+/// readout under it once a variant is picked. The price is the clerk's to set on
+/// any kind except bundles (the API rejects overrides there) and is sent as
+/// `priceOverrideMinor` on submit.
 class InlineLeafForm extends StatefulWidget {
   const InlineLeafForm({
     super.key,
@@ -173,71 +174,93 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
     final isBundle = _variant?.kind == 'bundle';
     return _InlineFormFrame(
       onDismiss: widget.onCancel,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(flex: 3, child: _productCombobox()),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 70,
-            child: TextField(
-              controller: _qty,
-              focusNode: _qtyFocus,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              onSubmitted: (_) => _submit(),
-              decoration: const InputDecoration(
-                  isDense: true,
-                  labelText: 'Qty',
-                  border: OutlineInputBorder()),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _price,
-              enabled: _variant != null && !isBundle,
-              keyboardType: TextInputType.number,
-              inputFormatters: const [ThousandsInputFormatter()],
-              onSubmitted: (_) => _submit(),
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: isBundle ? 'Bundle price' : 'Price',
-                prefixText: 'Rp ',
-                // Live margin preview against the picked variant's cost.
-                suffixIcon: Center(
-                  widthFactor: 1,
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: MarginPill(fraction: _previewMarginFraction),
+          Row(
+            children: [
+              Expanded(flex: 3, child: _productCombobox()),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 70,
+                child: TextField(
+                  controller: _qty,
+                  focusNode: _qtyFocus,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onSubmitted: (_) => _submit(),
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Qty',
+                      border: OutlineInputBorder()),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _price,
+                  enabled: _variant != null && !isBundle,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: const [ThousandsInputFormatter()],
+                  onSubmitted: (_) => _submit(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: isBundle ? 'Bundle price' : 'Price',
+                    prefixText: 'Rp ',
+                    // Live margin preview against the picked variant's cost.
+                    suffixIcon: Center(
+                      widthFactor: 1,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: MarginPill(fraction: _previewMarginFraction),
+                      ),
+                    ),
+                    suffixIconConstraints:
+                        const BoxConstraints(minWidth: 0, minHeight: 0),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
-                suffixIconConstraints:
-                    const BoxConstraints(minWidth: 0, minHeight: 0),
-                border: const OutlineInputBorder(),
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 2,
-            child: TextField(
-              controller: _note,
-              onSubmitted: (_) => _submit(),
-              decoration: const InputDecoration(
-                isDense: true,
-                labelText: 'Note (stays local)',
-                border: OutlineInputBorder(),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _note,
+                  onSubmitted: (_) => _submit(),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'Note (stays local)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              TextButton(
+                  onPressed: widget.onCancel, child: const Text('Cancel')),
+              const SizedBox(width: 4),
+              FilledButton(
+                onPressed: _variant == null ? null : _submit,
+                child: const Text('Add'),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
-          const SizedBox(width: 4),
-          FilledButton(
-            onPressed: _variant == null ? null : _submit,
-            child: const Text('Add'),
-          ),
+          // Cost/margin readout under the row once a variant is picked, so the
+          // price can be tuned to a target margin (the pill shows the percent).
+          if (_variant != null) _costPreview(),
         ],
+      ),
+    );
+  }
+
+  Widget _costPreview() {
+    final price = parseMinor(_price.text) ?? 0;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 2),
+      child: CostMarginLine(
+        costMinor: _variant!.costForPrice(price),
+        priceMinor: price,
       ),
     );
   }
