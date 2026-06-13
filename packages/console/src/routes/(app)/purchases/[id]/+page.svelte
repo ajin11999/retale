@@ -1022,6 +1022,155 @@
     }
   }
 
+  // ---- Invoice import (offline OCR / PDF) ----------------------------------
+  // Upload a vendor invoice (image or PDF); the API reads it offline (no AI, no
+  // internet) and returns a preview of lines. The clerk confirms / fixes them in
+  // a modal — unrecognized rows arrive blank with a notice — then they're
+  // appended via the same bulk createPurchaseItems mutation as the by-stock tab.
+  let invoiceFileInput = $state<HTMLInputElement | null>(null);
+  let invoiceBusy = $state(false);
+  let invoiceOpen = $state(false);
+  let importSectionId = $state(""); // batch section for the whole import; "" = none
+
+  interface ImportRow {
+    include: boolean;
+    recognized: boolean;
+    variantId: string;
+    description: string;
+    qty: number;
+    unitCostMinor: number | null;
+    confidence: number;
+    raw: string;
+  }
+  let importRows = $state<ImportRow[]>([]);
+  const importIncludedCount = $derived(importRows.filter((r) => r.include).length);
+  const importSectionOptions = $derived([
+    { value: "", label: "— No section —" },
+    ...sections.map((s) => ({ value: s.id, label: s.name })),
+  ]);
+
+  const openInvoicePicker = () => invoiceFileInput?.click();
+  const closeInvoice = () => (invoiceOpen = false);
+
+  async function onInvoiceFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // let the same file be re-picked later
+    if (!file || !purchase) return;
+    invoiceBusy = true;
+    feedback = null;
+    try {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const res = await fetch(`/purchases/${purchase.id}/recognize-invoice`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        let msg = `Recognition failed (${res.status}).`;
+        try {
+          msg = ((await res.json()) as { message?: string }).message ?? msg;
+        } catch {
+          // non-JSON error body — keep the generic message
+        }
+        feedback = { ok: false, text: msg };
+        return;
+      }
+      const { lines } = (await res.json()) as {
+        lines: Array<{
+          recognized: boolean;
+          description: string;
+          variantId: string | null;
+          qty: number | null;
+          unitCostMinor: number | null;
+          confidence: number;
+          raw: string;
+        }>;
+      };
+      if (!lines.length) {
+        feedback = { ok: false, text: "No lines could be read from that file." };
+        return;
+      }
+      importRows = lines.map((l) => ({
+        include: true,
+        recognized: l.recognized,
+        variantId: l.variantId ?? "",
+        description: l.description ?? "",
+        qty: l.qty ?? 1,
+        unitCostMinor: l.unitCostMinor,
+        confidence: l.confidence,
+        raw: l.raw,
+      }));
+      importSectionId = "";
+      invoiceOpen = true;
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      invoiceBusy = false;
+    }
+  }
+
+  // Quick-create a product from a modal row's variant combobox; returns the new
+  // variant id (mirrors createProductForLine, but row-scoped).
+  async function createProductForImport(name: string): Promise<string | null> {
+    busy = true;
+    feedback = null;
+    try {
+      const res = await CreateProductInline.mutate({
+        name,
+        kind: "physical" as never,
+        priceMode: "tax_inclusive" as never,
+        variants: [{ priceMinor: 0, costMinor: 0 }],
+      });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return null;
+      }
+      const variantId = res.data?.createProduct.variants[0]?.id ?? null;
+      if (variantId) {
+        await RefData.fetch({ policy: "NetworkOnly" });
+        feedback = { ok: true, text: `Created “${name}”.` };
+      }
+      return variantId;
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      return null;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function addImported() {
+    if (!purchase) return;
+    const chosen = importRows.filter((r) => r.include);
+    if (chosen.length === 0) return;
+    for (const r of chosen) {
+      if (!r.variantId && !r.description.trim()) {
+        feedback = { ok: false, text: "Each line needs a product or a description." };
+        return;
+      }
+      const q = Number(r.qty);
+      if (!Number.isFinite(q) || q < 1) {
+        feedback = { ok: false, text: "Each quantity must be at least 1." };
+        return;
+      }
+    }
+    const lines = chosen.map((r) => ({
+      sectionId: importSectionId || null,
+      variantId: r.variantId || null,
+      description: r.variantId ? null : r.description.trim(),
+      qtyOrdered: Math.round(Number(r.qty)),
+      unitCostMinor: r.unitCostMinor ?? 0,
+    }));
+    const ok = await run("Lines", () =>
+      CreateItems.mutate({ purchaseId: purchase.id, lines }),
+    );
+    if (ok) {
+      await refetch();
+      closeInvoice();
+    }
+  }
+
   // ---- Inline cell edit ----------------------------------------------------
   // Click a line's qty / unit-cost / (free-text) description cell to edit just
   // that field in place — the common quick tweak, without the full line form.
@@ -1697,6 +1846,13 @@
 <svelte:window
   onkeydown={(e) => {
     // Esc closes an open modal first.
+    if (invoiceOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeInvoice();
+      }
+      return;
+    }
     if (resourceOpen) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1872,6 +2028,20 @@
             disabled={busy || !editable}
             onclick={() => (newSectionName = "")}>Add section</Button
           >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || invoiceBusy || !editable}
+            onclick={openInvoicePicker}
+            >{invoiceBusy ? "Reading…" : "Import invoice"}</Button
+          >
+          <input
+            bind:this={invoiceFileInput}
+            type="file"
+            accept="image/*,application/pdf"
+            class="hidden"
+            onchange={onInvoiceFile}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -2544,6 +2714,104 @@
         </div>
       {/if}
     </section>
+
+    {#if invoiceOpen}
+      <!-- Invoice import: confirm & fix the offline-recognized lines, then add
+           them in one batch. Unrecognized rows start blank with a notice. -->
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="presentation"
+        onclick={(e) => e.target === e.currentTarget && closeInvoice()}
+      >
+        <div
+          class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Import invoice lines"
+        >
+          <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
+            <h2 class="text-sm font-semibold">Import invoice lines</h2>
+            <IconButton icon={X} label="Close" variant="muted" onclick={closeInvoice} />
+          </div>
+
+          <div class="flex items-center gap-3 border-b px-5 py-2">
+            <p class="text-xs text-muted-foreground">
+              Review each line. Unrecognized rows are blank — fill them in or untick them.
+            </p>
+            <label class="ml-auto flex items-center gap-2 text-xs">
+              Section
+              <Select bind:value={importSectionId} class="h-8 w-44">
+                {#each importSectionOptions as o (o.value)}
+                  <option value={o.value}>{o.label}</option>
+                {/each}
+              </Select>
+            </label>
+          </div>
+
+          <div class="flex-1 space-y-2 overflow-auto px-5 py-4">
+            {#each importRows as r, i (i)}
+              <div class="rounded-md border p-3 {r.include ? '' : 'opacity-60'}">
+                <div class="mb-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    bind:checked={r.include}
+                    aria-label="Include line {i + 1}"
+                  />
+                  <span class="text-xs font-medium">Line {i + 1}</span>
+                  {#if !r.recognized}
+                    <span class="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                      unrecognized — please fill manually
+                    </span>
+                  {/if}
+                  {#if r.raw}
+                    <span
+                      class="ml-auto max-w-[55%] truncate text-xs text-muted-foreground"
+                      title={r.raw}>scanned: {r.raw}</span
+                    >
+                  {/if}
+                </div>
+                <Combobox
+                  options={variantOptions}
+                  bind:value={r.variantId}
+                  placeholder="Search product… (leave blank for a non-stock line)"
+                  onCreate={canCreateProduct
+                    ? async (q) => {
+                        const id = await createProductForImport(q);
+                        if (id) r.variantId = id;
+                      }
+                    : undefined}
+                  createLabel={(q) => `Create product “${q}”`}
+                  onChange={(id) => {
+                    if (id && r.unitCostMinor == null) r.unitCostMinor = prefillCost(id);
+                  }}
+                />
+                <div class="mt-2 flex gap-2">
+                  <Input
+                    bind:value={r.description}
+                    placeholder="Description (for a non-stock line)"
+                    class="flex-1"
+                  />
+                  <Input type="number" min="1" bind:value={r.qty} class="w-20" aria-label="Quantity" />
+                  <MoneyInput bind:value={r.unitCostMinor} placeholder="Unit cost" class="w-36" />
+                </div>
+              </div>
+            {/each}
+          </div>
+
+          <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
+            <span class="text-xs text-muted-foreground">
+              {importIncludedCount} of {importRows.length} selected
+            </span>
+            <div class="flex gap-2">
+              <Button variant="outline" size="sm" onclick={closeInvoice}>Cancel</Button>
+              <Button size="sm" disabled={busy || importIncludedCount === 0} onclick={addImported}>
+                Add {importIncludedCount} line{importIncludedCount === 1 ? "" : "s"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     {#if bulkOpen}
       <!-- Bulk-add modal: a centered overlay with two tabs. Backdrop click /
