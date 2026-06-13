@@ -312,31 +312,70 @@
     }
   `);
 
-  // Re-source selected lines onto a new PO for a different vendor (pre-delivery
-  // reconciliation). Trims the source lines and returns the new PO to navigate to.
+  // Re-source selected lines onto another PO for a different vendor (pre-delivery
+  // reconciliation) — an existing open PO (targetPurchaseId) or a new one
+  // (targetVendorId). Trims the source lines; returns the destination PO.
   const ResourcePurchaseItems = graphql(`
     mutation ConsoleResourcePurchaseItems(
       $sourcePurchaseId: ID!
-      $targetVendorId: ID!
+      $targetPurchaseId: ID
+      $targetVendorId: ID
       $replacements: [ResourceLineInput!]!
     ) {
       resourcePurchaseItems(
         sourcePurchaseId: $sourcePurchaseId
+        targetPurchaseId: $targetPurchaseId
         targetVendorId: $targetVendorId
         replacements: $replacements
       ) {
+        # Return the destination PO's full line list + header so Houdini refreshes
+        # its normalized cache. Otherwise an existing target PO keeps serving its
+        # stale (pre-append) lines until a hard refresh — returning the parent with
+        # its items updates the cached list (a bare child item would not).
         id
+        snapshotVendorName
+        revision
+        totalInvoiceCost
+        hasUnsentChanges
+        items {
+          id
+          sectionId
+          variantId
+          description
+          qtyOrdered
+          qtyDelivered
+          qtyInTransit
+          transitFreightMinor
+          unitCostMinor
+          sortOrder
+        }
+        unmappedLines {
+          id
+        }
       }
     }
   `);
 
-  // The re-source target vendor's last-charged costs — shown as the cost a
+  // The re-source destination vendor's last-charged costs — shown as the cost a
   // moved line will default to (the API applies the same default server-side).
   const ResourceVendorCostsQuery = graphql(`
     query PurchaseResourceVendorCosts($vendorId: ID!) {
       vendorLastCosts(vendorId: $vendorId) {
         variantId
         unitCostMinor
+      }
+    }
+  `);
+
+  // Open POs to re-source *into* (the "add to existing" mode). Pulled when the
+  // dialog opens; the source PO itself is filtered out client-side.
+  const ResourceTargetsQuery = graphql(`
+    query PurchaseResourceTargets {
+      purchases(status: open) {
+        id
+        snapshotVendorName
+        vendorId
+        date
       }
     }
   `);
@@ -1280,11 +1319,32 @@
     unitCostMinor: number | null;
   }
   let resourceOpen = $state(false);
+  let resourceMode = $state<"existing" | "new">("existing");
+  let resourceTargetPurchaseId = $state("");
   let resourceVendorId = $state("");
   let resourceRows = $state<ResourceRow[]>([]);
 
-  // The target vendor's last-charged cost per variant — for the per-line "→ Rp"
-  // default hint. Re-pulled whenever the chosen vendor changes.
+  // Open POs to re-source into, excluding this one. `value`/`label` feed the
+  // existing-PO Combobox directly.
+  const resourceTargets = $derived(
+    ($ResourceTargetsQuery.data?.purchases ?? []).filter((p) => p.id !== purchase?.id),
+  );
+  const resourceTargetOptions = $derived(
+    resourceTargets.map((p) => ({
+      value: p.id,
+      label: `${p.snapshotVendorName} · ${fmtDate(p.date)}`,
+    })),
+  );
+
+  // The destination vendor drives the per-line cost default: the chosen PO's
+  // vendor when adding to an existing PO, else the picked vendor.
+  const resourceDestVendorId = $derived(
+    resourceMode === "existing"
+      ? (resourceTargets.find((p) => p.id === resourceTargetPurchaseId)?.vendorId ?? "")
+      : resourceVendorId,
+  );
+
+  // That vendor's last-charged cost per variant — for the per-line "→ Rp" hint.
   const resourceCostByVariant = $derived(
     new Map(
       ($ResourceVendorCostsQuery.data?.vendorLastCosts ?? []).map((c) => [
@@ -1294,8 +1354,8 @@
     ),
   );
   $effect(() => {
-    if (resourceOpen && resourceVendorId)
-      ResourceVendorCostsQuery.fetch({ variables: { vendorId: resourceVendorId } });
+    if (resourceOpen && resourceDestVendorId)
+      ResourceVendorCostsQuery.fetch({ variables: { vendorId: resourceDestVendorId } });
   });
 
   // Only lines with no deliveries can be re-sourced (matches the API's lock).
@@ -1318,14 +1378,24 @@
       qty: i.qtyOrdered,
       unitCostMinor: null,
     }));
+    resourceMode = "existing";
+    resourceTargetPurchaseId = "";
     resourceVendorId = "";
+    // Pull open POs for the "add to existing" picker.
+    ResourceTargetsQuery.fetch({ policy: "NetworkOnly" });
     resourceOpen = true;
   }
 
   const closeResource = () => (resourceOpen = false);
 
-  // The cost a row will land at: the clerk's override, else the target vendor's
-  // last price for the chosen variant, else 0 — mirrors the API default.
+  // Tab styling for the destination mode toggle (mirrors the bulk modal's tabs).
+  const resourceTabClass = (m: "existing" | "new") =>
+    resourceMode === m
+      ? "border-b-2 border-primary px-3 py-2 text-sm font-medium"
+      : "border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground";
+
+  // The cost a row will land at: the clerk's override, else the destination
+  // vendor's last price for the chosen variant, else 0 — mirrors the API default.
   const resourceRowCost = (r: ResourceRow) =>
     r.unitCostMinor ??
     (r.variantId ? resourceCostByVariant.get(r.variantId) : undefined) ??
@@ -1333,7 +1403,12 @@
 
   async function submitResource() {
     if (!purchase) return;
-    if (!resourceVendorId) {
+    const useExisting = resourceMode === "existing";
+    if (useExisting && !resourceTargetPurchaseId) {
+      feedback = { ok: false, text: "Pick a PO to re-source into." };
+      return;
+    }
+    if (!useExisting && !resourceVendorId) {
       feedback = { ok: false, text: "Pick a vendor to re-source to." };
       return;
     }
@@ -1359,33 +1434,35 @@
       unitCostMinor: r.unitCostMinor,
     }));
     const n = replacements.length;
-    const targetName = vendors.find((v) => v.id === resourceVendorId)?.name ?? "another vendor";
 
     busy = true;
     feedback = null;
     try {
       const res = await ResourcePurchaseItems.mutate({
         sourcePurchaseId: purchase.id,
-        targetVendorId: resourceVendorId,
+        targetPurchaseId: useExisting ? resourceTargetPurchaseId : null,
+        targetVendorId: useExisting ? null : resourceVendorId,
         replacements,
       });
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
         return;
       }
-      const newId = res.data?.resourcePurchaseItems.id;
+      const dest = res.data?.resourcePurchaseItems;
       resourceOpen = false;
       selected = new Set();
-      // The mutation returns only the new PO, so Houdini's cache never learns
-      // that the source lines were trimmed. Re-pull this PO (NetworkOnly) so its
-      // lines update in place — same pattern as every other edit here. Stay put
-      // (reconciliation continues) and offer the new PO as a link, not a jump.
+      // The mutation returns only the destination PO, so Houdini's cache never
+      // learns that the source lines were trimmed. Re-pull this PO (NetworkOnly)
+      // so its lines update in place — same pattern as every other edit here.
+      // Stay put (reconciliation continues) and offer the destination as a link.
       await refetch();
+      const destName = dest?.snapshotVendorName ?? "the vendor";
+      const where = useExisting ? `into the PO for ${destName}` : `to a new PO for ${destName}`;
       feedback = {
         ok: true,
-        text: `Re-sourced ${n} line${n === 1 ? "" : "s"} to a new PO for ${targetName}.`,
-        href: newId ? `/purchases/${newId}` : undefined,
-        linkText: newId ? "Open it →" : undefined,
+        text: `Re-sourced ${n} line${n === 1 ? "" : "s"} ${where}.`,
+        href: dest?.id ? `/purchases/${dest.id}` : undefined,
+        linkText: dest?.id ? "Open it →" : undefined,
       };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -2689,21 +2766,57 @@
 
           <div class="flex-1 space-y-4 overflow-auto px-5 py-4">
             <p class="text-xs text-muted-foreground">
-              Moves these lines onto a new open PO for the chosen vendor and trims
-              them off this one. Pick that vendor's own product for each line; cost
-              defaults to what they last charged.
+              Moves these lines onto another open PO and trims them off this one —
+              add them to a pending PO you've already started, or spin up a new one.
+              Pick the destination vendor's own product for each line; cost defaults
+              to what they last charged.
             </p>
 
-            <label class="block space-y-1">
-              <span class="text-sm font-medium">Re-source to vendor</span>
-              <div class="max-w-sm">
-                <Combobox
-                  options={vendors.map((v) => ({ value: v.id, label: v.name }))}
-                  bind:value={resourceVendorId}
-                  placeholder="Search vendor…"
-                />
-              </div>
-            </label>
+            <div class="flex gap-1 border-b">
+              <button
+                type="button"
+                class={resourceTabClass("existing")}
+                onclick={() => (resourceMode = "existing")}
+              >
+                Add to existing PO
+              </button>
+              <button
+                type="button"
+                class={resourceTabClass("new")}
+                onclick={() => (resourceMode = "new")}
+              >
+                Create new PO
+              </button>
+            </div>
+
+            {#if resourceMode === "existing"}
+              <label class="block space-y-1">
+                <span class="text-sm font-medium">Add to open PO</span>
+                <div class="max-w-md">
+                  <Combobox
+                    options={resourceTargetOptions}
+                    bind:value={resourceTargetPurchaseId}
+                    placeholder="Search open purchases…"
+                  />
+                </div>
+                {#if resourceTargetOptions.length === 0}
+                  <span class="block text-xs text-muted-foreground">
+                    No other open POs — switch to “Create new PO”.
+                  </span>
+                {/if}
+              </label>
+            {:else}
+              <label class="block space-y-1">
+                <span class="text-sm font-medium">New PO for vendor</span>
+                <div class="max-w-sm">
+                  <Combobox
+                    options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+                    bind:value={resourceVendorId}
+                    placeholder="Search vendor…"
+                  />
+                </div>
+              </label>
+            {/if}
 
             <table class="w-full text-sm">
               <thead class="border-b text-left text-xs text-muted-foreground">
@@ -2752,7 +2865,7 @@
                       <div class="w-32">
                         <MoneyInput bind:value={resourceRows[idx].unitCostMinor} />
                       </div>
-                      {#if resourceRows[idx].unitCostMinor == null && resourceVendorId}
+                      {#if resourceRows[idx].unitCostMinor == null && resourceDestVendorId}
                         <span class="mt-1 block text-xs text-muted-foreground">
                           → {formatMoney(resourceRowCost(resourceRows[idx]))}
                         </span>
@@ -2774,7 +2887,8 @@
               </Button>
               <Button
                 size="sm"
-                disabled={busy || !resourceVendorId}
+                disabled={busy ||
+                  (resourceMode === "existing" ? !resourceTargetPurchaseId : !resourceVendorId)}
                 onclick={submitResource}
               >
                 Re-source {resourceRows.length} line{resourceRows.length === 1 ? "" : "s"}

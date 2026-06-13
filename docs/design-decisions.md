@@ -415,15 +415,17 @@ dimension. Each vendor's own part number for a brand's variant lives in
 
 A PO addresses **one vendor** (`purchases.vendor_id` is singular). When a vendor's
 invoice comes back short *before delivery*, the unavailable lines are **re-sourced**
-onto a fresh open PO for a substitute vendor — which sells its own brand, so each
-moved line is swapped to that vendor's variant (BBC 40KWD → NSK 40KWD). Because
+onto another open PO for a substitute vendor — a fresh one, or an existing pending
+PO. The substitute sells its own brand, so each moved line is swapped to that
+vendor's variant (BBC 40KWD → NSK 40KWD). Because
 reconciliation is pre-delivery, the source lines have `qty_delivered = 0` and can be
 trimmed — deleted when fully moved, or `qty_ordered` reduced for a partial — so the
 source PO matches what its vendor confirmed and `complete`s cleanly on delivery.
 
-`resourcePurchaseItems` does this in one transaction (new PO + trimmed source lines +
-a single source `revision` bump); the new PO's `memo` references the source for
-audit, and line costs default to the target vendor's last-charged price
+`resourcePurchaseItems` does this in one transaction: the destination PO — created
+fresh for a vendor, or an existing open PO — gains the moved lines, the source lines
+are trimmed, and revisions bump. A freshly created PO's `memo` references the source
+for audit, and line costs default to the destination vendor's last-charged price
 (`lastVendorCosts`). Two alternatives were rejected: a self-morphing "placeholder
 product" (duplicates `vendor_variant_codes` and breaks the one-cost / one-stock
 variant identity) and bare-description lines (makes the line non-stock — no

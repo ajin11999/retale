@@ -166,10 +166,11 @@ export const typeDefs = /* GraphQL */ `
     cancelPurchase(id: ID!): Purchase!
     "Duplicate a purchase as a fresh open draft (recurring-order shortcut)."
     clonePurchase(id: ID!): Purchase!
-    "Split unavailable lines of an open PO onto a new PO for a different vendor (pre-delivery re-sourcing). Trims the source lines; each new line points at the substitute vendor's variant. Returns the new PO."
+    "Split unavailable lines of an open PO onto another PO for a different vendor (pre-delivery re-sourcing). The destination is either an existing open PO (targetPurchaseId) or a new one for targetVendorId — exactly one. Trims the source lines; each moved line points at the substitute vendor's variant. Returns the destination PO."
     resourcePurchaseItems(
       sourcePurchaseId: ID!
-      targetVendorId: ID!
+      targetPurchaseId: ID
+      targetVendorId: ID
       date: String
       replacements: [ResourceLineInput!]!
     ): Purchase!
@@ -375,7 +376,8 @@ export const resolvers = {
       _: unknown,
       args: {
         sourcePurchaseId: string;
-        targetVendorId: string;
+        targetPurchaseId?: string | null;
+        targetVendorId?: string | null;
         date?: string | null;
         replacements: Array<{
           sourceItemId: string;
@@ -387,13 +389,15 @@ export const resolvers = {
       },
       ctx: GraphQLContext,
     ) => {
-      // Re-sourcing both creates a PO and edits the source, so it needs both.
+      // Re-sourcing edits the source and either creates or edits the destination,
+      // so it needs both permissions.
       const viewer = await requirePermission(ctx, "purchase.create");
       await requirePermission(ctx, "purchase.edit");
       try {
         return await purchases.resourcePurchaseItems({
           sourcePurchaseId: args.sourcePurchaseId,
-          targetVendorId: args.targetVendorId,
+          targetPurchaseId: args.targetPurchaseId ?? null,
+          targetVendorId: args.targetVendorId ?? null,
           replacements: args.replacements,
           date: args.date ?? null,
           createdByUserId: viewer.userId,

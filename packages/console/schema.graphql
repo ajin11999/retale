@@ -271,9 +271,9 @@ type Mutation {
   clonePurchase(id: ID!): Purchase!
 
   """
-  Split unavailable lines of an open PO onto a new PO for a different vendor (pre-delivery re-sourcing). Trims the source lines; each new line points at the substitute vendor's variant. Returns the new PO.
+  Split unavailable lines of an open PO onto another PO for a different vendor (pre-delivery re-sourcing). The destination is either an existing open PO (targetPurchaseId) or a new one for targetVendorId — exactly one. Trims the source lines; each moved line points at the substitute vendor's variant. Returns the destination PO.
   """
-  resourcePurchaseItems(sourcePurchaseId: ID!, targetVendorId: ID!, date: String, replacements: [ResourceLineInput!]!): Purchase!
+  resourcePurchaseItems(sourcePurchaseId: ID!, targetPurchaseId: ID, targetVendorId: ID, date: String, replacements: [ResourceLineInput!]!): Purchase!
   createPurchaseSection(purchaseId: ID!, name: String!, sortOrder: Int): PurchaseSection!
   updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
   deletePurchaseSection(id: ID!): Boolean!

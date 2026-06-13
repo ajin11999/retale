@@ -306,33 +306,39 @@ export async function clonePurchase(id: string, userId: string): Promise<Purchas
 }
 
 /**
- * Re-source selected lines of an open purchase onto a fresh open purchase for a
+ * Re-source selected lines of an open purchase onto another open purchase for a
  * different vendor — the pre-delivery reconciliation split. When a vendor's
- * invoice comes back short, the unavailable lines move to a new PO addressed to a
- * substitute vendor, swapping each to that vendor's own product/variant (a
- * different brand: BBC 40KWD → NSK 40KWD). Each source line is trimmed by the
- * quantity that moved — deleted when nothing remains — so the source PO matches
- * what its vendor confirmed and completes cleanly on delivery.
+ * invoice comes back short, the unavailable lines move to a substitute vendor,
+ * swapping each to that vendor's own product/variant (a different brand: BBC
+ * 40KWD → NSK 40KWD). Each source line is trimmed by the quantity that moved —
+ * deleted when nothing remains — so the source PO matches what its vendor
+ * confirmed and completes cleanly on delivery.
  *
- * Pre-delivery only: every re-sourced line must have `qtyDelivered = 0` (cancel
- * its delivery first otherwise), mirroring the delete / qty-edit lock. A line's
- * cost on the new PO defaults to the target vendor's last-charged price for that
- * variant (`lastVendorCosts`) and is overridable per line. Returns the new PO.
+ * The destination is **either** an existing open PO (`targetPurchaseId` — the
+ * lines append to it) **or** a fresh PO created for `targetVendorId`; exactly one
+ * must be given. Pre-delivery only: every re-sourced line must have
+ * `qtyDelivered = 0` (cancel its delivery first otherwise), mirroring the delete
+ * / qty-edit lock. A line's cost defaults to the destination vendor's
+ * last-charged price for that variant (`lastVendorCosts`), overridable per line.
+ * Returns the destination PO.
  */
 export async function resourcePurchaseItems(input: {
   sourcePurchaseId: string;
-  targetVendorId: string;
+  /** Append to this existing open PO. Mutually exclusive with targetVendorId. */
+  targetPurchaseId?: string | null;
+  /** Create a fresh open PO for this vendor. Mutually exclusive with targetPurchaseId. */
+  targetVendorId?: string | null;
   replacements: Array<{
     sourceItemId: string;
     /** The substitute variant (target brand); null keeps a non-stock line. */
     variantId?: string | null;
     description?: string | null;
-    /** How much to move to the new PO; 1 ≤ qty ≤ the source line's qtyOrdered. */
+    /** How much to move; 1 ≤ qty ≤ the source line's qtyOrdered. */
     qty: number;
-    /** Overrides the lastVendorCosts default for the target vendor. */
+    /** Overrides the destination vendor's lastVendorCosts default. */
     unitCostMinor?: number | null;
   }>;
-  /** New PO date; defaults to today. */
+  /** New-PO date; defaults to today. Ignored when appending to an existing PO. */
   date?: string | null;
   createdByUserId: string;
 }): Promise<Purchase> {
@@ -344,19 +350,48 @@ export async function resourcePurchaseItems(input: {
     throw new PurchaseError("INVALID_INPUT", "no lines to re-source");
   }
 
-  const target = await db.query.vendors.findFirst({
-    where: eq(vendors.id, input.targetVendorId),
-  });
-  if (!target) throw new PurchaseError("VENDOR_NOT_FOUND");
+  // Resolve the destination: append to an existing open PO, or create a fresh one
+  // for a vendor. Exactly one of the two inputs must be supplied.
+  if (input.targetPurchaseId && input.targetVendorId) {
+    throw new PurchaseError(
+      "INVALID_INPUT",
+      "provide either a target purchase or a vendor, not both",
+    );
+  }
+  let destId: string;
+  let destVendorId: string | null;
+  let newVendorName: string | null = null; // set only when creating a fresh PO
+  if (input.targetPurchaseId) {
+    if (input.targetPurchaseId === source.id) {
+      throw new PurchaseError("INVALID_INPUT", "cannot re-source onto the same purchase");
+    }
+    const dest = await loadPurchase(input.targetPurchaseId);
+    if (dest.status !== "open") {
+      throw new PurchaseError("NOT_OPEN", "the target purchase is not open");
+    }
+    destId = dest.id;
+    destVendorId = dest.vendorId;
+  } else if (input.targetVendorId) {
+    const vendor = await db.query.vendors.findFirst({
+      where: eq(vendors.id, input.targetVendorId),
+    });
+    if (!vendor) throw new PurchaseError("VENDOR_NOT_FOUND");
+    destId = ulid();
+    destVendorId = vendor.id;
+    newVendorName = vendor.name;
+  } else {
+    throw new PurchaseError("INVALID_INPUT", "a target purchase or vendor is required");
+  }
 
-  // Cost fallback: the target vendor's last-charged price per variant. Looked up
-  // once, only when some line leaves its cost to default.
-  const needsCostLookup = input.replacements.some(
-    (r) => r.unitCostMinor == null && r.variantId,
-  );
+  // Cost fallback: the destination vendor's last-charged price per variant. Looked
+  // up once, only when some line leaves its cost to default and the destination
+  // has a vendor (an ad-hoc target PO has none).
+  const needsCostLookup =
+    destVendorId != null &&
+    input.replacements.some((r) => r.unitCostMinor == null && r.variantId);
   const lastCosts = needsCostLookup
     ? new Map(
-        (await lastVendorCosts(input.targetVendorId)).map((c) => [
+        (await lastVendorCosts(destVendorId as string)).map((c) => [
           c.variantId,
           c.unitCostMinor,
         ]),
@@ -410,23 +445,33 @@ export async function resourcePurchaseItems(input: {
     prepared.push({ sourceItem, variantId, description, qty: r.qty, unitCostMinor });
   }
 
-  const newId = ulid();
   await db.transaction(async (tx) => {
-    await tx.insert(purchases).values({
-      id: newId,
-      vendorId: target.id,
-      snapshotVendorName: target.name,
-      date: input.date?.trim() || new Date().toISOString().slice(0, 10),
-      memo: `Re-sourced from PO ${source.id} (${source.snapshotVendorName})`,
-      createdByUserId: input.createdByUserId,
-    });
+    let sortOrder: number;
+    if (newVendorName) {
+      // Fresh destination PO.
+      await tx.insert(purchases).values({
+        id: destId,
+        vendorId: destVendorId,
+        snapshotVendorName: newVendorName,
+        date: input.date?.trim() || new Date().toISOString().slice(0, 10),
+        memo: `Re-sourced from PO ${source.id} (${source.snapshotVendorName})`,
+        createdByUserId: input.createdByUserId,
+      });
+      sortOrder = 0;
+    } else {
+      // Append after the existing destination PO's last line.
+      const [{ maxSort } = { maxSort: null }] = await tx
+        .select({ maxSort: sql<number | null>`max(${purchaseItems.sortOrder})` })
+        .from(purchaseItems)
+        .where(eq(purchaseItems.purchaseId, destId));
+      sortOrder = (maxSort ?? -1) + 1;
+    }
 
-    let sortOrder = 0;
     for (const p of prepared) {
-      // New line on the target PO.
+      // New line on the destination PO.
       await tx.insert(purchaseItems).values({
         id: ulid(),
-        purchaseId: newId,
+        purchaseId: destId,
         variantId: p.variantId,
         description: p.description,
         qtyOrdered: p.qty,
@@ -444,11 +489,14 @@ export async function resourcePurchaseItems(input: {
           .where(eq(purchaseItems.id, p.sourceItem.id));
       }
     }
-    // The source PO's content changed; the new PO stays at revision 1.
+
+    // An existing destination PO gains content → bump its revision; a fresh PO
+    // stays at revision 1. The source PO always changes → bump it too.
+    if (!newVendorName) await bumpRevision(tx, destId);
     await bumpRevision(tx, source.id);
   });
 
-  return loadPurchase(newId);
+  return loadPurchase(destId);
 }
 
 // --- Sections ---
