@@ -305,6 +305,152 @@ export async function clonePurchase(id: string, userId: string): Promise<Purchas
   return loadPurchase(newId);
 }
 
+/**
+ * Re-source selected lines of an open purchase onto a fresh open purchase for a
+ * different vendor — the pre-delivery reconciliation split. When a vendor's
+ * invoice comes back short, the unavailable lines move to a new PO addressed to a
+ * substitute vendor, swapping each to that vendor's own product/variant (a
+ * different brand: BBC 40KWD → NSK 40KWD). Each source line is trimmed by the
+ * quantity that moved — deleted when nothing remains — so the source PO matches
+ * what its vendor confirmed and completes cleanly on delivery.
+ *
+ * Pre-delivery only: every re-sourced line must have `qtyDelivered = 0` (cancel
+ * its delivery first otherwise), mirroring the delete / qty-edit lock. A line's
+ * cost on the new PO defaults to the target vendor's last-charged price for that
+ * variant (`lastVendorCosts`) and is overridable per line. Returns the new PO.
+ */
+export async function resourcePurchaseItems(input: {
+  sourcePurchaseId: string;
+  targetVendorId: string;
+  replacements: Array<{
+    sourceItemId: string;
+    /** The substitute variant (target brand); null keeps a non-stock line. */
+    variantId?: string | null;
+    description?: string | null;
+    /** How much to move to the new PO; 1 ≤ qty ≤ the source line's qtyOrdered. */
+    qty: number;
+    /** Overrides the lastVendorCosts default for the target vendor. */
+    unitCostMinor?: number | null;
+  }>;
+  /** New PO date; defaults to today. */
+  date?: string | null;
+  createdByUserId: string;
+}): Promise<Purchase> {
+  const source = await loadPurchase(input.sourcePurchaseId);
+  if (source.status !== "open") {
+    throw new PurchaseError("NOT_OPEN", "only an open purchase can be re-sourced");
+  }
+  if (input.replacements.length === 0) {
+    throw new PurchaseError("INVALID_INPUT", "no lines to re-source");
+  }
+
+  const target = await db.query.vendors.findFirst({
+    where: eq(vendors.id, input.targetVendorId),
+  });
+  if (!target) throw new PurchaseError("VENDOR_NOT_FOUND");
+
+  // Cost fallback: the target vendor's last-charged price per variant. Looked up
+  // once, only when some line leaves its cost to default.
+  const needsCostLookup = input.replacements.some(
+    (r) => r.unitCostMinor == null && r.variantId,
+  );
+  const lastCosts = needsCostLookup
+    ? new Map(
+        (await lastVendorCosts(input.targetVendorId)).map((c) => [
+          c.variantId,
+          c.unitCostMinor,
+        ]),
+      )
+    : new Map<string, number>();
+
+  // Validate every replacement up front (outside the tx) so we fail before writing.
+  const seen = new Set<string>();
+  const prepared: Array<{
+    sourceItem: Item;
+    variantId: string | null;
+    description: string | null;
+    qty: number;
+    unitCostMinor: number;
+  }> = [];
+  for (const r of input.replacements) {
+    if (seen.has(r.sourceItemId)) {
+      throw new PurchaseError("INVALID_INPUT", "a source line is listed twice");
+    }
+    seen.add(r.sourceItemId);
+
+    const sourceItem = await loadItem(r.sourceItemId);
+    if (sourceItem.purchaseId !== source.id) {
+      throw new PurchaseError("INVALID_INPUT", "line belongs to a different purchase");
+    }
+    if (sourceItem.qtyDelivered > 0) {
+      throw new PurchaseError("ITEM_LOCKED", "a line with deliveries cannot be re-sourced");
+    }
+
+    const variantId = r.variantId ?? null;
+    const description = r.description?.trim() || null;
+    assertLineTarget(variantId, description);
+    if (variantId) await assertVariantExists(variantId);
+
+    if (!Number.isInteger(r.qty) || r.qty <= 0) {
+      throw new PurchaseError("INVALID_INPUT", "qty must be a positive integer");
+    }
+    if (r.qty > sourceItem.qtyOrdered) {
+      throw new PurchaseError(
+        "INVALID_INPUT",
+        `qty ${r.qty} exceeds the ${sourceItem.qtyOrdered} ordered on the source line`,
+      );
+    }
+
+    const unitCostMinor =
+      r.unitCostMinor ?? (variantId ? lastCosts.get(variantId) : undefined) ?? 0;
+    if (!Number.isInteger(unitCostMinor) || unitCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+    }
+
+    prepared.push({ sourceItem, variantId, description, qty: r.qty, unitCostMinor });
+  }
+
+  const newId = ulid();
+  await db.transaction(async (tx) => {
+    await tx.insert(purchases).values({
+      id: newId,
+      vendorId: target.id,
+      snapshotVendorName: target.name,
+      date: input.date?.trim() || new Date().toISOString().slice(0, 10),
+      memo: `Re-sourced from PO ${source.id} (${source.snapshotVendorName})`,
+      createdByUserId: input.createdByUserId,
+    });
+
+    let sortOrder = 0;
+    for (const p of prepared) {
+      // New line on the target PO.
+      await tx.insert(purchaseItems).values({
+        id: ulid(),
+        purchaseId: newId,
+        variantId: p.variantId,
+        description: p.description,
+        qtyOrdered: p.qty,
+        unitCostMinor: p.unitCostMinor,
+        sortOrder: sortOrder++,
+      });
+
+      // Trim the source line by what moved; delete it when nothing remains.
+      if (p.qty >= p.sourceItem.qtyOrdered) {
+        await tx.delete(purchaseItems).where(eq(purchaseItems.id, p.sourceItem.id));
+      } else {
+        await tx
+          .update(purchaseItems)
+          .set({ qtyOrdered: p.sourceItem.qtyOrdered - p.qty })
+          .where(eq(purchaseItems.id, p.sourceItem.id));
+      }
+    }
+    // The source PO's content changed; the new PO stays at revision 1.
+    await bumpRevision(tx, source.id);
+  });
+
+  return loadPurchase(newId);
+}
+
 // --- Sections ---
 
 export async function createSection(input: {

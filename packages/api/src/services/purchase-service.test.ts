@@ -30,6 +30,7 @@ import {
   PurchaseError,
   type PurchaseErrorCode,
   recordPurchaseSend,
+  resourcePurchaseItems,
   unmappedLines,
 } from "./purchase-service.ts";
 import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
@@ -507,5 +508,173 @@ describe("lastVendorCosts", () => {
   test("returns empty for a vendor with no purchase history", async () => {
     const vendorId = await seedVendor();
     expect(await lastVendorCosts(vendorId)).toHaveLength(0);
+  });
+});
+
+describe("resourcePurchaseItems", () => {
+  /** Create a vendor with a specific name; returns its id. */
+  async function seedVendorNamed(name: string): Promise<string> {
+    const id = ulid();
+    await db.insert(vendors).values({ id, name });
+    return id;
+  }
+
+  test("moves a full line to a new PO for the target vendor and deletes the source line", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    const bbc = await seedVariant();
+    const nskVariant = await seedVariant();
+    const keep = await seedVariant();
+
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const moved = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 10, unitCostMinor: 200 });
+    const kept = await createItem({ purchaseId: source.id, variantId: keep, qtyOrdered: 4, unitCostMinor: 300 });
+    const revBefore = (await getPurchase(source.id)).revision;
+
+    const newPo = await resourcePurchaseItems({
+      sourcePurchaseId: source.id,
+      targetVendorId: nsk,
+      replacements: [{ sourceItemId: moved.id, variantId: nskVariant, qty: 10, unitCostMinor: 250 }],
+      createdByUserId: userId,
+    });
+
+    expect(newPo.id).not.toBe(source.id);
+    expect(newPo.status).toBe("open");
+    expect(newPo.vendorId).toBe(nsk);
+    expect(newPo.snapshotVendorName).toBe("NSK Indonesia");
+    expect(newPo.memo).toContain(source.id);
+
+    const newItems = await listItems(newPo.id);
+    expect(newItems).toHaveLength(1);
+    expect(newItems[0]!.variantId).toBe(nskVariant);
+    expect(newItems[0]!.qtyOrdered).toBe(10);
+    expect(newItems[0]!.unitCostMinor).toBe(250);
+
+    // Source: the moved line is gone, the untouched line stays, revision bumped.
+    const srcItems = await listItems(source.id);
+    expect(srcItems.map((i) => i.id)).toEqual([kept.id]);
+    expect((await getPurchase(source.id)).revision).toBe(revBefore + 1);
+  });
+
+  test("partially re-sources, leaving the remainder on the source line", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    const bbc = await seedVariant();
+    const nskVariant = await seedVariant();
+
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const line = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 10, unitCostMinor: 200 });
+
+    const newPo = await resourcePurchaseItems({
+      sourcePurchaseId: source.id,
+      targetVendorId: nsk,
+      replacements: [{ sourceItemId: line.id, variantId: nskVariant, qty: 4, unitCostMinor: 250 }],
+      createdByUserId: userId,
+    });
+
+    // Source keeps 6 of the BBC line; the new PO carries 4 of the NSK variant.
+    const srcItems = await listItems(source.id);
+    expect(srcItems).toHaveLength(1);
+    expect(srcItems[0]!.id).toBe(line.id);
+    expect(srcItems[0]!.variantId).toBe(bbc);
+    expect(srcItems[0]!.qtyOrdered).toBe(6);
+    const newItems = await listItems(newPo.id);
+    expect(newItems[0]!.qtyOrdered).toBe(4);
+    expect(newItems[0]!.variantId).toBe(nskVariant);
+  });
+
+  test("defaults a moved line's cost to the target vendor's last-charged price", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    const bbc = await seedVariant();
+    const nskVariant = await seedVariant();
+
+    // Establish NSK's last cost for the NSK variant via a prior purchase.
+    const prior = await createPurchase({ vendorId: nsk, date: "2025-12-01", createdByUserId: userId });
+    await createItem({ purchaseId: prior.id, variantId: nskVariant, qtyOrdered: 1, unitCostMinor: 333 });
+
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const line = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 5, unitCostMinor: 200 });
+
+    const newPo = await resourcePurchaseItems({
+      sourcePurchaseId: source.id,
+      targetVendorId: nsk,
+      replacements: [{ sourceItemId: line.id, variantId: nskVariant, qty: 5 }],
+      createdByUserId: userId,
+    });
+
+    expect((await listItems(newPo.id))[0]!.unitCostMinor).toBe(333);
+  });
+
+  test("rejects re-sourcing a line that already has deliveries", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    const bbc = await seedVariant();
+    const nskVariant = await seedVariant();
+
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const line = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 10, unitCostMinor: 200 });
+    await db.update(purchaseItems).set({ qtyDelivered: 3 }).where(eq(purchaseItems.id, line.id));
+
+    await expectError(
+      resourcePurchaseItems({
+        sourcePurchaseId: source.id,
+        targetVendorId: nsk,
+        replacements: [{ sourceItemId: line.id, variantId: nskVariant, qty: 5, unitCostMinor: 250 }],
+        createdByUserId: userId,
+      }),
+      "ITEM_LOCKED",
+    );
+  });
+
+  test("rejects a qty above what the source line ordered, leaving it untouched", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    const bbc = await seedVariant();
+    const nskVariant = await seedVariant();
+
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const line = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 5, unitCostMinor: 200 });
+
+    await expectError(
+      resourcePurchaseItems({
+        sourcePurchaseId: source.id,
+        targetVendorId: nsk,
+        replacements: [{ sourceItemId: line.id, variantId: nskVariant, qty: 6, unitCostMinor: 250 }],
+        createdByUserId: userId,
+      }),
+      "INVALID_INPUT",
+    );
+    // Nothing trimmed — validation runs before any write.
+    expect((await listItems(source.id))[0]!.qtyOrdered).toBe(5);
+  });
+
+  test("rejects an unknown target vendor and a non-open source", async () => {
+    const abj = await seedVendorNamed("ABJ Bearing");
+    const bbc = await seedVariant();
+    const source = await createPurchase({ vendorId: abj, date: "2026-01-01", createdByUserId: userId });
+    const line = await createItem({ purchaseId: source.id, variantId: bbc, qtyOrdered: 5, unitCostMinor: 200 });
+
+    await expectError(
+      resourcePurchaseItems({
+        sourcePurchaseId: source.id,
+        targetVendorId: ulid(),
+        replacements: [{ sourceItemId: line.id, variantId: bbc, qty: 1, unitCostMinor: 200 }],
+        createdByUserId: userId,
+      }),
+      "VENDOR_NOT_FOUND",
+    );
+
+    const nsk = await seedVendorNamed("NSK Indonesia");
+    await cancelPurchase(source.id, userId);
+    await expectError(
+      resourcePurchaseItems({
+        sourcePurchaseId: source.id,
+        targetVendorId: nsk,
+        replacements: [{ sourceItemId: line.id, variantId: bbc, qty: 1, unitCostMinor: 200 }],
+        createdByUserId: userId,
+      }),
+      "NOT_OPEN",
+    );
   });
 });

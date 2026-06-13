@@ -269,6 +269,11 @@ type Mutation {
 
   """Duplicate a purchase as a fresh open draft (recurring-order shortcut)."""
   clonePurchase(id: ID!): Purchase!
+
+  """
+  Split unavailable lines of an open PO onto a new PO for a different vendor (pre-delivery re-sourcing). Trims the source lines; each new line points at the substitute vendor's variant. Returns the new PO.
+  """
+  resourcePurchaseItems(sourcePurchaseId: ID!, targetVendorId: ID!, date: String, replacements: [ResourceLineInput!]!): Purchase!
   createPurchaseSection(purchaseId: ID!, name: String!, sortOrder: Int): PurchaseSection!
   updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
   deletePurchaseSection(id: ID!): Boolean!
@@ -1072,6 +1077,28 @@ input PurchaseLineInput {
   description: String
   qtyOrdered: Float!
   unitCostMinor: Float!
+}
+
+"""
+One re-sourced line: how much of a source line to move, and the substitute variant.
+"""
+input ResourceLineInput {
+  """The line on the source PO being re-sourced."""
+  sourceItemId: ID!
+
+  """
+  The substitute vendor's own variant (target brand); null keeps a non-stock line.
+  """
+  variantId: ID
+  description: String
+
+  """
+  Quantity to move to the new PO; 1 ≤ qty ≤ the source line's qtyOrdered.
+  """
+  qty: Float!
+
+  """Overrides the target vendor's last-charged cost default."""
+  unitCostMinor: Float
 }
 
 enum DeliveryStatus {

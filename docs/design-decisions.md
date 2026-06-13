@@ -405,6 +405,30 @@ Stored on the row for indexing, but driven by item state:
 - `complete` flipped automatically by the delivery transaction that finishes the last item
 - `cancelled` manually; hard-fails if any non-cancelled delivery references its items
 
+### Multi-brand sourcing & re-sourcing
+
+A part stocked under several brands (NSK vs BBC bearings) is modeled as **one
+product per brand**, not one product with brand variants — brands differ in quality
+and price, so each is its own sellable thing. Variants stay reserved for size /
+dimension. Each vendor's own part number for a brand's variant lives in
+`vendor_variant_codes` (the receiving scan and reorder preferred-vendor read it).
+
+A PO addresses **one vendor** (`purchases.vendor_id` is singular). When a vendor's
+invoice comes back short *before delivery*, the unavailable lines are **re-sourced**
+onto a fresh open PO for a substitute vendor — which sells its own brand, so each
+moved line is swapped to that vendor's variant (BBC 40KWD → NSK 40KWD). Because
+reconciliation is pre-delivery, the source lines have `qty_delivered = 0` and can be
+trimmed — deleted when fully moved, or `qty_ordered` reduced for a partial — so the
+source PO matches what its vendor confirmed and `complete`s cleanly on delivery.
+
+`resourcePurchaseItems` does this in one transaction (new PO + trimmed source lines +
+a single source `revision` bump); the new PO's `memo` references the source for
+audit, and line costs default to the target vendor's last-charged price
+(`lastVendorCosts`). Two alternatives were rejected: a self-morphing "placeholder
+product" (duplicates `vendor_variant_codes` and breaks the one-cost / one-stock
+variant identity) and bare-description lines (makes the line non-stock — no
+inventory, no WAC, no reorder).
+
 ### Accumulated landed cost view (not denormalized on purchase)
 
 Computed per-purchase via resolver:

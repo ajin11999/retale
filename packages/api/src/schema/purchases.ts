@@ -132,6 +132,19 @@ export const typeDefs = /* GraphQL */ `
     unitCostMinor: Float!
   }
 
+  "One re-sourced line: how much of a source line to move, and the substitute variant."
+  input ResourceLineInput {
+    "The line on the source PO being re-sourced."
+    sourceItemId: ID!
+    "The substitute vendor's own variant (target brand); null keeps a non-stock line."
+    variantId: ID
+    description: String
+    "Quantity to move to the new PO; 1 ≤ qty ≤ the source line's qtyOrdered."
+    qty: Float!
+    "Overrides the target vendor's last-charged cost default."
+    unitCostMinor: Float
+  }
+
   extend type Mutation {
     createPurchase(
       vendorId: ID
@@ -153,6 +166,13 @@ export const typeDefs = /* GraphQL */ `
     cancelPurchase(id: ID!): Purchase!
     "Duplicate a purchase as a fresh open draft (recurring-order shortcut)."
     clonePurchase(id: ID!): Purchase!
+    "Split unavailable lines of an open PO onto a new PO for a different vendor (pre-delivery re-sourcing). Trims the source lines; each new line points at the substitute vendor's variant. Returns the new PO."
+    resourcePurchaseItems(
+      sourcePurchaseId: ID!
+      targetVendorId: ID!
+      date: String
+      replacements: [ResourceLineInput!]!
+    ): Purchase!
 
     createPurchaseSection(purchaseId: ID!, name: String!, sortOrder: Int): PurchaseSection!
     updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
@@ -347,6 +367,37 @@ export const resolvers = {
       const viewer = await requirePermission(ctx, "purchase.create");
       try {
         return await purchases.clonePurchase(args.id, viewer.userId);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    resourcePurchaseItems: async (
+      _: unknown,
+      args: {
+        sourcePurchaseId: string;
+        targetVendorId: string;
+        date?: string | null;
+        replacements: Array<{
+          sourceItemId: string;
+          variantId?: string | null;
+          description?: string | null;
+          qty: number;
+          unitCostMinor?: number | null;
+        }>;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      // Re-sourcing both creates a PO and edits the source, so it needs both.
+      const viewer = await requirePermission(ctx, "purchase.create");
+      await requirePermission(ctx, "purchase.edit");
+      try {
+        return await purchases.resourcePurchaseItems({
+          sourcePurchaseId: args.sourcePurchaseId,
+          targetVendorId: args.targetVendorId,
+          replacements: args.replacements,
+          date: args.date ?? null,
+          createdByUserId: viewer.userId,
+        });
       } catch (e) {
         asGraphQLError(e);
       }

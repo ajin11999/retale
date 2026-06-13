@@ -312,6 +312,35 @@
     }
   `);
 
+  // Re-source selected lines onto a new PO for a different vendor (pre-delivery
+  // reconciliation). Trims the source lines and returns the new PO to navigate to.
+  const ResourcePurchaseItems = graphql(`
+    mutation ConsoleResourcePurchaseItems(
+      $sourcePurchaseId: ID!
+      $targetVendorId: ID!
+      $replacements: [ResourceLineInput!]!
+    ) {
+      resourcePurchaseItems(
+        sourcePurchaseId: $sourcePurchaseId
+        targetVendorId: $targetVendorId
+        replacements: $replacements
+      ) {
+        id
+      }
+    }
+  `);
+
+  // The re-source target vendor's last-charged costs — shown as the cost a
+  // moved line will default to (the API applies the same default server-side).
+  const ResourceVendorCostsQuery = graphql(`
+    query PurchaseResourceVendorCosts($vendorId: ID!) {
+      vendorLastCosts(vendorId: $vendorId) {
+        variantId
+        unitCostMinor
+      }
+    }
+  `);
+
   const ReorderSections = graphql(`
     mutation ConsoleReorderPurchaseSections($purchaseId: ID!, $orderedIds: [ID!]!) {
       reorderPurchaseSections(purchaseId: $purchaseId, orderedIds: $orderedIds) {
@@ -497,7 +526,14 @@
   });
 
   let busy = $state(false);
-  let feedback = $state<{ ok: boolean; text: string } | null>(null);
+  // `href`/`linkText` render an optional follow-up link in the banner (e.g.
+  // "Open it →" pointing at the PO a re-source just created).
+  let feedback = $state<{
+    ok: boolean;
+    text: string;
+    href?: string;
+    linkText?: string;
+  } | null>(null);
 
   /** Run a mutation, surfacing the first GraphQL error as feedback. */
   async function run(
@@ -1228,6 +1264,136 @@
     );
   }
 
+  // ---- Re-source modal -----------------------------------------------------
+  // Split the selected (undelivered) lines onto a fresh PO for a different
+  // vendor — the pre-delivery reconciliation move when a vendor's invoice comes
+  // back short. Each line is swapped to the substitute vendor's own variant
+  // (a different brand); the source lines are trimmed by what moves.
+  interface ResourceRow {
+    sourceItemId: string;
+    sourceLabel: string;
+    sourceIsStock: boolean;
+    variantId: string; // replacement variant (stock lines)
+    description: string; // replacement label (non-stock lines)
+    remaining: number; // qtyOrdered (re-sourced lines have no deliveries)
+    qty: number;
+    unitCostMinor: number | null;
+  }
+  let resourceOpen = $state(false);
+  let resourceVendorId = $state("");
+  let resourceRows = $state<ResourceRow[]>([]);
+
+  // The target vendor's last-charged cost per variant — for the per-line "→ Rp"
+  // default hint. Re-pulled whenever the chosen vendor changes.
+  const resourceCostByVariant = $derived(
+    new Map(
+      ($ResourceVendorCostsQuery.data?.vendorLastCosts ?? []).map((c) => [
+        c.variantId,
+        c.unitCostMinor,
+      ]),
+    ),
+  );
+  $effect(() => {
+    if (resourceOpen && resourceVendorId)
+      ResourceVendorCostsQuery.fetch({ variables: { vendorId: resourceVendorId } });
+  });
+
+  // Only lines with no deliveries can be re-sourced (matches the API's lock).
+  function openResource() {
+    const chosen = items.filter((i) => selected.has(i.id) && i.qtyDelivered === 0);
+    if (chosen.length === 0) {
+      feedback = {
+        ok: false,
+        text: "Re-sourcing applies only to selected lines with no deliveries yet.",
+      };
+      return;
+    }
+    resourceRows = chosen.map((i) => ({
+      sourceItemId: i.id,
+      sourceLabel: lineLabel(i),
+      sourceIsStock: !!i.variantId,
+      variantId: i.variantId ?? "",
+      description: i.description ?? "",
+      remaining: i.qtyOrdered,
+      qty: i.qtyOrdered,
+      unitCostMinor: null,
+    }));
+    resourceVendorId = "";
+    resourceOpen = true;
+  }
+
+  const closeResource = () => (resourceOpen = false);
+
+  // The cost a row will land at: the clerk's override, else the target vendor's
+  // last price for the chosen variant, else 0 — mirrors the API default.
+  const resourceRowCost = (r: ResourceRow) =>
+    r.unitCostMinor ??
+    (r.variantId ? resourceCostByVariant.get(r.variantId) : undefined) ??
+    0;
+
+  async function submitResource() {
+    if (!purchase) return;
+    if (!resourceVendorId) {
+      feedback = { ok: false, text: "Pick a vendor to re-source to." };
+      return;
+    }
+    for (const r of resourceRows) {
+      if (r.sourceIsStock && !r.variantId) {
+        feedback = { ok: false, text: "Pick a replacement product for every line." };
+        return;
+      }
+      if (!r.sourceIsStock && !r.description.trim()) {
+        feedback = { ok: false, text: "Enter a description for every non-stock line." };
+        return;
+      }
+      if (!Number.isFinite(r.qty) || r.qty < 1 || r.qty > r.remaining) {
+        feedback = { ok: false, text: "Each quantity must be between 1 and its ordered amount." };
+        return;
+      }
+    }
+    const replacements = resourceRows.map((r) => ({
+      sourceItemId: r.sourceItemId,
+      variantId: r.sourceIsStock ? r.variantId || null : null,
+      description: r.sourceIsStock ? null : r.description.trim() || null,
+      qty: Math.round(r.qty),
+      unitCostMinor: r.unitCostMinor,
+    }));
+    const n = replacements.length;
+    const targetName = vendors.find((v) => v.id === resourceVendorId)?.name ?? "another vendor";
+
+    busy = true;
+    feedback = null;
+    try {
+      const res = await ResourcePurchaseItems.mutate({
+        sourcePurchaseId: purchase.id,
+        targetVendorId: resourceVendorId,
+        replacements,
+      });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
+      const newId = res.data?.resourcePurchaseItems.id;
+      resourceOpen = false;
+      selected = new Set();
+      // The mutation returns only the new PO, so Houdini's cache never learns
+      // that the source lines were trimmed. Re-pull this PO (NetworkOnly) so its
+      // lines update in place — same pattern as every other edit here. Stay put
+      // (reconciliation continues) and offer the new PO as a link, not a jump.
+      await refetch();
+      feedback = {
+        ok: true,
+        text: `Re-sourced ${n} line${n === 1 ? "" : "s"} to a new PO for ${targetName}.`,
+        href: newId ? `/purchases/${newId}` : undefined,
+        linkText: newId ? "Open it →" : undefined,
+      };
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+  }
+
   // Persist a reorder quietly: the list already moved optimistically, so we
   // skip the busy/feedback churn that `run()` does — toggling `busy` disables
   // (and de-focuses) the arrow button you just clicked, and the "saved" banner
@@ -1453,7 +1619,14 @@
      menu first — it only reaches here once the menu is already shut. -->
 <svelte:window
   onkeydown={(e) => {
-    // Esc closes the bulk-add modal first, when it's open.
+    // Esc closes an open modal first.
+    if (resourceOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeResource();
+      }
+      return;
+    }
     if (bulkOpen) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1527,6 +1700,9 @@
     {#if feedback}
       <p class="text-sm {feedback.ok ? 'text-emerald-700' : 'text-destructive'}">
         {feedback.text}
+        {#if feedback.href && feedback.linkText}
+          <a href={feedback.href} class="font-medium underline">{feedback.linkText}</a>
+        {/if}
       </p>
     {/if}
 
@@ -1710,6 +1886,14 @@
               <option value={UNGROUPED}>— No section —</option>
             </Select>
           </div>
+          {#if purchase.status === "open"}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onclick={openResource}>Re-source…</Button
+            >
+          {/if}
           <Button
             variant="destructive"
             size="sm"
@@ -2477,6 +2661,124 @@
                   Add {stockSelectedCount} line{stockSelectedCount === 1 ? "" : "s"}
                 </Button>
               {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if resourceOpen}
+      <!-- Re-source modal: move the selected lines onto a new PO for a different
+           vendor, swapping each to that vendor's own variant. Backdrop / Esc
+           closes (Esc via the window listener above). -->
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="presentation"
+        onclick={(e) => e.target === e.currentTarget && closeResource()}
+      >
+        <div
+          class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Re-source lines to another vendor"
+        >
+          <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
+            <h2 class="text-sm font-semibold">Re-source to another vendor</h2>
+            <IconButton icon={X} label="Close" variant="muted" onclick={closeResource} />
+          </div>
+
+          <div class="flex-1 space-y-4 overflow-auto px-5 py-4">
+            <p class="text-xs text-muted-foreground">
+              Moves these lines onto a new open PO for the chosen vendor and trims
+              them off this one. Pick that vendor's own product for each line; cost
+              defaults to what they last charged.
+            </p>
+
+            <label class="block space-y-1">
+              <span class="text-sm font-medium">Re-source to vendor</span>
+              <div class="max-w-sm">
+                <Combobox
+                  options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+                  bind:value={resourceVendorId}
+                  placeholder="Search vendor…"
+                />
+              </div>
+            </label>
+
+            <table class="w-full text-sm">
+              <thead class="border-b text-left text-xs text-muted-foreground">
+                <tr>
+                  <th class="py-2 font-medium">From line</th>
+                  <th class="py-2 font-medium">Replacement</th>
+                  <th class="py-2 font-medium">Qty</th>
+                  <th class="py-2 font-medium">Unit cost (Rp)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each resourceRows as r, idx (r.sourceItemId)}
+                  <tr class="border-b align-top last:border-0">
+                    <td class="py-2 pr-3">
+                      <span class="font-medium">{r.sourceLabel}</span>
+                      <span class="block text-xs text-muted-foreground">
+                        of {r.remaining} ordered
+                      </span>
+                    </td>
+                    <td class="py-2 pr-3">
+                      {#if r.sourceIsStock}
+                        <div class="w-56">
+                          <Combobox
+                            options={variantOptions}
+                            bind:value={resourceRows[idx].variantId}
+                            placeholder="Search product…"
+                          />
+                        </div>
+                      {:else}
+                        <div class="w-56">
+                          <Input
+                            bind:value={resourceRows[idx].description}
+                            placeholder="Line description"
+                          />
+                        </div>
+                      {/if}
+                    </td>
+                    <td class="py-2 pr-3">
+                      <Input
+                        type="number"
+                        class="w-20"
+                        bind:value={resourceRows[idx].qty}
+                      />
+                    </td>
+                    <td class="py-2">
+                      <div class="w-32">
+                        <MoneyInput bind:value={resourceRows[idx].unitCostMinor} />
+                      </div>
+                      {#if resourceRows[idx].unitCostMinor == null && resourceVendorId}
+                        <span class="mt-1 block text-xs text-muted-foreground">
+                          → {formatMoney(resourceRowCost(resourceRows[idx]))}
+                        </span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
+            <p class="text-sm text-muted-foreground">
+              {resourceRows.length} line{resourceRows.length === 1 ? "" : "s"}
+            </p>
+            <div class="flex items-center gap-2">
+              <Button variant="ghost" size="sm" disabled={busy} onclick={closeResource}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy || !resourceVendorId}
+                onclick={submitResource}
+              >
+                Re-source {resourceRows.length} line{resourceRows.length === 1 ? "" : "s"}
+              </Button>
             </div>
           </div>
         </div>
