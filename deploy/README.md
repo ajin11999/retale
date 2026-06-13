@@ -29,7 +29,24 @@ part of this stack.
    The api container applies DB migrations on every start (look for
    `✓ migrations applied` in `docker compose -p retale-prod logs api`).
 
-5. Export Caddy's local-CA root certificate and install it on **every client**
+5. Create the first (root) user. There is no sign-up screen and the GraphQL
+   playground is disabled in production, so call the `bootstrap` mutation once
+   directly — it only works while the users table is empty (`-k` because the
+   CA is not trusted yet; see the next step):
+
+   ```
+   curl -k https://<HOST_IP>:8443/graphql \
+     -H 'content-type: application/json' \
+     -d '{"query":"mutation($u:String!,$p:String!,$n:String!){bootstrap(username:$u,password:$p,name:$n){user{id username isRoot}}}","variables":{"u":"admin","p":"<strong-password>","n":"Administrator"}}'
+   ```
+
+   Sign into the console with that username/password. Root users must enrol 2FA
+   (mandatory by design): on first login the account is locked out of every
+   action until you complete 2FA setup on the **Account** page. To add further
+   day-to-day (non-root) logins afterwards, use the console's user management
+   rather than this mutation.
+
+6. Export Caddy's local-CA root certificate and install it on **every client**
    (console browsers and POS web devices). Without it, browsers show cert
    warnings and the POS PWA service worker will not register (no offline mode):
 
@@ -42,7 +59,7 @@ part of this stack.
    The CA lives in the `caddy-data` volume, so it survives restarts — clients
    only trust it once.
 
-6. POS / Workshop apps (native or web): enter `https://<HOST_IP>:8443` as the
+7. POS / Workshop apps (native or web): enter `https://<HOST_IP>:8443` as the
    API address on first launch.
 
 ## Day-to-day

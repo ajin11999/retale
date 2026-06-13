@@ -81,10 +81,15 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
 Clients then reach the console at `https://<HOST_IP>`, the API at
 `https://<HOST_IP>:8443`, and the POS web app at `https://<HOST_IP>:8081`.
-Migrations apply automatically on API start. See
-[`deploy/README.md`](deploy/README.md) for client certificate trust, updates,
-and backups. The catalog is deployed separately to Vercel and is not part of
-this stack.
+Migrations apply automatically on API start. On a fresh install create the
+first (root) user with the one-time `bootstrap` mutation — there is no sign-up
+screen. See [`deploy/README.md`](deploy/README.md) for that step, plus client
+certificate trust, updates, and backups. The catalog is deployed separately to
+Vercel and is not part of this stack.
+
+Migrating from ProDuck? `packages/api/scripts/import-from-produck.ts` is a
+one-shot, destructive importer for products and vendors only — see its header
+and [`docs/design-decisions.md`](docs/design-decisions.md).
 
 ## Development
 
