@@ -87,6 +87,12 @@ screen. See [`deploy/README.md`](deploy/README.md) for that step, plus client
 certificate trust, updates, and backups. The catalog is deployed separately to
 Vercel and is not part of this stack.
 
+To install on another machine with **only Docker** — no repo clone and no local
+build — publish the images to GHCR (push a `v*` tag; see the `Publish images`
+workflow) and run [`docker-compose.dist.yml`](docker-compose.dist.yml) against
+them. Full maintainer/operator steps, including an offline `docker save`/`load`
+variant, are in [`deploy/DISTRIBUTE.md`](deploy/DISTRIBUTE.md).
+
 Migrating from ProDuck? `packages/api/scripts/import-from-produck.ts` is a
 one-shot, destructive importer for products and vendors only — see its header
 and [`docs/design-decisions.md`](docs/design-decisions.md).

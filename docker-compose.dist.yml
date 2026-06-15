@@ -1,0 +1,79 @@
+# Distributable LAN stack — runs from pre-built GHCR images, no repo clone and
+# no local build required. The target machine needs only this file and a
+# filled-in .env.prod (copy .env.prod.example).
+#
+#   docker login ghcr.io                 # only if the images are private
+#   docker compose -f docker-compose.dist.yml --env-file .env.prod up -d
+#
+# Pin a release with RETALE_TAG in .env.prod (defaults to latest). See
+# deploy/DISTRIBUTE.md for first-time setup (secrets, bootstrap user, CA cert).
+#
+# Same project name as the build-from-source stack so `docker compose -p
+# retale-prod ...` operations match either way.
+name: retale-prod
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: retale
+      MARIADB_USER: retale
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ghcr.io/fransiscowijaya1999/retale-api:${RETALE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql://retale:${MARIADB_PASSWORD}@mariadb:3306/retale
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+      TWO_FACTOR_ENC_KEY: ${TWO_FACTOR_ENC_KEY}
+      # Optional — catalog snapshot publishing to Vercel Blob (needs outbound
+      # internet). Empty disables it.
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      mariadb:
+        condition: service_healthy # migrations run at startup; don't race the DB
+
+  console:
+    image: ghcr.io/fransiscowijaya1999/retale-console:${RETALE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      GRAPHQL_URL: http://api:3000/graphql
+      ORIGIN: https://${HOST_IP} # adapter-node needs ORIGIN behind a proxy
+    depends_on:
+      - api
+
+  caddy:
+    image: ghcr.io/fransiscowijaya1999/retale-caddy:${RETALE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      HOST_IP: ${HOST_IP}
+    ports: # only caddy publishes host ports
+      - "80:80" # HTTP->HTTPS redirect, so bare-IP typing (no scheme) reaches 443
+      - "443:443"
+      - "8443:8443"
+      - "8081:8081"
+    volumes:
+      - caddy-data:/data # persists the local CA — clients only trust it once
+      - caddy-config:/config
+    depends_on:
+      - api
+      - console
+
+volumes:
+  dbdata:
+  uploads:
+  caddy-data:
+  caddy-config:

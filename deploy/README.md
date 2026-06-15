@@ -10,6 +10,12 @@ part of this stack.
 | `https://<HOST_IP>:8443`       | API — GraphQL at `/graphql` + HTTP routes |
 | `https://<HOST_IP>:8081`       | POS web/PWA (static Flutter build) |
 
+> **Two ways to install.** This page builds the images from source on the host
+> (`up -d --build`, needs the repo + Bun + Flutter). To install with **only
+> Docker** — no repo clone, no local build — from pre-built GHCR images, see
+> [`DISTRIBUTE.md`](DISTRIBUTE.md). The bootstrap-user (§5) and CA-certificate
+> (§6) steps below apply identically to both.
+
 ## First-time setup
 
 1. Reserve a static IP for the host in the router (DHCP reservation).
