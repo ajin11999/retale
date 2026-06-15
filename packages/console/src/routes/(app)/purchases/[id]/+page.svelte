@@ -736,30 +736,48 @@
     // unit cost that gets saved. See netUnitCost.
     lineDiscountPct: number | null;
     lineDiscountFixed: number | null;
+    // Input-helper tax %: added to the price after discounts. Like the discounts
+    // above it's not persisted — it just bumps the net unit cost that gets saved.
+    lineTaxPct: number | null;
   }
   let itemDraft = $state<ItemDraft | null>(null);
   // Transient "current input" global discount % — applies to every new line you
   // add while it's set, on top of any per-line discount. Page-scoped, not saved.
   let inputDiscountPct = $state<number | null>(null);
+  // Transient "current input" global tax % — added to every new line you add
+  // while it's set, on top of any per-line tax. Page-scoped, not saved.
+  let inputTaxPct = $state<number | null>(null);
   // The group the line editor is anchored to (its key), so the form renders
   // inside that section instead of detached at the bottom. Fixed when the form
   // opens, so changing the Section dropdown mid-edit doesn't make it jump.
   let draftGroupKey = $state<string | null>(null);
 
-  // Net unit cost after discounts, rounded to 2dp (DECIMAL(19,2)) and floored at
-  // 0: list % off first, then the per-unit fixed amount, then the global % last.
-  function netUnitCost(d: ItemDraft, globalPct: number): number {
+  // Net unit cost, rounded to 2dp (DECIMAL(19,2)) and floored at 0. Pipeline:
+  // base price → discounts (list % off, then the per-unit fixed amount, then the
+  // global %) → tax addition (per-line + global %). Landed costs add later, on
+  // arrival. globalPct/globalTaxPct are the page-level inputs (new lines only).
+  function netUnitCost(
+    d: ItemDraft,
+    globalPct: number,
+    globalTaxPct: number,
+  ): number {
     const gross = d.unitCostMinor ?? 0;
     const qty = d.qtyOrdered || 0;
     const perUnitFixed = qty > 0 ? (d.lineDiscountFixed ?? 0) / qty : 0;
     let net = gross - gross * ((d.lineDiscountPct ?? 0) / 100) - perUnitFixed;
     net = net * (1 - (globalPct ?? 0) / 100);
+    net = net * (1 + ((d.lineTaxPct ?? 0) + (globalTaxPct ?? 0)) / 100);
     return Math.max(0, Math.round(net * 100) / 100);
   }
-  // The net unit cost for the open new-line draft, for the hint beside the field.
+  // The final unit cost for the open line draft, for the hint beside the field.
+  // The global input discount/tax % only apply to new lines, not edits.
   const draftNet = $derived(
-    itemDraft && !itemDraft.id
-      ? netUnitCost(itemDraft, inputDiscountPct ?? 0)
+    itemDraft
+      ? netUnitCost(
+          itemDraft,
+          itemDraft.id ? 0 : (inputDiscountPct ?? 0),
+          itemDraft.id ? 0 : (inputTaxPct ?? 0),
+        )
       : null,
   );
 
@@ -782,6 +800,7 @@
       unitCostMinor: 0,
       lineDiscountPct: null,
       lineDiscountFixed: null,
+      lineTaxPct: null,
     };
     draftGroupKey = UNGROUPED;
     focusLineField("line-variant");
@@ -795,9 +814,12 @@
       description: i.description ?? "",
       qtyOrdered: i.qtyOrdered,
       unitCostMinor: i.unitCostMinor,
-      // Editing: the stored cost is already net, so no discount is applied.
+      // Discount/tax start clear: the shown unit cost is treated as the gross, so
+      // leaving these blank saves the stored cost unchanged. Fill them in to
+      // apply a further discount or tax on top.
       lineDiscountPct: null,
       lineDiscountFixed: null,
+      lineTaxPct: null,
     };
     draftGroupKey = i.sectionId ?? UNGROUPED;
   }
@@ -810,9 +832,13 @@
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
-    const unitCostMinor = d.id
-      ? (d.unitCostMinor ?? 0) // editing: stored value is already net
-      : netUnitCost(d, inputDiscountPct ?? 0); // new line: apply discounts
+    // Both modes apply the per-line discount/tax to the shown (gross) unit cost;
+    // the global input discount/tax % only apply to new lines.
+    const unitCostMinor = netUnitCost(
+      d,
+      d.id ? 0 : (inputDiscountPct ?? 0),
+      d.id ? 0 : (inputTaxPct ?? 0),
+    );
     const isNew = !d.id;
     const ok = await run("Item", () =>
       d.id
@@ -845,10 +871,11 @@
           description: "",
           qtyOrdered: 1,
           unitCostMinor: 0,
-          // Per-line discounts are line-specific; clear them for the next line
-          // (the global "input discount %" persists for batch-wide discounts).
+          // Per-line discount/tax are line-specific; clear them for the next line
+          // (the global "input discount/tax %" persist for batch-wide rates).
           lineDiscountPct: null,
           lineDiscountFixed: null,
+          lineTaxPct: null,
         };
         focusLineField("line-variant");
       } else {
@@ -1728,6 +1755,7 @@
       unitCostMinor: 0,
       lineDiscountPct: null,
       lineDiscountFixed: null,
+      lineTaxPct: null,
     };
     draftGroupKey = sectionId;
     focusLineField("line-variant");
@@ -2108,6 +2136,14 @@
             bind:value={inputDiscountPct}
             placeholder="0"
           />
+          <span>Input tax %</span>
+          <Input
+            type="number"
+            min="0"
+            class="h-7 w-20"
+            bind:value={inputTaxPct}
+            placeholder="0"
+          />
           <span class="text-[11px]">applied to new lines as you add them</span>
         </div>
       {/if}
@@ -2275,34 +2311,42 @@
               <label class="space-y-1">
                 <span class="text-xs font-medium">Unit cost (Rp)</span>
                 <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
-                {#if !itemDraft.id && draftNet !== (itemDraft.unitCostMinor ?? 0)}
+                {#if draftNet !== (itemDraft.unitCostMinor ?? 0)}
                   <span class="text-xs text-muted-foreground"
-                    >→ {formatMoney(draftNet ?? 0)} net</span
+                    >→ {formatMoney(draftNet ?? 0)} final</span
                   >
                 {/if}
               </label>
-              {#if !itemDraft.id}
-                <label class="space-y-1">
-                  <span class="text-xs font-medium">Line discount %</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    bind:value={itemDraft.lineDiscountPct}
-                    placeholder="0"
-                    disabled={!editable}
-                  />
-                </label>
-                <label class="space-y-1">
-                  <span class="text-xs font-medium"
-                    >Line discount (Rp, whole line ÷ qty)</span
-                  >
-                  <MoneyInput
-                    bind:value={itemDraft.lineDiscountFixed}
-                    disabled={!editable}
-                  />
-                </label>
-              {/if}
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Line discount %</span>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  bind:value={itemDraft.lineDiscountPct}
+                  placeholder="0"
+                  disabled={!editable}
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium"
+                  >Line discount (Rp, whole line ÷ qty)</span
+                >
+                <MoneyInput
+                  bind:value={itemDraft.lineDiscountFixed}
+                  disabled={!editable}
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium">Line tax %</span>
+                <Input
+                  type="number"
+                  min="0"
+                  bind:value={itemDraft.lineTaxPct}
+                  placeholder="0"
+                  disabled={!editable}
+                />
+              </label>
             </div>
             <div class="flex items-center justify-end gap-2">
               {#if editable}
