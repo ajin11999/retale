@@ -741,10 +741,10 @@
     lineTaxPct: number | null;
   }
   let itemDraft = $state<ItemDraft | null>(null);
-  // Transient "current input" global discount % — applies to every new line you
-  // add while it's set, on top of any per-line discount. Page-scoped, not saved.
+  // Transient "current input" global discount % — applies to every line you add
+  // or edit while it's set, on top of any per-line discount. Page-scoped, not saved.
   let inputDiscountPct = $state<number | null>(null);
-  // Transient "current input" global tax % — added to every new line you add
+  // Transient "current input" global tax % — added to every line you add or edit
   // while it's set, on top of any per-line tax. Page-scoped, not saved.
   let inputTaxPct = $state<number | null>(null);
   // The group the line editor is anchored to (its key), so the form renders
@@ -755,7 +755,7 @@
   // Net unit cost, rounded to 2dp (DECIMAL(19,2)) and floored at 0. Pipeline:
   // base price → discounts (list % off, then the per-unit fixed amount, then the
   // global %) → tax addition (per-line + global %). Landed costs add later, on
-  // arrival. globalPct/globalTaxPct are the page-level inputs (new lines only).
+  // arrival. globalPct/globalTaxPct are the page-level inputs (new + edited lines).
   function netUnitCost(
     d: ItemDraft,
     globalPct: number,
@@ -770,14 +770,11 @@
     return Math.max(0, Math.round(net * 100) / 100);
   }
   // The final unit cost for the open line draft, for the hint beside the field.
-  // The global input discount/tax % only apply to new lines, not edits.
+  // Page-level discount/tax apply on edit too, so the hint surfaces the change
+  // before save — applying a global rate to an existing line is never silent.
   const draftNet = $derived(
     itemDraft
-      ? netUnitCost(
-          itemDraft,
-          itemDraft.id ? 0 : (inputDiscountPct ?? 0),
-          itemDraft.id ? 0 : (inputTaxPct ?? 0),
-        )
+      ? netUnitCost(itemDraft, inputDiscountPct ?? 0, inputTaxPct ?? 0)
       : null,
   );
 
@@ -814,9 +811,10 @@
       description: i.description ?? "",
       qtyOrdered: i.qtyOrdered,
       unitCostMinor: i.unitCostMinor,
-      // Discount/tax start clear: the shown unit cost is treated as the gross, so
-      // leaving these blank saves the stored cost unchanged. Fill them in to
-      // apply a further discount or tax on top.
+      // Per-line discount/tax start clear; the shown unit cost is treated as the
+      // gross. With no page-level rate set, leaving these blank saves the stored
+      // cost unchanged — but any active Input discount/tax % applies here too (the
+      // "final" hint shows the result). Fill these in for a further per-line rate.
       lineDiscountPct: null,
       lineDiscountFixed: null,
       lineTaxPct: null,
@@ -832,13 +830,10 @@
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
-    // Both modes apply the per-line discount/tax to the shown (gross) unit cost;
-    // the global input discount/tax % only apply to new lines.
-    const unitCostMinor = netUnitCost(
-      d,
-      d.id ? 0 : (inputDiscountPct ?? 0),
-      d.id ? 0 : (inputTaxPct ?? 0),
-    );
+    // New and edited lines both treat the shown unit cost as gross and fold in
+    // the per-line plus page-level discount/tax. The "final" hint surfaces the
+    // result first, so applying a global rate on edit is never silent.
+    const unitCostMinor = netUnitCost(d, inputDiscountPct ?? 0, inputTaxPct ?? 0);
     const isNew = !d.id;
     const ok = await run("Item", () =>
       d.id
@@ -2144,7 +2139,7 @@
             bind:value={inputTaxPct}
             placeholder="0"
           />
-          <span class="text-[11px]">applied to new lines as you add them</span>
+          <span class="text-[11px]">applied to lines as you add or edit them</span>
         </div>
       {/if}
 
