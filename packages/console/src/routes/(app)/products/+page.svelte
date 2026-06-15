@@ -83,6 +83,23 @@
     }
   `);
 
+  // Bulk-action mutations, applied one product at a time over the selection.
+  // A null categoryId moves the product to Uncategorized.
+  const BulkUpdateCategory = graphql(`
+    mutation ConsoleBulkUpdateProductCategory($id: ID!, $categoryId: ID) {
+      updateProduct(id: $id, categoryId: $categoryId) {
+        id
+        categoryId
+      }
+    }
+  `);
+
+  const BulkDeleteProduct = graphql(`
+    mutation ConsoleBulkHardDeleteProduct($id: ID!) {
+      hardDeleteProduct(id: $id)
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const ProductList = $derived(data.ProductList);
 
@@ -103,6 +120,7 @@
   const canCreate = $derived(has("product.create"));
   const canEdit = $derived(has("product.edit"));
   const canEditPrice = $derived(has("product.edit_price"));
+  const canDelete = $derived(has("product.hard_delete"));
 
   const KINDS = ["physical", "service", "bundle", "open_price"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
@@ -195,6 +213,8 @@
   // `searchInput` tracks the field; `search` (debounced 0.5s) drives filtering,
   // so we re-filter/sort at most once per pause, not per keystroke.
   let searchInput = $state("");
+  // Archived products are hidden by default; toggled by the header checkbox.
+  let showArchived = $state(false);
   let search = $state("");
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -263,6 +283,7 @@
 
   const rows = $derived.by<Row[]>(() => {
     let base = allRows;
+    if (!showArchived) base = base.filter((r) => !r.archived);
     if (categoryFilter) base = base.filter((r) => r.categoryId === categoryFilter);
     // AND-match whitespace tokens, so "sproc sss" matches "sprocket … sss"
     // regardless of word order — mirrors the server-side listProducts search
@@ -321,6 +342,105 @@
   }
   function nextPage() {
     pageIndex = Math.min(currentPage + 1, pageCount - 1);
+  }
+
+  // ---- Bulk selection ------------------------------------------------------
+  // The checkbox column drives mass actions (delete, recategorize). Selection
+  // is a set of product ids, pruned to the visible (filtered) set whenever the
+  // filters change — so a row hidden by search/category/archived can never be
+  // silently acted on. The header checkbox spans the whole filtered set, not
+  // just the current page, so a bulk action can cover results across pages.
+  let selectedIds = $state<string[]>([]);
+  const selectedSet = $derived(new Set(selectedIds));
+
+  $effect(() => {
+    const visible = new Set(rows.map((r) => r.id));
+    const pruned = selectedIds.filter((id) => visible.has(id));
+    if (pruned.length !== selectedIds.length) selectedIds = pruned;
+  });
+
+  const allSelected = $derived(rows.length > 0 && selectedIds.length === rows.length);
+  const someSelected = $derived(selectedIds.length > 0 && !allSelected);
+
+  function toggleRow(id: string) {
+    selectedIds = selectedSet.has(id)
+      ? selectedIds.filter((x) => x !== id)
+      : [...selectedIds, id];
+  }
+  function toggleAll() {
+    selectedIds = allSelected ? [] : rows.map((r) => r.id);
+  }
+  // Native checkbox `indeterminate` is a DOM property, not an attribute.
+  function indeterminate(el: HTMLInputElement, value: boolean) {
+    el.indeterminate = value;
+    return { update: (v: boolean) => (el.indeterminate = v) };
+  }
+
+  // `bulkCategoryPicked` distinguishes a deliberate "Uncategorized" (value "")
+  // choice from the untouched initial state, so Move stays disabled until the
+  // user actually picks a target.
+  let bulkCategoryId = $state("");
+  let bulkCategoryPicked = $state(false);
+  let bulkBusy = $state(false);
+
+  async function finishBulk(
+    total: number,
+    failed: number,
+    firstError: string,
+    pastVerb: string,
+  ) {
+    const ok = total - failed;
+    feedback = failed
+      ? { ok: false, text: `${pastVerb} ${ok} of ${total}; ${failed} failed — ${firstError}` }
+      : { ok: true, text: `${ok} product${ok === 1 ? "" : "s"} ${pastVerb.toLowerCase()}.` };
+    selectedIds = [];
+    bulkBusy = false;
+    await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
+  }
+
+  async function bulkSetCategory() {
+    const ids = [...selectedIds];
+    if (!ids.length || !bulkCategoryPicked) return;
+    bulkBusy = true;
+    feedback = null;
+    let failed = 0;
+    let firstError = "";
+    for (const id of ids) {
+      const res = await BulkUpdateCategory.mutate({
+        id,
+        categoryId: bulkCategoryId || null,
+      });
+      if (res.errors?.length) {
+        failed++;
+        firstError ||= res.errors[0].message;
+      }
+    }
+    bulkCategoryPicked = false;
+    bulkCategoryId = "";
+    await finishBulk(ids.length, failed, firstError, "Moved");
+  }
+
+  async function bulkDelete() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    if (
+      !confirm(
+        `Permanently delete ${ids.length} product${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+      )
+    )
+      return;
+    bulkBusy = true;
+    feedback = null;
+    let failed = 0;
+    let firstError = "";
+    for (const id of ids) {
+      const res = await BulkDeleteProduct.mutate({ id });
+      if (res.errors?.length) {
+        failed++;
+        firstError ||= res.errors[0].message;
+      }
+    }
+    await finishBulk(ids.length, failed, firstError, "Deleted");
   }
 
   function priceLabel(r: Row): string {
@@ -424,7 +544,11 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
     <h1 class="text-xl font-semibold">Products</h1>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <input type="checkbox" bind:checked={showArchived} class="size-4" />
+        Show archived
+      </label>
       <div class="w-64">
         <Input
           type="search"
@@ -557,6 +681,51 @@
     </div>
   {/if}
 
+  {#if selectedIds.length > 0 && (canEdit || canDelete)}
+    <div
+      class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+    >
+      <span class="font-medium">{selectedIds.length} selected</span>
+      {#if canEdit}
+        <div class="flex items-center gap-2">
+          <div class="w-56">
+            <Combobox
+              options={categoryOptions}
+              bind:value={bulkCategoryId}
+              placeholder="Move to category…"
+              onChange={() => (bulkCategoryPicked = true)}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulkBusy || !bulkCategoryPicked}
+            onclick={bulkSetCategory}
+          >
+            Move
+          </Button>
+        </div>
+      {/if}
+      {#if canDelete}
+        <Button
+          size="sm"
+          variant="destructive"
+          disabled={bulkBusy}
+          onclick={bulkDelete}
+        >
+          Delete
+        </Button>
+      {/if}
+      <button
+        class="ml-auto text-xs text-primary hover:underline"
+        disabled={bulkBusy}
+        onclick={() => (selectedIds = [])}
+      >
+        Clear
+      </button>
+    </div>
+  {/if}
+
   {#if $ProductList.fetching}
     <p class="text-sm text-muted-foreground">Loading…</p>
   {:else if $ProductList.errors?.length}
@@ -568,6 +737,18 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-muted-foreground">
           <tr>
+            {#if canEdit || canDelete}
+              <th class="w-8 px-4 py-2">
+                <input
+                  type="checkbox"
+                  class="size-4 align-middle"
+                  aria-label="Select all"
+                  checked={allSelected}
+                  use:indeterminate={someSelected}
+                  onchange={toggleAll}
+                />
+              </th>
+            {/if}
             {#each COLUMNS as col (col.id)}
               <th class="px-4 py-2 text-left font-medium">
                 <button
@@ -584,6 +765,17 @@
         <tbody>
           {#each pageRows as row (row.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
+              {#if canEdit || canDelete}
+                <td class="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    class="size-4 align-middle"
+                    aria-label="Select {row.name}"
+                    checked={selectedSet.has(row.id)}
+                    onchange={() => toggleRow(row.id)}
+                  />
+                </td>
+              {/if}
               <td class="px-4 py-2">
                 {#if quick?.id === row.id}
                   <input
@@ -672,7 +864,7 @@
           {#if pageRows.length === 0}
             <tr>
               <td
-                colspan={COLUMNS.length + 1}
+                colspan={COLUMNS.length + 1 + (canEdit || canDelete ? 1 : 0)}
                 class="px-4 py-10 text-center text-muted-foreground"
               >
                 No products match.
