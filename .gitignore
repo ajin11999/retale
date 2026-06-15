@@ -39,6 +39,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# TLS certs / keys (Caddy local CA root is generated per-deployment; private keys never belong in git)
+*.crt
+*.key
+*.pem
+
 # Drizzle
 packages/api/drizzle/meta/_journal.json.bak
 
