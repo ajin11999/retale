@@ -731,12 +731,37 @@
     description: string;
     qtyOrdered: number;
     unitCostMinor: number | null;
+    // Input-helper discounts (new lines only): a per-line % and a whole-line
+    // fixed amount split across qty. Not persisted — they just compute the net
+    // unit cost that gets saved. See netUnitCost.
+    lineDiscountPct: number | null;
+    lineDiscountFixed: number | null;
   }
   let itemDraft = $state<ItemDraft | null>(null);
+  // Transient "current input" global discount % — applies to every new line you
+  // add while it's set, on top of any per-line discount. Page-scoped, not saved.
+  let inputDiscountPct = $state<number | null>(null);
   // The group the line editor is anchored to (its key), so the form renders
   // inside that section instead of detached at the bottom. Fixed when the form
   // opens, so changing the Section dropdown mid-edit doesn't make it jump.
   let draftGroupKey = $state<string | null>(null);
+
+  // Net unit cost after discounts, rounded to 2dp (DECIMAL(19,2)) and floored at
+  // 0: list % off first, then the per-unit fixed amount, then the global % last.
+  function netUnitCost(d: ItemDraft, globalPct: number): number {
+    const gross = d.unitCostMinor ?? 0;
+    const qty = d.qtyOrdered || 0;
+    const perUnitFixed = qty > 0 ? (d.lineDiscountFixed ?? 0) / qty : 0;
+    let net = gross - gross * ((d.lineDiscountPct ?? 0) / 100) - perUnitFixed;
+    net = net * (1 - (globalPct ?? 0) / 100);
+    return Math.max(0, Math.round(net * 100) / 100);
+  }
+  // The net unit cost for the open new-line draft, for the hint beside the field.
+  const draftNet = $derived(
+    itemDraft && !itemDraft.id
+      ? netUnitCost(itemDraft, inputDiscountPct ?? 0)
+      : null,
+  );
 
   // Move focus to a line-form field once it has rendered. Lets opening a new
   // line land the cursor in Variant, and picking a variant jump to Qty.
@@ -755,6 +780,8 @@
       description: "",
       qtyOrdered: 1,
       unitCostMinor: 0,
+      lineDiscountPct: null,
+      lineDiscountFixed: null,
     };
     draftGroupKey = UNGROUPED;
     focusLineField("line-variant");
@@ -768,6 +795,9 @@
       description: i.description ?? "",
       qtyOrdered: i.qtyOrdered,
       unitCostMinor: i.unitCostMinor,
+      // Editing: the stored cost is already net, so no discount is applied.
+      lineDiscountPct: null,
+      lineDiscountFixed: null,
     };
     draftGroupKey = i.sectionId ?? UNGROUPED;
   }
@@ -780,7 +810,9 @@
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
-    const unitCostMinor = d.unitCostMinor ?? 0;
+    const unitCostMinor = d.id
+      ? (d.unitCostMinor ?? 0) // editing: stored value is already net
+      : netUnitCost(d, inputDiscountPct ?? 0); // new line: apply discounts
     const isNew = !d.id;
     const ok = await run("Item", () =>
       d.id
@@ -813,6 +845,10 @@
           description: "",
           qtyOrdered: 1,
           unitCostMinor: 0,
+          // Per-line discounts are line-specific; clear them for the next line
+          // (the global "input discount %" persists for batch-wide discounts).
+          lineDiscountPct: null,
+          lineDiscountFixed: null,
         };
         focusLineField("line-variant");
       } else {
@@ -1690,6 +1726,8 @@
       description: "",
       qtyOrdered: 1,
       unitCostMinor: 0,
+      lineDiscountPct: null,
+      lineDiscountFixed: null,
     };
     draftGroupKey = sectionId;
     focusLineField("line-variant");
@@ -2057,6 +2095,23 @@
         </div>
       </div>
 
+      {#if editable}
+        <div
+          class="flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
+        >
+          <span>Input discount %</span>
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            class="h-7 w-20"
+            bind:value={inputDiscountPct}
+            placeholder="0"
+          />
+          <span class="text-[11px]">applied to new lines as you add them</span>
+        </div>
+      {/if}
+
       {#if newSectionName !== null}
         <div class="flex gap-2">
           <Input
@@ -2220,7 +2275,34 @@
               <label class="space-y-1">
                 <span class="text-xs font-medium">Unit cost (Rp)</span>
                 <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
+                {#if !itemDraft.id && draftNet !== (itemDraft.unitCostMinor ?? 0)}
+                  <span class="text-xs text-muted-foreground"
+                    >→ {formatMoney(draftNet ?? 0)} net</span
+                  >
+                {/if}
               </label>
+              {#if !itemDraft.id}
+                <label class="space-y-1">
+                  <span class="text-xs font-medium">Line discount %</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    bind:value={itemDraft.lineDiscountPct}
+                    placeholder="0"
+                    disabled={!editable}
+                  />
+                </label>
+                <label class="space-y-1">
+                  <span class="text-xs font-medium"
+                    >Line discount (Rp, whole line ÷ qty)</span
+                  >
+                  <MoneyInput
+                    bind:value={itemDraft.lineDiscountFixed}
+                    disabled={!editable}
+                  />
+                </label>
+              {/if}
             </div>
             <div class="flex items-center justify-end gap-2">
               {#if editable}
