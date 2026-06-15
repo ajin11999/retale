@@ -5,6 +5,12 @@
 # refuses to register. HOST_IP comes from the container environment (.env.prod).
 {
 	local_certs
+	# Clients reach the stack by bare IP (https://HOST_IP). A TLS ClientHello
+	# for an IP literal carries no SNI (RFC 6066 forbids it), so without this
+	# Caddy can't pick a cert and aborts the handshake with an internal-error
+	# alert — only hostname access (localhost) would work. default_sni makes
+	# Caddy serve the HOST_IP cert when no SNI is presented.
+	default_sni {$HOST_IP}
 }
 
 # Console (back-office admin)
