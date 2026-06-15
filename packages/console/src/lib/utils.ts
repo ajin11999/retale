@@ -7,12 +7,12 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * Format an integer minor-unit money value for display.
- * Retale stores money as integer minor units (see docs/design-decisions.md);
- * adjust the scale here if the minor unit is ever sub-rupiah.
+ * Format a money value (the literal rupiah amount, up to 2 decimals) for
+ * display: "Rp 1,500,000.5". International grouping — comma thousands, dot
+ * decimal — with trailing zeros trimmed. Mirrors formatRp on the API.
  */
 export function formatMoney(minor: number): string {
-  return "Rp " + Math.round(minor).toLocaleString("id-ID");
+  return "Rp " + minor.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 /**

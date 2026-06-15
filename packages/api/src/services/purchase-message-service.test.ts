@@ -143,8 +143,8 @@ describe("renderPurchaseOrderMessage", () => {
     expect(body.endsWith("Thank you.")).toBe(true);
     expect(body).toContain("From: Frans Retail");
     expect(body).toContain("To: Acme Supply");
-    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
-    expect(body).toContain("Total: Rp 100.000");
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2,000 = Rp 100,000");
+    expect(body).toContain("Total: Rp 100,000");
   });
 
   test("compact: drops greeting, header and footer — item lines and total only", async () => {
@@ -168,8 +168,8 @@ describe("renderPurchaseOrderMessage", () => {
     });
 
     const { body } = await renderPurchaseOrderMessage(purchase.id, { compact: true });
-    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
-    expect(body).toContain("Total: Rp 100.000");
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2,000 = Rp 100,000");
+    expect(body).toContain("Total: Rp 100,000");
     expect(body).not.toContain("Dear supplier,");
     expect(body).not.toContain("PURCHASE ORDER");
     expect(body).not.toContain("From:");
@@ -214,7 +214,7 @@ describe("renderPurchaseOrderMessage", () => {
 
     const { body } = await renderPurchaseOrderMessage(purchase.id);
     expect(body).toContain("Consumables");
-    expect(body).toContain("Shop rags — 5 @ Rp 1.500 = Rp 7.500");
+    expect(body).toContain("Shop rags — 5 @ Rp 1,500 = Rp 7,500");
   });
 
   test("rejects an unknown purchase", async () => {

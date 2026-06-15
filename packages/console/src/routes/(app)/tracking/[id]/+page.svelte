@@ -270,13 +270,13 @@
       if (action === "payout") {
         res = await RecordPayout.mutate({
           accountId: account.id,
-          amountMinor: Math.round(Math.abs(amt)),
+          amountMinor: Math.abs(amt),
           note: aNote.trim() || null,
         });
       } else if (action === "deposit") {
         res = await RecordDeposit.mutate({
           accountId: account.id,
-          amountMinor: Math.round(Math.abs(amt)),
+          amountMinor: Math.abs(amt),
           note: aNote.trim() || null,
         });
       } else {
@@ -286,7 +286,7 @@
         }
         res = await AdjustBalance.mutate({
           accountId: account.id,
-          amountMinor: Math.round(amt),
+          amountMinor: amt,
           note: aNote.trim(),
         });
       }

@@ -20,7 +20,7 @@ import {
 import { users } from "./auth.ts";
 import { productVariants } from "./products.ts";
 import { vendors } from "./vendors.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** `complete` is set by the delivery transaction; `cancelled` is manual. */
 export const PURCHASE_STATUSES = ["open", "complete", "cancelled"] as const;
@@ -91,7 +91,7 @@ export const purchaseItems = mysqlTable(
     description: varchar({ length: 300 }),
     qtyOrdered: bigint({ mode: "number" }).notNull(),
     qtyDelivered: bigint({ mode: "number" }).notNull().default(0),
-    unitCostMinor: bigint({ mode: "number" }).notNull(),
+    unitCostMinor: money().notNull(),
     sortOrder: int().notNull().default(0),
   },
   (t) => [

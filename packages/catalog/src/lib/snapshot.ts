@@ -53,11 +53,10 @@ export interface CatalogSnapshot {
   products: CatalogProduct[];
 }
 
-/** Group an integer with "." thousands separators — Indonesian style. */
-function groupThousands(n: number): string {
-  return Math.trunc(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+/** Format a money value: international grouping (comma thousands, dot decimal),
+ *  trailing zeros trimmed — matches formatMoney (console) / formatRp (API). */
+function formatRp(n: number): string {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 /**
@@ -65,7 +64,7 @@ function groupThousands(n: number): string {
  * the real price formatted, the pre-masked peek string, or null (excluded).
  */
 export function priceLabel(v: CatalogVariant): string | null {
-  if (v.priceMinor !== undefined) return `Rp ${groupThousands(v.priceMinor)}`;
+  if (v.priceMinor !== undefined) return `Rp ${formatRp(v.priceMinor)}`;
   if (v.pricePeek !== undefined) return `Rp ${v.pricePeek}`;
   return null;
 }
@@ -85,7 +84,7 @@ export function fromPriceLabel(p: CatalogProduct): string | null {
     .map((v) => v.priceMinor)
     .filter((m): m is number => m !== undefined);
   if (shown.length > 0) {
-    return `from Rp ${groupThousands(Math.min(...shown))}`;
+    return `from Rp ${formatRp(Math.min(...shown))}`;
   }
   // No exact prices — fall back to the first variant's peek label, if any.
   const peek = p.variants.find((v) => v.pricePeek !== undefined);

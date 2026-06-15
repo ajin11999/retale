@@ -13,6 +13,7 @@ import {
   trackingAccounts,
 } from "../db/schema/tracking.ts";
 import { db } from "../lib/db.ts";
+import { isMoney } from "../lib/money.ts";
 
 export type TrackingErrorCode =
   | "ACCOUNT_NOT_FOUND"
@@ -303,8 +304,8 @@ export function recordTrackingPayout(input: {
   note?: string | null;
   createdByUserId: string;
 }): Promise<Account> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new TrackingError("INVALID_INPUT", "payout amount must be a positive integer");
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
+    throw new TrackingError("INVALID_INPUT", "payout amount must be a positive amount");
   }
   return postLedgerRow({
     accountId: input.accountId,
@@ -327,8 +328,8 @@ export function recordTrackingDeposit(input: {
   note?: string | null;
   createdByUserId: string;
 }): Promise<Account> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new TrackingError("INVALID_INPUT", "deposit amount must be a positive integer");
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
+    throw new TrackingError("INVALID_INPUT", "deposit amount must be a positive amount");
   }
   return postLedgerRow({
     accountId: input.accountId,
@@ -352,8 +353,8 @@ export async function adjustTrackingBalance(input: {
   counterCategoryOverride?: string | null;
   createdByUserId: string;
 }): Promise<Account> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor === 0) {
-    throw new TrackingError("INVALID_INPUT", "adjustment amount must be a non-zero integer");
+  if (!isMoney(input.amountMinor) || input.amountMinor === 0) {
+    throw new TrackingError("INVALID_INPUT", "adjustment amount must be a non-zero amount");
   }
   if (!input.note.trim()) {
     throw new TrackingError("INVALID_INPUT", "adjustment note is required");

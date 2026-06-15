@@ -2,11 +2,21 @@
 // audit columns stay identical across the schema.
 
 import { sql } from "drizzle-orm";
-import { timestamp, varchar } from "drizzle-orm/mysql-core";
+import { decimal, timestamp, varchar } from "drizzle-orm/mysql-core";
 import { ulid } from "ulid";
 
 // ULIDs are 26 chars, Crockford base32. Sortable, client-generatable.
 export const ID_LENGTH = 26;
+
+/**
+ * A money column. Money is stored as the literal rupiah value in an exact
+ * fixed-point `DECIMAL(19,2)` — `10.5` is stored as `10.50`, never scaled into
+ * "minor units". `mode: "number"` maps it to a JS `number` on read (writes go
+ * out as a string, which mysql2 handles). Use this for every price/cost/amount;
+ * change the scale here if the currency's smallest denomination ever changes.
+ * Field names keep their historical `*Minor` suffix — they now hold decimals.
+ */
+export const money = () => decimal({ precision: 19, scale: 2, mode: "number" });
 
 /** Primary key column: ULID, generated app-side if the caller omits one. */
 export const ulidPk = () =>

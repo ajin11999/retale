@@ -16,8 +16,8 @@ class Variant {
   final String? barcode;
   final String? label;
   final String unit;
-  final int priceMinor;
-  final int costMinor;
+  final num priceMinor;
+  final num costMinor;
   final double totalQty;
 
   factory Variant.fromJson(Map<String, dynamic> j) => Variant(
@@ -26,8 +26,8 @@ class Variant {
         barcode: j['barcode'] as String?,
         label: j['label'] as String?,
         unit: j['unit'] as String? ?? 'piece',
-        priceMinor: (j['priceMinor'] as num).round(),
-        costMinor: (j['costMinor'] as num?)?.round() ?? 0,
+        priceMinor: j['priceMinor'] as num,
+        costMinor: (j['costMinor'] as num?) ?? 0,
         totalQty: (j['totalQty'] as num?)?.toDouble() ?? 0,
       );
 

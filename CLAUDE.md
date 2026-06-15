@@ -4,7 +4,7 @@
 
 Retale is a Bun + TypeScript rewrite of **ProDuck** (`C:\Users\frans\ProDuck\`), a POS and inventory management API originally written in ASP.NET Core 7. The goal is a cleaner, more maintainable backend that works efficiently with Claude Code and serves both a Flutter app (web + Android) and a potential web admin panel.
 
-**Fresh-design rule:** ProDuck is NOT a schema constraint — it is only a one-time data source via importer. See `docs/design-decisions.md` for locked architectural decisions (ULID IDs, integer minor units, stock ledger, snapshot pattern, wipe-and-restore importer). Read that before writing schema or migrations.
+**Fresh-design rule:** ProDuck is NOT a schema constraint — it is only a one-time data source via importer. See `docs/design-decisions.md` for locked architectural decisions (ULID IDs, decimal money — `DECIMAL(19,2)`, literal value, `*Minor` field names retained, stock ledger, snapshot pattern, wipe-and-restore importer). Read that before writing schema or migrations.
 
 ---
 

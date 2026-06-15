@@ -20,6 +20,7 @@ import { trackingAccountLedger, trackingAccounts } from "../db/schema/tracking.t
 import { vendorLedger, vendors } from "../db/schema/vendors.ts";
 import { isKnownAccountCategory } from "../lib/account-categories.ts";
 import { db } from "../lib/db.ts";
+import { roundMoney } from "../lib/money.ts";
 
 /** A reporting period given as inclusive `YYYY-MM-DD` date strings. */
 export interface DateRange {
@@ -146,10 +147,10 @@ function splitTax(
 ): { taxMinor: number; netRevenueMinor: number } {
   if (rateBps === 0) return { taxMinor: 0, netRevenueMinor: netChargedMinor };
   if (mode === "tax_inclusive") {
-    const taxMinor = Math.round((netChargedMinor * rateBps) / (10000 + rateBps));
+    const taxMinor = roundMoney((netChargedMinor * rateBps) / (10000 + rateBps));
     return { taxMinor, netRevenueMinor: netChargedMinor - taxMinor };
   }
-  const taxMinor = Math.round((netChargedMinor * rateBps) / 10000);
+  const taxMinor = roundMoney((netChargedMinor * rateBps) / 10000);
   return { taxMinor, netRevenueMinor: netChargedMinor };
 }
 

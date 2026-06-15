@@ -14,6 +14,7 @@ import {
 } from "../db/schema/customers.ts";
 import { productVariants } from "../db/schema/products.ts";
 import { db } from "../lib/db.ts";
+import { isMoney } from "../lib/money.ts";
 
 export type CustomerErrorCode =
   | "CUSTOMER_NOT_FOUND"
@@ -160,11 +161,11 @@ export async function setCustomerCreditLimit(
   await loadCustomer(id);
   if (
     creditLimitMinor !== null &&
-    (!Number.isInteger(creditLimitMinor) || creditLimitMinor < 0)
+    (!isMoney(creditLimitMinor) || creditLimitMinor < 0)
   ) {
     throw new CustomerError(
       "INVALID_INPUT",
-      "credit limit must be a non-negative integer or null",
+      "credit limit must be a non-negative amount or null",
     );
   }
   await db
@@ -214,7 +215,7 @@ export async function recordDebtPayment(input: {
   note?: string | null;
   createdByUserId: string;
 }): Promise<Customer> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
     throw new CustomerError(
       "INVALID_INPUT",
       "payment amount must be a positive integer",
@@ -256,7 +257,7 @@ export async function adjustCustomerBalance(input: {
   note: string;
   createdByUserId: string;
 }): Promise<Customer> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor === 0) {
+  if (!isMoney(input.amountMinor) || input.amountMinor === 0) {
     throw new CustomerError(
       "INVALID_INPUT",
       "adjustment amount must be a non-zero integer",
@@ -326,7 +327,7 @@ export async function setCustomerPrice(input: {
   priceMinor: number;
 }): Promise<CustomerPrice> {
   await loadCustomer(input.customerId);
-  if (!Number.isInteger(input.priceMinor) || input.priceMinor < 0) {
+  if (!isMoney(input.priceMinor) || input.priceMinor < 0) {
     throw new CustomerError(
       "INVALID_INPUT",
       "price must be a non-negative integer",

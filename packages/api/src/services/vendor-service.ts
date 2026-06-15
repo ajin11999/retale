@@ -12,6 +12,7 @@ import {
   vendors,
 } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { isMoney } from "../lib/money.ts";
 
 export type VendorErrorCode =
   | "VENDOR_NOT_FOUND"
@@ -200,7 +201,7 @@ export async function postPurchaseOnAccount(
     createdByUserId?: string | null;
   },
 ): Promise<void> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) return;
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) return;
   await tx.insert(vendorLedger).values({
     id: ulid(),
     vendorId: input.vendorId,
@@ -268,7 +269,7 @@ export async function recordVendorPayment(input: {
   note?: string | null;
   createdByUserId: string;
 }): Promise<Vendor> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
     throw new VendorError("INVALID_INPUT", "payment amount must be a positive integer");
   }
   return db.transaction(async (tx) => {
@@ -307,7 +308,7 @@ export async function adjustVendorBalance(input: {
   note: string;
   createdByUserId: string;
 }): Promise<Vendor> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor === 0) {
+  if (!isMoney(input.amountMinor) || input.amountMinor === 0) {
     throw new VendorError("INVALID_INPUT", "adjustment amount must be a non-zero integer");
   }
   if (!input.note.trim()) {

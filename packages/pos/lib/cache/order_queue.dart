@@ -23,7 +23,7 @@ class QueuedOrder {
   final List<Map<String, dynamic>> items;
   final List<Map<String, dynamic>> payments;
   final String createdAt;
-  final int totalMinor;
+  final num totalMinor;
 
   Map<String, dynamic> toJson() => {
         'localId': localId,
@@ -46,7 +46,7 @@ class QueuedOrder {
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList(),
         createdAt: j['createdAt'] as String,
-        totalMinor: (j['totalMinor'] as num).round(),
+        totalMinor: j['totalMinor'] as num,
       );
 }
 

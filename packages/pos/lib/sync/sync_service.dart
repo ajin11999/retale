@@ -56,7 +56,7 @@ class SyncService extends ChangeNotifier {
     String? customerId,
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> payments,
-    required int totalMinor,
+    required num totalMinor,
     bool queueWhenOffline = true,
   }) async {
     try {

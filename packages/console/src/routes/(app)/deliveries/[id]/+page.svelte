@@ -582,7 +582,7 @@
   function startEdit(it: Item) {
     editingId = it.id;
     eIsLeaf = it.purchaseItemId != null;
-    eUnitCost = eIsLeaf && it.qty ? Math.round(it.costMinor / it.qty) : 0;
+    eUnitCost = eIsLeaf && it.qty ? Math.round((it.costMinor / it.qty) * 100) / 100 : 0;
     eDesc = it.description;
     eCost = it.costMinor;
     eQty = it.qty == null ? "" : String(it.qty);

@@ -8,7 +8,6 @@
 import { relations } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
-  bigint,
   foreignKey,
   index,
   mysqlEnum,
@@ -19,7 +18,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { posSessions } from "./pos.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** Ledger event categories. `amount_minor` is positive when the balance grows. */
 export const TRACKING_LEDGER_TYPES = [
@@ -59,7 +58,7 @@ export const trackingAccounts = mysqlTable(
     accountCategory: varchar({ length: 100 }).notNull(),
     counterCategory: varchar({ length: 100 }).notNull(),
     notes: text(),
-    balanceMinor: bigint({ mode: "number" }).notNull().default(0),
+    balanceMinor: money().notNull().default(0),
     archivedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     ...timestamps,
@@ -85,7 +84,7 @@ export const trackingAccountLedger = mysqlTable(
     trackingAccountId: ulidRef().notNull(),
     type: mysqlEnum(TRACKING_LEDGER_TYPES).notNull(),
     // Positive = balance increases (attribution, deposit).
-    amountMinor: bigint({ mode: "number" }).notNull(),
+    amountMinor: money().notNull(),
     refType: mysqlEnum(TRACKING_LEDGER_REF_TYPES),
     refId: ulidRef(),
     counterCategoryOverride: varchar({ length: 100 }),

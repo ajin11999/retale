@@ -6,7 +6,7 @@ function w(text: string, x0: number, y0: number, confidence = 90): OcrWord {
   return { text, confidence, bbox: { x0, y0, x1: x0 + text.length * 10, y1: y0 + 20 } };
 }
 
-describe("parseMoneyId (whole-rupiah minor units, id-ID)", () => {
+describe("parseMoneyId (literal rupiah, up to 2 decimals, id-ID)", () => {
   test("dot is the thousands separator", () => {
     expect(parseMoneyId("25.000")).toBe(25000);
     expect(parseMoneyId("3.500")).toBe(3500);
@@ -17,9 +17,9 @@ describe("parseMoneyId (whole-rupiah minor units, id-ID)", () => {
     expect(parseMoneyId("Rp 25.000")).toBe(25000);
     expect(parseMoneyId("IDR1.000")).toBe(1000);
   });
-  test("comma is the decimal separator; sub-rupiah rounds", () => {
-    expect(parseMoneyId("1.234.567,89")).toBe(1234568);
-    expect(parseMoneyId("3,5")).toBe(4);
+  test("comma is the decimal separator; sub-cent rounds", () => {
+    expect(parseMoneyId("1.234.567,89")).toBe(1234567.89);
+    expect(parseMoneyId("3,5")).toBe(3.5);
   });
   test("a bare comma group still reads as thousands", () => {
     expect(parseMoneyId("25,000")).toBe(25000);

@@ -181,14 +181,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _closeShift() async {
     // Best effort: the dialog still works offline, just without the figure.
-    int? expectedCash;
+    num? expectedCash;
     try {
       final data = await GraphQLService.instance.query(
         Ops.sessionExpectedCash,
         variables: {'id': widget.session.id},
       );
       final session = data['posSession'] as Map<String, dynamic>?;
-      expectedCash = (session?['expectedCashMinor'] as num?)?.toInt();
+      expectedCash = session?['expectedCashMinor'] as num?;
     } on GraphQLAppException {
       expectedCash = null;
     }
@@ -372,8 +372,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _pickOpenPrice(Product product) async {
     if (product.variants.isEmpty) return;
     final controller = TextEditingController();
-    int submit() => Money.parse(controller.text);
-    final priceMinor = await showDialog<int>(
+    num submit() => Money.parse(controller.text);
+    final priceMinor = await showDialog<num>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(product.publicDisplayName),
@@ -1094,7 +1094,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
 
   /// Signed cash balance: tendered − total. Positive is change owed back to the
   /// customer; negative is how much they still need to hand over.
-  int get _balanceMinor => Money.parse(_tendered.text) - widget.cart.totalMinor;
+  num get _balanceMinor => Money.parse(_tendered.text) - widget.cart.totalMinor;
 
   Future<void> _pickCustomer() async {
     final picked = await showModalBottomSheet<Customer>(
@@ -1299,9 +1299,9 @@ class _CompletedSale {
 
   final String? displayNumber;
   final List<ReceiptLine> lines;
-  final int totalMinor;
-  final int? paidMinor;
-  final int? onAccountMinor;
+  final num totalMinor;
+  final num? paidMinor;
+  final num? onAccountMinor;
   final Customer? customer;
   final DateTime createdAt;
 }
@@ -1319,10 +1319,10 @@ class _CheckoutOutcome {
 
   final SubmitResult result;
   final Customer? customer;
-  final int? paidMinor;
+  final num? paidMinor;
 
   /// The remainder charged to the customer's account; null when paid in full.
-  final int? onAccountMinor;
+  final num? onAccountMinor;
 }
 
 /// The "Walk-in customer" sentinel the picker returns to clear an attached

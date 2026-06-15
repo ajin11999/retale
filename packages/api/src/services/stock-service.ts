@@ -16,6 +16,7 @@ import {
   stockMovements,
 } from "../db/schema/stock.ts";
 import { db } from "../lib/db.ts";
+import { roundMoney } from "../lib/money.ts";
 
 export type MovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 export type RefType = (typeof STOCK_REF_TYPES)[number];
@@ -95,7 +96,7 @@ function weightedAverage(
   recvCost: number,
 ): number {
   if (curQty <= 0 || curQty + recvQty <= 0) return recvCost;
-  return Math.round((curQty * curCost + recvQty * recvCost) / (curQty + recvQty));
+  return roundMoney((curQty * curCost + recvQty * recvCost) / (curQty + recvQty));
 }
 
 async function recordMovementTx(tx: Tx, input: RecordMovementInput): Promise<Movement> {

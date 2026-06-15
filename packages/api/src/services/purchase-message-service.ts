@@ -8,6 +8,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { products, productVariants } from "../db/schema/products.ts";
 import { db } from "../lib/db.ts";
+import { formatRp } from "../lib/money.ts";
 import { getBusinessSettings } from "./business-service.ts";
 import {
   getPurchase,
@@ -23,14 +24,8 @@ export interface PurchaseMessage {
   body: string;
 }
 
-/** Group an integer with "." thousands separators — Indonesian style. */
-function groupThousands(n: number): string {
-  return Math.trunc(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-const rp = (minor: number): string => `Rp ${groupThousands(minor)}`;
+/** Money for display: "Rp 1,500,000.5" (international grouping, trimmed 2dp). */
+const rp = (value: number): string => formatRp(value);
 
 /**
  * Render a purchase order as a sendable message. Throws PurchaseError

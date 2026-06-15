@@ -373,8 +373,8 @@ describe("commitDelivery", () => {
 
     await commitDelivery(delivery.id, userId);
 
-    // Lubricant: (24000 base + 2400 customs + 40000 carton) / 24 = 2766.67 → 2767.
-    expect((await getVariant(lube))?.costMinor).toBe(2767);
+    // Lubricant: (24000 base + 2400 customs + 40000 carton) / 24 = 2766.67.
+    expect((await getVariant(lube))?.costMinor).toBe(2766.67);
     // Brake pad: (20000 base + 2000 customs) / 10 = 2200. Carton never touches it.
     expect((await getVariant(pad))?.costMinor).toBe(2200);
   });

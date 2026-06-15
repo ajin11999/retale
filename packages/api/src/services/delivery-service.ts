@@ -16,6 +16,7 @@ import { productVariants, products } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { allocateProportional, isMoney, roundMoney } from "../lib/money.ts";
 import { recordMovement } from "./stock-service.ts";
 import {
   postPurchaseOnAccount,
@@ -237,7 +238,7 @@ export async function createDeliveryItem(input: {
   if (!input.description.trim()) {
     throw new DeliveryError("INVALID_INPUT", "description is required");
   }
-  if (!Number.isInteger(input.costMinor) || input.costMinor < 0) {
+  if (!isMoney(input.costMinor) || input.costMinor < 0) {
     throw new DeliveryError("INVALID_INPUT", "costMinor must be a non-negative integer");
   }
   if (input.parentItemId) {
@@ -347,7 +348,7 @@ export async function updateDeliveryItem(
   }
   if (
     patch.costMinor !== undefined &&
-    (!Number.isInteger(patch.costMinor) || patch.costMinor < 0)
+    (!isMoney(patch.costMinor) || patch.costMinor < 0)
   ) {
     throw new DeliveryError("INVALID_INPUT", "costMinor must be a non-negative integer");
   }
@@ -554,8 +555,8 @@ export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLand
     const freight = freightByLeaf.get(l.id) ?? 0;
     const isStock = lines.get(l.purchaseItemId as string)?.variantId != null;
     const rate = pool.get(l.purchaseItemId as string)?.ratePerUnit ?? 0;
-    const transit = isStock ? Math.round(qty * rate) : 0;
-    const landed = l.costMinor + freight + transit;
+    const transit = isStock ? roundMoney(qty * rate) : 0;
+    const landed = roundMoney(l.costMinor + freight + transit);
     return {
       itemId: l.id,
       qty,
@@ -563,7 +564,7 @@ export async function deliveryLeafLandings(deliveryId: string): Promise<LeafLand
       freightMinor: freight,
       transitFreightMinor: transit,
       landedCostMinor: landed,
-      landedUnitCostMinor: qty > 0 ? Math.round(landed / qty) : 0,
+      landedUnitCostMinor: qty > 0 ? roundMoney(landed / qty) : 0,
       isStock,
     };
   });
@@ -645,21 +646,12 @@ function allocateFreightByValue(
   const spread = (pool: number, targets: DeliveryItem[]) => {
     const base = targets.reduce((sum, l) => sum + l.costMinor, 0);
     if (pool <= 0 || base <= 0) return;
-    const remainders: { id: string; rem: number }[] = [];
-    let handed = 0;
-    for (const l of targets) {
-      const exact = (pool * l.costMinor) / base;
-      const floor = Math.floor(exact);
-      out.set(l.id, (out.get(l.id) ?? 0) + floor);
-      remainders.push({ id: l.id, rem: exact - floor });
-      handed += floor;
-    }
-    // Hand the leftover cents to the largest fractional shares first; the
-    // leftover is always < the leaf count, so one pass over the top suffices.
-    remainders.sort((a, b) => b.rem - a.rem);
-    for (const { id } of remainders.slice(0, pool - handed)) {
-      out.set(id, (out.get(id) ?? 0) + 1);
-    }
+    // Spread the pool over the leaves by value, rounded to whole 0.01s so the
+    // shares sum back to the pool exactly (largest-remainder).
+    const shares = allocateProportional(pool, targets.map((l) => l.costMinor));
+    targets.forEach((l, i) => {
+      out.set(l.id, roundMoney((out.get(l.id) ?? 0) + shares[i]!));
+    });
   };
 
   for (const node of items) {
@@ -919,15 +911,16 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
 
       const qty = leaf.qty as number;
       const rate = pool.get(leaf.purchaseItemId as string)?.ratePerUnit ?? 0;
-      const landed =
-        leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0) + Math.round(qty * rate);
+      const landed = roundMoney(
+        leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0) + qty * rate,
+      );
       await recordMovement(
         {
           variantId: pi.variantId,
           locationId: delivery.targetLocationId,
           type: "purchase_receive",
           qtyDelta: qty,
-          unitCost: Math.round(landed / qty),
+          unitCost: roundMoney(landed / qty),
           refType: "purchase",
           refId: delivery.id,
           createdByUserId: userId,

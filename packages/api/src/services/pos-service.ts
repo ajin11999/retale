@@ -9,6 +9,7 @@ import { ulid } from "ulid";
 import { orderItems, orderPayments, orders } from "../db/schema/orders.ts";
 import { pointsOfSale, posSessions } from "../db/schema/pos.ts";
 import { db } from "../lib/db.ts";
+import { isMoney } from "../lib/money.ts";
 import { postSessionAttribution } from "./order-service.ts";
 
 export type PosErrorCode =
@@ -198,11 +199,8 @@ export async function openSession(input: {
   openedByUserId: string;
   notes?: string | null;
 }): Promise<Session> {
-  if (
-    !Number.isInteger(input.openingCashMinor) ||
-    input.openingCashMinor < 0
-  ) {
-    throw new PosError("INVALID_INPUT", "opening cash must be a non-negative integer");
+  if (!isMoney(input.openingCashMinor) || input.openingCashMinor < 0) {
+    throw new PosError("INVALID_INPUT", "opening cash must be a non-negative amount");
   }
   const pos = await loadPos(input.posId);
   if (pos.archivedAt) {
@@ -318,8 +316,8 @@ export async function closeSession(input: {
   closingCashMinor: number;
   closedByUserId: string;
 }): Promise<Session> {
-  if (!Number.isInteger(input.closingCashMinor) || input.closingCashMinor < 0) {
-    throw new PosError("INVALID_INPUT", "closing cash must be a non-negative integer");
+  if (!isMoney(input.closingCashMinor) || input.closingCashMinor < 0) {
+    throw new PosError("INVALID_INPUT", "closing cash must be a non-negative amount");
   }
   return db.transaction(async (tx) => {
     const session = await tx.query.posSessions.findFirst({

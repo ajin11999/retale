@@ -267,6 +267,13 @@
       "when": 1781189465360,
       "tag": "0037_bitter_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1781519860899,
+      "tag": "0038_nasty_giant_girl",
+      "breakpoints": true
     }
   ]
 }

@@ -8,9 +8,12 @@
 // the console renders as "unrecognized, please fill manually" (the explicit
 // product requirement). The confirm-and-fix modal is the safety net for the rest.
 //
-// Money is integer **minor units = whole rupiah** (see money-input.svelte /
-// formatMoney in the console): "25.000" → 25000, no ×100. id-ID grouping is `.`
-// for thousands and `,` for the decimal.
+// Money is the literal rupiah value with up to 2 decimals (see formatMoney /
+// money-input.svelte in the console): "25.000" → 25000, "25,5" → 25.5, no
+// scaling. Vendor invoices are still printed id-ID, so grouping here is `.` for
+// thousands and `,` for the decimal.
+
+import { roundMoney } from "../lib/money.ts";
 
 /** One positioned word. OCR gives confidence 0–100; PDF text items pass 100. */
 export interface OcrWord {
@@ -39,10 +42,9 @@ const centerY = (w: OcrWord) => (w.bbox.y0 + w.bbox.y1) / 2;
 const mean = (ns: number[]) => (ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : 0);
 
 /**
- * Parse one numeric string to whole rupiah, or null if it isn't a number.
- * Accepts an optional currency prefix (Rp / IDR / $) and id-ID grouping. When a
- * value carries a sub-rupiah decimal it is rounded, since the minor unit is the
- * rupiah.
+ * Parse one numeric string to a money amount (up to 2 decimals), or null if it
+ * isn't a number. Accepts an optional currency prefix (Rp / IDR / $) and id-ID
+ * grouping. A finer-than-cent value is rounded to 2 decimals.
  */
 export function parseMoneyId(input: string): number | null {
   let t = input.replace(/^\s*(rp\.?|idr|\$)\s*/i, "").replace(/\s*(rp|idr)\s*$/i, "").trim();
@@ -69,7 +71,7 @@ export function parseMoneyId(input: string): number | null {
 
   const value = parseFloat(normalized);
   if (Number.isNaN(value)) return null;
-  return Math.round(neg ? -value : value);
+  return roundMoney(neg ? -value : value);
 }
 
 /**

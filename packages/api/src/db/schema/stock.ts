@@ -9,7 +9,7 @@ import { bigint, index, mysqlEnum, mysqlTable, timestamp, unique, varchar } from
 import { users } from "./auth.ts";
 import { locations } from "./locations.ts";
 import { productVariants } from "./products.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** The nine recognized movement types. Only `purchase_receive`, `cost_override`,
  *  and `initial_import` change a variant's WAC `cost_minor`. */
@@ -73,9 +73,9 @@ export const stockMovements = mysqlTable(
     locationId: ulidRef().references(() => locations.id, { onDelete: "set null" }),
     type: mysqlEnum(STOCK_MOVEMENT_TYPES).notNull(),
     qtyDelta: bigint({ mode: "number" }).notNull(),
-    unitCost: bigint({ mode: "number" }).notNull().default(0),
+    unitCost: money().notNull().default(0),
     // Only set on cost_override rows — the WAC before the override, for audit.
-    previousCost: bigint({ mode: "number" }),
+    previousCost: money(),
     refType: mysqlEnum(STOCK_REF_TYPES).notNull(),
     refId: ulidRef(),
     reason: varchar({ length: 500 }),

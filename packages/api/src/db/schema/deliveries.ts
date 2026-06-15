@@ -22,7 +22,7 @@ import { users } from "./auth.ts";
 import { locations } from "./locations.ts";
 import { purchaseItems, purchases } from "./purchases.ts";
 import { vendors } from "./vendors.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** `delivered` is set by the commit transaction; `cancelled` reverses it (root only). */
 export const DELIVERY_STATUSES = ["draft", "delivered", "cancelled"] as const;
@@ -60,7 +60,7 @@ export const purchaseDeliveries = mysqlTable("purchase_deliveries", {
   status: mysqlEnum(DELIVERY_STATUSES).notNull().default("draft"),
   deliveredAt: timestamp(),
   deliveredByUserId: ulidRef().references(() => users.id),
-  totalCostMinor: bigint({ mode: "number" }).notNull().default(0),
+  totalCostMinor: money().notNull().default(0),
   createdByUserId: ulidRef().references(() => users.id),
   ...timestamps,
 });
@@ -94,12 +94,12 @@ export const purchaseDeliveryItems = mysqlTable(
     description: varchar({ length: 300 }).notNull(),
     // Set only on leaves; in the variant's smallest unit.
     qty: bigint({ mode: "number" }),
-    costMinor: bigint({ mode: "number" }).notNull(),
+    costMinor: money().notNull(),
     // Frozen value-weighted freight share, written per stock leaf when a
     // *transit* delivery commits. The per-PO-item transit cost pool is derived
     // from these rows (over delivered transit deliveries); cancelling a transit
     // delivery removes its contribution via the status filter — never rewritten.
-    allocatedFreightMinor: bigint({ mode: "number" }),
+    allocatedFreightMinor: money(),
     sortOrder: int().notNull().default(0),
   },
   (t) => [

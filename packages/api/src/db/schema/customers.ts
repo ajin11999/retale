@@ -6,7 +6,6 @@
 
 import { relations, sql } from "drizzle-orm";
 import {
-  bigint,
   index,
   mysqlEnum,
   mysqlTable,
@@ -18,7 +17,7 @@ import {
 import { users } from "./auth.ts";
 import { posSessions } from "./pos.ts";
 import { productVariants } from "./products.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** Ledger event categories. `amount_minor` is positive when the customer owes more. */
 export const CUSTOMER_LEDGER_TYPES = [
@@ -57,9 +56,9 @@ export const customers = mysqlTable(
     address: text(),
     notes: text(),
     // Cached sum of customer_ledger.amount_minor. Positive = they owe us.
-    balanceMinor: bigint({ mode: "number" }).notNull().default(0),
+    balanceMinor: money().notNull().default(0),
     // null = no credit limit.
-    creditLimitMinor: bigint({ mode: "number" }),
+    creditLimitMinor: money(),
     archivedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     // Lowercased name + phone for LIKE search. Stored + indexed; same MariaDB
@@ -94,7 +93,7 @@ export const customerLedger = mysqlTable(
     type: mysqlEnum(CUSTOMER_LEDGER_TYPES).notNull(),
     // Positive = the customer owes more (sale on account); negative = they owe
     // less (payment, credit). Signed so the running balance is a plain SUM.
-    amountMinor: bigint({ mode: "number" }).notNull(),
+    amountMinor: money().notNull(),
     refType: mysqlEnum(CUSTOMER_LEDGER_REF_TYPES),
     refId: ulidRef(),
     // Required for `adjustment` rows — checked in the service layer.
@@ -126,7 +125,7 @@ export const customerPrices = mysqlTable(
     variantId: ulidRef()
       .notNull()
       .references(() => productVariants.id, { onDelete: "cascade" }),
-    priceMinor: bigint({ mode: "number" }).notNull(),
+    priceMinor: money().notNull(),
     ...timestamps,
   },
   (t) => [

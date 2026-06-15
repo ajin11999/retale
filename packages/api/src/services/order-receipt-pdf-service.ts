@@ -11,6 +11,7 @@
 // the PO PDF there is no price-visibility toggle.
 
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { formatRp } from "../lib/money.ts";
 import { BUSINESS_LOGO_PATH } from "../lib/uploads.ts";
 import { getBusinessSettings } from "./business-service.ts";
 import { getCustomer } from "./customer-service.ts";
@@ -69,13 +70,8 @@ function sanitize(text: string): string {
     .replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
 }
 
-/** Group an integer with "." thousands separators — Indonesian style. */
-function groupThousands(n: number): string {
-  return Math.trunc(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-const rp = (minor: number): string => `Rp ${groupThousands(minor)}`;
+/** Money for display: "Rp 1,500,000.5" (international grouping, trimmed 2dp). */
+const rp = (value: number): string => formatRp(value);
 const dateOnly = (d: Date | string): string => new Date(d).toISOString().slice(0, 10);
 
 /** Break a line to fit `maxWidthMm`, splitting on spaces. */

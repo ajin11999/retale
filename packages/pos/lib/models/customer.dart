@@ -14,18 +14,18 @@ class Customer {
   final String name;
   final String? phone;
 
-  /// Outstanding account balance (what the customer owes), in minor units.
-  final int balanceMinor;
+  /// Outstanding account balance (what the customer owes), in rupiah.
+  final num balanceMinor;
 
-  /// Credit cap in minor units; null means no limit is set.
-  final int? creditLimitMinor;
+  /// Credit cap in rupiah; null means no limit is set.
+  final num? creditLimitMinor;
 
   factory Customer.fromJson(Map<String, dynamic> json) => Customer(
         id: json['id'] as String,
         name: json['name'] as String,
         phone: json['phone'] as String?,
-        balanceMinor: (json['balanceMinor'] as num?)?.toInt() ?? 0,
-        creditLimitMinor: (json['creditLimitMinor'] as num?)?.toInt(),
+        balanceMinor: (json['balanceMinor'] as num?) ?? 0,
+        creditLimitMinor: json['creditLimitMinor'] as num?,
       );
 
   bool get hasPhone => phone != null && phone!.trim().isNotEmpty;

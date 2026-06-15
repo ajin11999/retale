@@ -25,8 +25,8 @@ class ReceiptLine {
 
   final String name;
   final int qty;
-  final int unitPriceMinor;
-  final int lineTotalMinor;
+  final num unitPriceMinor;
+  final num lineTotalMinor;
 
   /// Unit of measure — "piece", "g", "ml", "mm"; null on receipts rebuilt
   /// from orders that predate the unit snapshot.
@@ -50,15 +50,15 @@ class Receipt {
 
   final StoreInfo store;
   final List<ReceiptLine> lines;
-  final int totalMinor;
+  final num totalMinor;
   final String? displayNumber;
   final DateTime? createdAt;
-  final int? paidMinor;
-  final int? changeMinor;
+  final num? paidMinor;
+  final num? changeMinor;
 
   /// Unpaid remainder charged to the customer's account; null when paid in
   /// full.
-  final int? onAccountMinor;
+  final num? onAccountMinor;
   final String? customerName;
 
   static final _dateFmt = DateFormat('yyyy-MM-dd HH:mm');
@@ -77,16 +77,16 @@ class Receipt {
         .map((it) => ReceiptLine(
               name: it['displayName'] as String,
               qty: (it['qty'] as num).toInt(),
-              unitPriceMinor: (it['snapshotPriceMinor'] as num).toInt(),
-              lineTotalMinor: (it['lineTotalMinor'] as num).toInt(),
+              unitPriceMinor: it['snapshotPriceMinor'] as num,
+              lineTotalMinor: it['lineTotalMinor'] as num,
               unit: it['snapshotUnit'] as String?,
             ))
         .toList();
     final paid = (order['payments'] as List<dynamic>)
         .cast<Map<String, dynamic>>()
-        .fold<int>(0, (sum, p) => sum + (p['amountMinor'] as num).toInt());
+        .fold<num>(0, (sum, p) => sum + (p['amountMinor'] as num));
     final customer = order['customer'] as Map<String, dynamic>?;
-    final total = (order['totalMinor'] as num).toInt();
+    final total = order['totalMinor'] as num;
     return Receipt(
       store: store,
       lines: lines,

@@ -104,8 +104,8 @@ async function expectError(
 
 describe("masking", () => {
   test("maskPricePeek keeps the leading digit and groups thousands", () => {
-    expect(maskPricePeek(250000)).toBe("2xx.xxx");
-    expect(maskPricePeek(1500)).toBe("1.xxx");
+    expect(maskPricePeek(250000)).toBe("2xx,xxx");
+    expect(maskPricePeek(1500)).toBe("1,xxx");
     expect(maskPricePeek(9)).toBe("9");
   });
 
@@ -144,7 +144,7 @@ describe("buildCatalogSnapshot", () => {
     await seedProduct({ onlineVisible: true, priceMode: "peek", priceMinor: 250000 });
     v = (await buildCatalogSnapshot()).products[0]?.variants[0];
     expect(v?.priceMinor).toBeUndefined();
-    expect(v?.pricePeek).toBe("2xx.xxx");
+    expect(v?.pricePeek).toBe("2xx,xxx");
 
     await wipe();
     await seedProduct({ onlineVisible: true, priceMode: "exclude", priceMinor: 250000 });

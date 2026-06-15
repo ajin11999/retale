@@ -233,7 +233,9 @@
               <td class="px-3 py-1.5">
                 {#if row.status === "created"}
                   <span class="text-muted-foreground"
-                    >{row.priceMinor?.toLocaleString("id-ID")}</span
+                    >{row.priceMinor?.toLocaleString("en-US", {
+                      maximumFractionDigits: 2,
+                    })}</span
                   >
                 {:else}
                   <MoneyInput bind:value={row.priceMinor} disabled={busy} />
@@ -242,7 +244,9 @@
               <td class="px-3 py-1.5">
                 {#if row.status === "created"}
                   <span class="text-muted-foreground"
-                    >{row.costMinor?.toLocaleString("id-ID") ?? "—"}</span
+                    >{row.costMinor?.toLocaleString("en-US", {
+                      maximumFractionDigits: 2,
+                    }) ?? "—"}</span
                   >
                 {:else}
                   <MoneyInput bind:value={row.costMinor} disabled={busy} />

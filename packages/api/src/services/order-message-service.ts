@@ -5,6 +5,7 @@
 // shows the public-facing name snapshotted at sale time. Pure read — no side
 // effects, no PDF (that lives in order-receipt-pdf-service.ts).
 
+import { formatRp } from "../lib/money.ts";
 import { getCustomer } from "./customer-service.ts";
 import { getBusinessSettings } from "./business-service.ts";
 import { getOrder, listOrderItems, listOrderPayments } from "./order-service.ts";
@@ -19,14 +20,8 @@ export interface OrderMessage {
   body: string;
 }
 
-/** Group an integer with "." thousands separators — Indonesian style. */
-function groupThousands(n: number): string {
-  return Math.trunc(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-const rp = (minor: number): string => `Rp ${groupThousands(minor)}`;
+/** Money for display: "Rp 1,500,000.5" (international grouping, trimmed 2dp). */
+const rp = (value: number): string => formatRp(value);
 
 /** A timestamp / date as a plain YYYY-MM-DD string. */
 const dateOnly = (d: Date | string): string => new Date(d).toISOString().slice(0, 10);

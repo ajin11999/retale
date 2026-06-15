@@ -16,6 +16,7 @@ import {
 import { vendorVariantCodes } from "../db/schema/vendor-variant-codes.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
+import { isMoney } from "../lib/money.ts";
 
 export type PurchaseErrorCode =
   | "PURCHASE_NOT_FOUND"
@@ -438,8 +439,8 @@ export async function resourcePurchaseItems(input: {
 
     const unitCostMinor =
       r.unitCostMinor ?? (variantId ? lastCosts.get(variantId) : undefined) ?? 0;
-    if (!Number.isInteger(unitCostMinor) || unitCostMinor < 0) {
-      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+    if (!isMoney(unitCostMinor) || unitCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative amount");
     }
 
     prepared.push({ sourceItem, variantId, description, qty: r.qty, unitCostMinor });
@@ -643,8 +644,8 @@ export async function createItem(input: {
   if (!Number.isInteger(input.qtyOrdered) || input.qtyOrdered <= 0) {
     throw new PurchaseError("INVALID_INPUT", "qtyOrdered must be a positive integer");
   }
-  if (!Number.isInteger(input.unitCostMinor) || input.unitCostMinor < 0) {
-    throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+  if (!isMoney(input.unitCostMinor) || input.unitCostMinor < 0) {
+    throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative amount");
   }
 
   const id = ulid();
@@ -706,8 +707,8 @@ export async function createItems(input: {
     if (!Number.isInteger(line.qtyOrdered) || line.qtyOrdered <= 0) {
       throw new PurchaseError("INVALID_INPUT", "qtyOrdered must be a positive integer");
     }
-    if (!Number.isInteger(line.unitCostMinor) || line.unitCostMinor < 0) {
-      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+    if (!isMoney(line.unitCostMinor) || line.unitCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative amount");
     }
     prepared.push({
       id: ulid(),
@@ -780,7 +781,7 @@ export async function updateItem(
   }
   if (
     patch.unitCostMinor !== undefined &&
-    (!Number.isInteger(patch.unitCostMinor) || patch.unitCostMinor < 0)
+    (!isMoney(patch.unitCostMinor) || patch.unitCostMinor < 0)
   ) {
     throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
   }

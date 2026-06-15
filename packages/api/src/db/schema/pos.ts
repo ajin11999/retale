@@ -5,7 +5,6 @@
 
 import { relations, sql } from "drizzle-orm";
 import {
-  bigint,
   boolean,
   index,
   json,
@@ -17,7 +16,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { locations } from "./locations.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /**
  * Physical register / checkout terminal, bound to the location where its cash
@@ -69,12 +68,12 @@ export const posSessions = mysqlTable(
     openedAt: timestamp()
       .notNull()
       .$defaultFn(() => new Date()),
-    openingCashMinor: bigint({ mode: "number" }).notNull(),
+    openingCashMinor: money().notNull(),
     closedByUserId: ulidRef().references(() => users.id),
     closedAt: timestamp(),
     // Null when force-closed.
-    closingCashMinor: bigint({ mode: "number" }),
-    varianceMinor: bigint({ mode: "number" }),
+    closingCashMinor: money(),
+    varianceMinor: money(),
     forceClosed: boolean().notNull().default(false),
     // Denormalized totals snapshot, written at close.
     zReportJson: json(),

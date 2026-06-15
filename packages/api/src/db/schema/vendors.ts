@@ -6,7 +6,6 @@
 
 import { relations, sql } from "drizzle-orm";
 import {
-  bigint,
   date,
   index,
   int,
@@ -19,7 +18,7 @@ import {
 import { addresses } from "./addresses.ts";
 import { users } from "./auth.ts";
 import { posSessions } from "./pos.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /**
  * Channels a purchase order can be sent over from the send screen. A vendor's
@@ -88,7 +87,7 @@ export const vendors = mysqlTable(
       onDelete: "set null",
     }),
     // Cached sum of vendor_ledger.amount_minor. Positive = we owe them.
-    balanceMinor: bigint({ mode: "number" }).notNull().default(0),
+    balanceMinor: money().notNull().default(0),
     archivedAt: timestamp(),
     createdByUserId: ulidRef().references(() => users.id),
     // Lowercased name + phone for LIKE search. Stored + indexed; same MariaDB
@@ -124,7 +123,7 @@ export const vendorLedger = mysqlTable(
     type: mysqlEnum(VENDOR_LEDGER_TYPES).notNull(),
     // Positive = we owe more (purchase on account); negative = we owe less
     // (payment, credit). Signed so the running balance is a plain SUM.
-    amountMinor: bigint({ mode: "number" }).notNull(),
+    amountMinor: money().notNull(),
     refType: mysqlEnum(VENDOR_LEDGER_REF_TYPES),
     refId: ulidRef(),
     // When this charge is due, for AP aging. Set on `purchase_on_account` rows

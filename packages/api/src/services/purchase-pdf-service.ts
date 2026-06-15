@@ -11,6 +11,7 @@ import { eq, inArray } from "drizzle-orm";
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from "pdf-lib";
 import { products, productVariants } from "../db/schema/products.ts";
 import { db } from "../lib/db.ts";
+import { formatRp } from "../lib/money.ts";
 import { BUSINESS_LOGO_PATH } from "../lib/uploads.ts";
 import { resolveShipTo } from "./address-service.ts";
 import { getBusinessSettings } from "./business-service.ts";
@@ -126,13 +127,8 @@ function sanitize(text: string): string {
   return text.replace(/[—–]/g, "-").replace(/[·•]/g, "-").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
 }
 
-/** Group an integer with "." thousands separators — Indonesian style. */
-function groupThousands(n: number): string {
-  return Math.trunc(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-const rp = (minor: number): string => `Rp ${groupThousands(minor)}`;
+/** Money for display: "Rp 1,500,000.5" (international grouping, trimmed 2dp). */
+const rp = (value: number): string => formatRp(value);
 
 /** Break a line to fit `maxWidthMm`, splitting on spaces. */
 function wrapLine(line: string, font: PDFFont, size: number, maxWidthMm: number): string[] {

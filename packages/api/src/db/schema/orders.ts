@@ -4,8 +4,9 @@
 // status is derived, never stored — see docs/design-decisions.md → "Order
 // lifecycle" and "Payments & customer debt".
 //
-// Money is integer minor units. `order_items` carries a full snapshot of the
-// product at sale time so products stay truly deletable.
+// Money is the literal rupiah value in DECIMAL(19,2) (see the `money` helper).
+// `order_items` carries a full snapshot of the product at sale time so products
+// stay truly deletable.
 
 import { relations } from "drizzle-orm";
 import {
@@ -23,7 +24,7 @@ import { customers } from "./customers.ts";
 import { posSessions } from "./pos.ts";
 import { products, productVariants } from "./products.ts";
 import { trackingAccounts } from "./tracking.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /** Payment methods. Cash-only for v1; the enum is extensible. */
 export const ORDER_PAYMENT_METHODS = ["cash"] as const;
@@ -46,7 +47,7 @@ export const orders = mysqlTable(
     // Preserves the customer name on the order after a hard-delete. Null for walk-in.
     snapshotCustomerName: varchar({ length: 300 }),
     posSessionId: ulidRef().references(() => posSessions.id),
-    totalMinor: bigint({ mode: "number" }).notNull().default(0),
+    totalMinor: money().notNull().default(0),
     closedAt: timestamp(),
     closedByUserId: ulidRef().references(() => users.id),
     cancelledAt: timestamp(),
@@ -98,7 +99,7 @@ export const orderItems = mysqlTable(
       { onDelete: "set null" },
     ),
     qty: bigint({ mode: "number" }).notNull(),
-    discountMinor: bigint({ mode: "number" }).notNull().default(0),
+    discountMinor: money().notNull().default(0),
     // --- Snapshot of the product at sale time (locked field set) ---
     // Internal name; the source of truth for sales reports.
     snapshotProductName: varchar({ length: 300 }).notNull(),
@@ -111,9 +112,9 @@ export const orderItems = mysqlTable(
     snapshotUnit: mysqlEnum(["piece", "g", "ml", "mm"]).notNull(),
     snapshotCategoryName: varchar({ length: 200 }),
     // Price actually charged per smallest unit.
-    snapshotPriceMinor: bigint({ mode: "number" }).notNull(),
+    snapshotPriceMinor: money().notNull(),
     // WAC at sale time; 0 for services.
-    snapshotCostMinor: bigint({ mode: "number" }).notNull(),
+    snapshotCostMinor: money().notNull(),
     snapshotTaxRateBps: int().notNull(),
     snapshotPriceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),
     // Survives a hard-delete of the tracking account. Tracking domain pending.
@@ -124,7 +125,7 @@ export const orderItems = mysqlTable(
     attributionAccountId: ulidRef().references(() => trackingAccounts.id, {
       onDelete: "set null",
     }),
-    attributionAmountMinor: bigint({ mode: "number" }).notNull().default(0),
+    attributionAmountMinor: money().notNull().default(0),
     voidedAt: timestamp(),
     voidedByUserId: ulidRef().references(() => users.id),
     voidReason: varchar({ length: 255 }),
@@ -151,7 +152,7 @@ export const orderPayments = mysqlTable(
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
     method: mysqlEnum(ORDER_PAYMENT_METHODS).notNull(),
-    amountMinor: bigint({ mode: "number" }).notNull(),
+    amountMinor: money().notNull(),
     posSessionId: ulidRef().references(() => posSessions.id),
     createdByUserId: ulidRef().references(() => users.id),
     createdAt: timestamp()

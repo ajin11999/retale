@@ -32,7 +32,7 @@ class PosSession {
 
   final String id;
   final String posId;
-  final int openingCashMinor;
+  final num openingCashMinor;
   final String openedAt;
   final String? closedAt;
 
@@ -41,7 +41,7 @@ class PosSession {
   factory PosSession.fromJson(Map<String, dynamic> j) => PosSession(
         id: j['id'] as String,
         posId: j['posId'] as String,
-        openingCashMinor: (j['openingCashMinor'] as num).round(),
+        openingCashMinor: j['openingCashMinor'] as num,
         openedAt: j['openedAt'] as String,
         closedAt: j['closedAt'] as String?,
       );

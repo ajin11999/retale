@@ -92,15 +92,16 @@ export async function setProductsOnlineVisible(
 
 // --- Masking ---
 
-/** Insert "." every three characters from the right (thousands grouping). */
+/** Insert "," every three characters from the right (thousands grouping). */
 function groupThousands(s: string): string {
-  return s.replace(/\B(?=(.{3})+(?!.))/g, ".");
+  return s.replace(/\B(?=(.{3})+(?!.))/g, ",");
 }
 
 /**
  * Mask a price to its order of magnitude: keep the leading digit, hide the
- * rest, keep thousands grouping — e.g. 250000 → "2xx.xxx". The catalog adds
- * the currency prefix.
+ * rest, keep thousands grouping — e.g. 250000 → "2xx,xxx". The catalog adds
+ * the currency prefix. Operates on the whole-rupiah part (decimals are dropped
+ * from a magnitude peek).
  */
 export function maskPricePeek(minor: number): string {
   const s = Math.max(0, Math.trunc(minor)).toString();

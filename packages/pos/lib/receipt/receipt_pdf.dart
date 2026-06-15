@@ -46,7 +46,7 @@ Future<Uint8List> buildReceiptPdf(
 
   // A label/amount line (TOTAL, Cash, CHANGE). [strong] enlarges and bolds it,
   // matching ProDuck's emphasis on the total and change.
-  pw.Widget costRow(String label, int minor, {bool strong = false}) {
+  pw.Widget costRow(String label, num minor, {bool strong = false}) {
     final font = strong ? bold : regular;
     final size = strong ? 13.0 : 11.0;
     return pw.Padding(

@@ -9,7 +9,7 @@ Retale is a **fresh-design** POS/inventory backend. ProDuck is **not** a schema 
 ## Locked decisions
 
 1. **IDs — ULID.** Sortable strings, client-generatable. Not bigint autoincrement.
-2. **Money — integer minor units** (e.g. cents/rupiah), stored as `BIGINT`. Not `decimal`. Avoids decimal-as-string pain in JS.
+2. **Money — the literal rupiah value, stored as `DECIMAL(19,2)`.** **(Amended 2026-06-15.)** Originally integer minor units in `BIGINT`; switched to fixed-point decimal to support fractional rupiah ahead of the IDR redenomination (`Rp 10,500` → `Rp 10.5`). Field names keep their historical `*Minor` suffix but now hold the actual amount — `10.5` is stored as `10.50` — surfaced as a JS `number` via Drizzle `decimal({ precision: 19, scale: 2, mode: "number" })` (the `money()` helper in `db/schema/_helpers.ts`). Compute with `roundMoney` / `isMoney` and render with `formatRp` (`src/lib/money.ts`); display is international — comma thousands, dot decimal, trailing zeros trimmed. The `BIGINT *_minor` columns in the DDL snippets below should be read as `DECIMAL(19,2)`.
 3. **Stock model — append-only `stock_movements` ledger.** Columns: product, location, delta, reason, ref_type, ref_id, created_at. `stock_locations.qty` is a cached running total. Replaces ProDuck's qty-only model; gives full traceability and simplifies landed-cost delivery.
 4. **Order payments — separate `order_payments` table.** Cash/card/transfer/split with amounts. Even though only cash is supported initially.
 5. **Replenishment `min_qty` — on BOTH `products` and `product_categories`.** Product value overrides category when set.

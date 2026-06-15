@@ -22,6 +22,7 @@ import {
   trackingAccounts,
 } from "../db/schema/tracking.ts";
 import { db } from "../lib/db.ts";
+import { allocateProportional, isMoney, roundMoney } from "../lib/money.ts";
 import { modifyStock } from "./stock-service.ts";
 
 export type OrderErrorCode =
@@ -285,9 +286,9 @@ function computeAttribution(args: {
   const preTax =
     args.priceMode === "tax_exclusive"
       ? gross
-      : Math.round((gross * 10000) / (10000 + args.taxRateBps));
+      : roundMoney((gross * 10000) / (10000 + args.taxRateBps));
   if (args.mode === "full") return preTax;
-  return Math.round((preTax * (args.pctBps ?? 0)) / 10000);
+  return roundMoney((preTax * (args.pctBps ?? 0)) / 10000);
 }
 
 /** Built order_items insert row plus the computed line total. */
@@ -352,8 +353,8 @@ async function buildSnapshotRow(opts: {
         "attribution override requires a tracking account on the variant",
       );
     }
-    if (!Number.isInteger(opts.attributionOverrideMinor)) {
-      throw new OrderError("INVALID_INPUT", "attribution override must be an integer");
+    if (!isMoney(opts.attributionOverrideMinor)) {
+      throw new OrderError("INVALID_INPUT", "attribution override must be a valid amount");
     }
     attributionAmountMinor = opts.attributionOverrideMinor;
   }
@@ -380,7 +381,7 @@ async function buildSnapshotRow(opts: {
         product.kind === "service"
           ? 0
           : product.kind === "open_price"
-            ? Math.round((priceMinor * (product.costRatioBps ?? 0)) / 10000)
+            ? roundMoney((priceMinor * (product.costRatioBps ?? 0)) / 10000)
             : variant.costMinor,
       snapshotTaxRateBps: product.taxRateBps,
       snapshotPriceMode: product.priceMode,
@@ -441,18 +442,10 @@ async function buildBundleLines(opts: {
     parts.push({ variant: cv, product: cp, qty: lineQty, value: cv.priceMinor * lineQty });
   }
 
-  // Distribute `target` over the components: floor each proportional share,
-  // then hand the rounding remainder out one unit at a time. Sums exactly.
-  const totalValue = parts.reduce((sum, p) => sum + p.value, 0);
-  let shares: number[];
-  if (totalValue > 0) {
-    const floors = parts.map((p) => Math.floor((target * p.value) / totalValue));
-    const remainder = target - floors.reduce((a, b) => a + b, 0);
-    shares = floors.map((f, i) => f + (i < remainder ? 1 : 0));
-  } else {
-    // Zero-value components — put the whole price on the last line.
-    shares = parts.map((_, i) => (i === parts.length - 1 ? target : 0));
-  }
+  // Distribute `target` over the components proportionally by value, rounded to
+  // whole 0.01s so the shares sum back to `target` exactly. Zero total value
+  // puts the whole price on the last line (allocateProportional handles both).
+  const shares = allocateProportional(target, parts.map((p) => p.value));
 
   const lines: BuiltLine[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -465,7 +458,7 @@ async function buildBundleLines(opts: {
         product: p.product,
         qty: p.qty,
         priceMinor: p.variant.priceMinor,
-        discountMinor: p.value - shares[i]!,
+        discountMinor: roundMoney(p.value - shares[i]!),
         bundleName: bundleProduct.name,
       }),
     );
@@ -487,7 +480,7 @@ async function buildLines(
     throw new OrderError("INVALID_INPUT", "item qty must be a positive integer");
   }
   const discount = item.discountMinor ?? 0;
-  if (!Number.isInteger(discount) || discount < 0) {
+  if (!isMoney(discount) || discount < 0) {
     throw new OrderError("INVALID_INPUT", "discount must be a non-negative integer");
   }
 
@@ -518,7 +511,7 @@ async function buildLines(
   const isOpenPrice = product.kind === "open_price";
   let price: number;
   if (item.priceOverrideMinor != null) {
-    if (!Number.isInteger(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
+    if (!isMoney(item.priceOverrideMinor) || item.priceOverrideMinor < 0) {
       throw new OrderError("INVALID_INPUT", "price override must be a non-negative integer");
     }
     price = item.priceOverrideMinor;
@@ -658,7 +651,7 @@ export async function createPosOrder(input: {
 
   let paid = 0;
   for (const p of input.payments) {
-    if (!Number.isInteger(p.amountMinor) || p.amountMinor <= 0) {
+    if (!isMoney(p.amountMinor) || p.amountMinor <= 0) {
       throw new OrderError("INVALID_INPUT", "payment amount must be a positive integer");
     }
     paid += p.amountMinor;
@@ -987,7 +980,7 @@ export async function updateCustomerSaleItem(input: {
 
     let newDiscount = oldDiscount;
     if (input.discountMinor != null) {
-      if (!Number.isInteger(input.discountMinor) || input.discountMinor < 0) {
+      if (!isMoney(input.discountMinor) || input.discountMinor < 0) {
         throw new OrderError(
           "INVALID_INPUT",
           "discount must be a non-negative integer",
@@ -1007,7 +1000,7 @@ export async function updateCustomerSaleItem(input: {
     let newPrice = oldPrice;
     if (input.priceOverrideMinor != null) {
       if (
-        !Number.isInteger(input.priceOverrideMinor) ||
+        !isMoney(input.priceOverrideMinor) ||
         input.priceOverrideMinor < 0
       ) {
         throw new OrderError(
@@ -1073,7 +1066,7 @@ export async function updateCustomerSaleItem(input: {
     };
     // Open-price cost is derived from the (possibly edited) price.
     if (product?.kind === "open_price") {
-      patch.snapshotCostMinor = Math.round((newPrice * (product.costRatioBps ?? 0)) / 10000);
+      patch.snapshotCostMinor = roundMoney((newPrice * (product.costRatioBps ?? 0)) / 10000);
     }
     if (input.displayNameOverride !== undefined) {
       const trimmed = input.displayNameOverride?.trim() ?? "";
@@ -1101,7 +1094,7 @@ export async function addCustomerSalePayment(input: {
   posSessionId?: string | null;
   createdByUserId: string;
 }): Promise<Order> {
-  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
     throw new OrderError("INVALID_INPUT", "payment amount must be a positive integer");
   }
   return db.transaction(async (tx) => {
@@ -1373,10 +1366,10 @@ export async function createReturn(input: {
       // Prorate the original discount and attribution across the units being
       // returned — a return reverses what the original line actually posted
       // (so a cashier override on the original is reversed proportionally).
-      const proratedDiscount = Math.round(
+      const proratedDiscount = roundMoney(
         (orig.discountMinor * ret.qty) / orig.qty,
       );
-      const proratedAttribution = Math.round(
+      const proratedAttribution = roundMoney(
         (orig.attributionAmountMinor * ret.qty) / orig.qty,
       );
       rows.push({

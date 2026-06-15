@@ -15,17 +15,17 @@ class CartLine {
   final Product product;
   final Variant variant;
   int qty;
-  int discountMinor;
+  num discountMinor;
 
   /// Cashier-entered price for open-price (and service) lines, or an override
   /// edited on the cart; null means use the variant's base price.
-  int? overridePriceMinor;
+  num? overridePriceMinor;
 
   /// The effective unit price: an entered override wins over the base price.
-  int get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
+  num get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
 
   /// qty * price - discount, never below zero.
-  int get lineTotalMinor {
+  num get lineTotalMinor {
     final gross = unitPriceMinor * qty - discountMinor;
     return gross < 0 ? 0 : gross;
   }
@@ -33,27 +33,27 @@ class CartLine {
   /// Per-unit cost. Open-price products derive cost from the entered price via
   /// the product's ratio (matching the API's snapshot rule); everything else
   /// uses the variant's weighted-average cost.
-  int get unitCostMinor => unitCostForPrice(unitPriceMinor);
+  num get unitCostMinor => unitCostForPrice(unitPriceMinor);
 
   /// Per-unit cost at a hypothetical [priceMinor], for previewing a price edit
   /// before it is applied. Same rule as [unitCostMinor].
-  int unitCostForPrice(int priceMinor) {
+  num unitCostForPrice(num priceMinor) {
     final ratio = product.costRatioBps;
     if (product.kind == 'open_price' && ratio != null) {
-      return (priceMinor * ratio / 10000).round();
+      return (priceMinor * ratio / 10000 * 100).round() / 100; // snap to 2dp
     }
     return variant.costMinor;
   }
 
   /// qty * unit cost — the cost of goods for this line.
-  int get lineCostMinor => unitCostMinor * qty;
+  num get lineCostMinor => unitCostMinor * qty;
 
   /// Line revenue minus line cost. Can be negative if sold below cost.
-  int get lineMarginMinor => lineTotalMinor - lineCostMinor;
+  num get lineMarginMinor => lineTotalMinor - lineCostMinor;
 
   /// Per-unit margin, ignoring any line-level discount: unit price minus unit
   /// cost. The "each" figure, as opposed to [lineMarginMinor] (× qty).
-  int get unitMarginMinor => unitPriceMinor - unitCostMinor;
+  num get unitMarginMinor => unitPriceMinor - unitCostMinor;
 
   /// Per-unit margin as a fraction of unit price, or null when price is zero.
   double? get unitMarginFraction =>
@@ -81,15 +81,15 @@ class Cart extends ChangeNotifier {
 
   List<CartLine> get lines => List.unmodifiable(_lines);
   bool get isEmpty => _lines.isEmpty;
-  int get totalMinor =>
-      _lines.fold(0, (sum, l) => sum + l.lineTotalMinor);
+  num get totalMinor =>
+      _lines.fold<num>(0, (sum, l) => sum + l.lineTotalMinor);
 
   /// Cost of goods across every line.
-  int get totalCostMinor =>
-      _lines.fold(0, (sum, l) => sum + l.lineCostMinor);
+  num get totalCostMinor =>
+      _lines.fold<num>(0, (sum, l) => sum + l.lineCostMinor);
 
   /// Total revenue minus total cost.
-  int get totalMarginMinor => totalMinor - totalCostMinor;
+  num get totalMarginMinor => totalMinor - totalCostMinor;
 
   /// Cart-wide gross margin as a fraction of revenue, or null when empty.
   double? get marginFraction =>
@@ -108,7 +108,7 @@ class Cart extends ChangeNotifier {
 
   /// Add an open-price line at a cashier-entered lump price. Each entry is a
   /// distinct guess, so these never merge with an existing line.
-  void addOpenPrice(Product product, Variant variant, int priceMinor) {
+  void addOpenPrice(Product product, Variant variant, num priceMinor) {
     _lines.add(CartLine(
       product: product,
       variant: variant,
@@ -126,14 +126,14 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setDiscount(CartLine line, int discountMinor) {
+  void setDiscount(CartLine line, num discountMinor) {
     line.discountMinor = discountMinor < 0 ? 0 : discountMinor;
     notifyListeners();
   }
 
   /// Override a line's unit price. A non-positive value clears the override,
   /// reverting to the variant's base price.
-  void setPrice(CartLine line, int? priceMinor) {
+  void setPrice(CartLine line, num? priceMinor) {
     line.overridePriceMinor =
         (priceMinor != null && priceMinor > 0) ? priceMinor : null;
     notifyListeners();

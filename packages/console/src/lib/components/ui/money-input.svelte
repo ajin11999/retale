@@ -3,14 +3,14 @@
   import type { HTMLInputAttributes } from "svelte/elements";
   import { cn } from "$lib/utils";
 
-  // A money entry field that shows id-ID thousand separators (dots) as you
-  // type, while binding an integer **minor-unit** value (whole rupiah — see
-  // formatMoney in $lib/utils). Display only; no decimals, since the minor
-  // unit is the rupiah. Use this for every editable price/cost/amount so the
-  // grouping is consistent with how money renders elsewhere.
+  // A money entry field for the literal rupiah value (DECIMAL(19,2) on the API).
+  // Shows international grouping as you type — comma thousands, dot decimal —
+  // while binding a plain number (e.g. 10.5), up to 2 decimal places. Use this
+  // for every editable price/cost/amount so entry stays consistent with how
+  // money renders elsewhere (formatMoney in $lib/utils).
   interface Props
     extends Omit<HTMLInputAttributes, "value" | "type" | "inputmode"> {
-    /** Integer minor-unit value (whole rupiah). `null` = empty. */
+    /** The money value in rupiah (up to 2 decimals). `null` = empty. */
     value: number | null;
     /** Permit negative entry (e.g. signed ledger adjustments). */
     allowNegative?: boolean;
@@ -29,38 +29,64 @@
 
   let el = $state<HTMLInputElement | null>(null);
 
-  const fmt = (v: number | null): string =>
-    v == null || Number.isNaN(v) ? "" : v.toLocaleString("id-ID");
+  /** Comma-group the integer part of a plain digit string. */
+  const groupInt = (digits: string): string =>
+    digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-  /** Parse a displayed string back to an integer, or null when empty. */
-  function parse(s: string): number | null {
-    const neg = allowNegative && s.trimStart().startsWith("-");
-    const digits = s.replace(/\D/g, "");
-    if (digits === "") return null;
-    const n = Number(digits);
-    return neg ? -n : n;
+  /** A number → the displayed string: comma thousands, dot decimal, trimmed. */
+  const fmt = (v: number | null): string =>
+    v == null || Number.isNaN(v)
+      ? ""
+      : v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+  /**
+   * Normalize a raw input string into the grouped display text and its numeric
+   * value. Keeps at most one decimal point, caps the fraction to 2 digits, and
+   * tolerates a lone "-" (negatives) / "10." (mid-entry) so typing flows.
+   */
+  function normalize(raw: string): { text: string; value: number | null } {
+    const neg = allowNegative && raw.trimStart().startsWith("-");
+    const s = raw.replace(/[^\d.]/g, "");
+    const dot = s.indexOf(".");
+    const hasDot = dot !== -1;
+    let intPart = (hasDot ? s.slice(0, dot) : s).replace(/\./g, "");
+    const frac = hasDot ? s.slice(dot + 1).replace(/\./g, "").slice(0, 2) : null;
+    intPart = intPart.replace(/^0+(?=\d)/, ""); // drop leading zeros, keep a lone 0
+
+    const sign = neg ? "-" : "";
+    const groupedInt = intPart === "" ? "" : groupInt(intPart);
+    const text =
+      groupedInt === "" && frac == null
+        ? sign // "" or a lone "-"
+        : sign + (groupedInt === "" ? "0" : groupedInt) + (frac != null ? "." + frac : "");
+
+    // Empty (no integer and no fraction digits) reads as null.
+    const value =
+      intPart === "" && (frac == null || frac === "")
+        ? null
+        : Number(sign + (intPart === "" ? "0" : intPart) + (frac ? "." + frac : ""));
+    return { text, value: value != null && Number.isNaN(value) ? null : value };
   }
 
-  // The string the input shows. Seeded from the bound value and re-synced by
-  // the effect below when the value is changed from outside (load / reset).
+  /** The string the input shows, seeded from `value` and re-synced by the effect
+   *  below when the value changes from outside (load / reset). */
   let text = $state(fmt(value));
 
   $effect(() => {
-    if (parse(text) !== value) text = fmt(value);
+    // Don't fight mid-entry text (a trailing "." / "0" fmt would discard) — only
+    // re-sync when the bound value disagrees with what the text parses to.
+    if (normalize(text).value !== value) text = fmt(value);
   });
 
-  // Caret index just past the `digitsLeft`-th digit of `formatted`, so the
-  // cursor stays put as separators shift around it.
-  function caretAfter(
-    formatted: string,
-    digitsLeft: number,
-    neg: boolean,
-  ): number {
-    if (digitsLeft === 0) return neg && formatted.startsWith("-") ? 1 : 0;
+  // Caret index just past the `keptLeft`-th significant char (digit or dot) of
+  // `formatted`, so the cursor stays put as separators shift around it.
+  function caretAfter(formatted: string, keptLeft: number, neg: boolean): number {
+    if (keptLeft === 0) return neg && formatted.startsWith("-") ? 1 : 0;
     let seen = 0;
     for (let i = 0; i < formatted.length; i++) {
       const c = formatted.charCodeAt(i);
-      if (c >= 48 && c <= 57 && ++seen === digitsLeft) return i + 1;
+      const isSig = (c >= 48 && c <= 57) || c === 46; // digit or "."
+      if (isSig && ++seen === keptLeft) return i + 1;
     }
     return formatted.length;
   }
@@ -70,18 +96,16 @@
     const raw = node.value;
     const caret = node.selectionStart ?? raw.length;
     const neg = allowNegative && raw.trimStart().startsWith("-");
-    const digitsLeft = raw.slice(0, caret).replace(/\D/g, "").length;
+    const keptLeft = (raw.slice(0, caret).match(/[\d.]/g) ?? []).length;
 
-    const next = parse(raw);
-    value = next;
-    // Keep a lone "-" visible so a negative can still be entered.
-    const grouped = next == null ? (neg ? "-" : "") : fmt(next);
-    text = grouped;
-    node.value = grouped; // force, in case `text` itself didn't change
+    const next = normalize(raw);
+    value = next.value;
+    text = next.text;
+    node.value = next.text; // force, in case `text` itself didn't change
 
     await tick();
     if (el) {
-      const pos = caretAfter(el.value, digitsLeft, neg);
+      const pos = caretAfter(el.value, keptLeft, neg);
       el.setSelectionRange(pos, pos);
     }
   }
@@ -97,7 +121,7 @@
 <input
   bind:this={el}
   value={text}
-  inputmode="numeric"
+  inputmode="decimal"
   class={cn(
     "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
     className,

@@ -151,8 +151,8 @@ describe("renderOrderReceiptMessage", () => {
     expect(body).toContain("From: Frans Retail");
     expect(body).toContain("No: TK1-2026-06-05-12");
     expect(body).toContain("To: Pak Budi");
-    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
-    expect(body).toContain("Total: Rp 100.000");
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2,000 = Rp 100,000");
+    expect(body).toContain("Total: Rp 100,000");
   });
 
   test("compact: drops greeting, header and footer — item lines and totals only", async () => {
@@ -168,8 +168,8 @@ describe("renderOrderReceiptMessage", () => {
     });
 
     const { body } = await renderOrderReceiptMessage(orderId, { compact: true });
-    expect(body).toContain("M6 Bolt — 50 @ Rp 2.000 = Rp 100.000");
-    expect(body).toContain("Total: Rp 100.000");
+    expect(body).toContain("M6 Bolt — 50 @ Rp 2,000 = Rp 100,000");
+    expect(body).toContain("Total: Rp 100,000");
     expect(body).not.toContain("Terima kasih,");
     expect(body).not.toContain("RECEIPT");
     expect(body).not.toContain("From:");
@@ -185,7 +185,7 @@ describe("renderOrderReceiptMessage", () => {
       ],
     });
     const { body } = await renderOrderReceiptMessage(orderId);
-    expect(body).toContain("Premium Widget — 2 @ Rp 5.000 (disc Rp 1.000) = Rp 9.000");
+    expect(body).toContain("Premium Widget — 2 @ Rp 5,000 (disc Rp 1,000) = Rp 9,000");
     expect(body).not.toContain("Internal SKU A");
   });
 
@@ -199,11 +199,11 @@ describe("renderOrderReceiptMessage", () => {
       paidMinor: 4000,
     });
     const { body } = await renderOrderReceiptMessage(orderId);
-    expect(body).toContain("Kept — 1 @ Rp 10.000 = Rp 10.000");
+    expect(body).toContain("Kept — 1 @ Rp 10,000 = Rp 10,000");
     expect(body).not.toContain("Voided");
-    expect(body).toContain("Total: Rp 10.000");
-    expect(body).toContain("Paid: Rp 4.000");
-    expect(body).toContain("Balance due: Rp 6.000");
+    expect(body).toContain("Total: Rp 10,000");
+    expect(body).toContain("Paid: Rp 4,000");
+    expect(body).toContain("Balance due: Rp 6,000");
   });
 
   test("rejects an unknown order", async () => {

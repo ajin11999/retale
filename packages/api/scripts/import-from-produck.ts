@@ -22,6 +22,7 @@ import mysql from "mysql2/promise";
 import { ulid } from "ulid";
 import { productVariants, products, vendors } from "../src/db/schema/index.ts";
 import { db, pool } from "../src/lib/db.ts";
+import { roundMoney } from "../src/lib/money.ts";
 
 // --- Configuration -------------------------------------------------------
 
@@ -33,9 +34,9 @@ const CHUNK = 500;
 /** A drizzle transaction handle. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** Round a ProDuck decimal (string from the driver) to integer minor units. */
+/** A ProDuck money decimal (string from the driver) → a 2-decimal amount. */
 function toMinor(value: unknown): number {
-  return Math.round(Number(value ?? 0));
+  return roundMoney(Number(value ?? 0));
 }
 
 /** Empty/whitespace strings become null; otherwise the trimmed string. */

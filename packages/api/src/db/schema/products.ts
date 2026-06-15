@@ -1,8 +1,9 @@
 // Products domain: categories, products, variants, variant options, and
 // qty-break price tiers. See docs/design-decisions.md → "Product structure".
 //
-// Money is integer minor units (BIGINT). Stock qty is an integer count of the
-// variant's smallest `unit`. Images are deferred (filesystem concern).
+// Money is the literal rupiah value in DECIMAL(19,2) (see the `money` helper).
+// Stock qty is an integer count of the variant's smallest `unit`. Images are
+// deferred (filesystem concern).
 
 import { relations, sql } from "drizzle-orm";
 import {
@@ -23,7 +24,7 @@ import {
 import { users } from "./auth.ts";
 import { trackingAccounts } from "./tracking.ts";
 import { vendors } from "./vendors.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 /**
  * Single-parent category hierarchy. One category per product. `minQty` and
@@ -132,8 +133,8 @@ export const productVariants = mysqlTable(
     label: varchar({ length: 200 }),
     unit: mysqlEnum(["piece", "g", "ml", "mm"]).notNull().default("piece"),
     qtyDecimals: tinyint().notNull().default(0),
-    priceMinor: bigint({ mode: "number" }).notNull(),
-    costMinor: bigint({ mode: "number" }).notNull().default(0),
+    priceMinor: money().notNull(),
+    costMinor: money().notNull().default(0),
     totalQty: bigint({ mode: "number" }).notNull().default(0),
     // Reorder thresholds, in the variant's smallest unit. `reorderPoint` is the
     // available-stock level at or below which the reorder scan suggests a
@@ -177,7 +178,7 @@ export const productPriceTiers = mysqlTable(
       .notNull()
       .references(() => productVariants.id, { onDelete: "cascade" }),
     minQty: bigint({ mode: "number" }).notNull(),
-    priceMinor: bigint({ mode: "number" }).notNull(),
+    priceMinor: money().notNull(),
   },
   (t) => [unique("product_price_tiers_variant_min_qty_unique").on(t.variantId, t.minQty)],
 );
