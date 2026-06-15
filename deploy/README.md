@@ -14,6 +14,9 @@ part of this stack.
 
 1. Reserve a static IP for the host in the router (DHCP reservation).
 2. `cp .env.prod.example .env.prod` and fill in `HOST_IP` + fresh secrets.
+   On a Windows host, `./deploy/gen-secrets.ps1 -Write` creates `.env.prod`
+   and fills the secret placeholders (hex DB passwords, base64 API keys);
+   then just set `HOST_IP`.
 3. Build the POS web bundle on the host (Flutter is not containerized):
 
    ```
