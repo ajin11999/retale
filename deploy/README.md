@@ -57,8 +57,28 @@ part of this stack.
    docker compose -f docker-compose.prod.yml cp caddy:/data/caddy/pki/authorities/local/root.crt retale-root.crt
    ```
 
-   Windows: install into "Trusted Root Certification Authorities".
-   ChromeOS: Settings → Security and privacy → Manage certificates → Authorities → Import.
+   It **must** land in the *Trusted Root Certification Authorities* store. Do
+   **not** use the import wizard's "Automatically select the certificate store"
+   — for a root CA it picks *Intermediate Certification Authorities*, where the
+   cert is not a trust anchor and browsers keep warning ("Not secure") even
+   though you can reach the site. Choose the store explicitly:
+
+   - Windows (all users, no prompt) — in an **Administrator** PowerShell:
+
+     ```
+     Import-Certificate -FilePath retale-root.crt -CertStoreLocation Cert:\LocalMachine\Root
+     ```
+
+     Or double-click the file → Install Certificate → "Place all certificates in
+     the following store" → Browse → *Trusted Root Certification Authorities*.
+   - ChromeOS: Settings → Security and privacy → Manage certificates → Authorities → Import.
+
+   After installing, **fully quit and reopen the browser** (or visit
+   `chrome://restart`) — Chrome caches trust decisions per session, so a tab
+   refresh won't clear an existing warning. To check where a cert actually
+   landed: `Get-ChildItem Cert:\CurrentUser\Root, Cert:\LocalMachine\Root,
+   Cert:\CurrentUser\CA | ? Subject -match Caddy`.
+
    The CA lives in the `caddy-data` volume, so it survives restarts — clients
    only trust it once.
 
