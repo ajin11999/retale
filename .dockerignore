@@ -10,7 +10,13 @@ node_modules
 **/build
 **/.svelte-kit
 packages/console/$houdini
-packages/pos
+# packages/pos is a heavy Flutter package and normally excluded, but the caddy
+# image bakes in the pre-built web bundle. Re-include only packages/pos/build/web:
+# exclude each level's other contents, then carve out the path to the bundle.
+packages/pos/*
+!packages/pos/build
+packages/pos/build/*
+!packages/pos/build/web
 packages/stockeeper
 packages/workshop
 assets
