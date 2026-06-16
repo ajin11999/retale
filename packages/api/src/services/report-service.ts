@@ -173,7 +173,7 @@ export interface SessionVariantSaleRow {
   sku: string;
   /** Units sold in the variant's smallest unit; nets returns. */
   qtySold: number;
-  /** Revenue net of attribution (price×qty − discount − attribution). */
+  /** Gross revenue — the sale price (price×qty − discount), before any worker cut. */
   revenueMinor: number;
   /** COGS — snapshot WAC × qty. */
   costMinor: number;
@@ -183,8 +183,10 @@ export interface SessionVariantSaleRow {
  * Per-variant units / revenue / cost for one POS session. Scans non-voided lines
  * of the session's non-cancelled orders and groups by variant — return lines
  * (negative qty/revenue/cost) net cleanly, bundle lines arrive pre-exploded per
- * component variant. Revenue nets the tracking-account attribution out, matching
- * the sales/profit reports. Sorted by revenue, descending.
+ * component variant. This is a quick lookup of what each variant rang up for, so
+ * revenue is the gross sale price (price×qty − discount); unlike the aggregate
+ * sales/profit reports, it does NOT net out the tracking-account attribution.
+ * Sorted by revenue, descending.
  */
 export async function sessionVariantSales(
   sessionId: string,
@@ -199,7 +201,6 @@ export async function sessionVariantSales(
       costMinor: orderItems.snapshotCostMinor,
       qty: orderItems.qty,
       discountMinor: orderItems.discountMinor,
-      attributionMinor: orderItems.attributionAmountMinor,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
@@ -226,7 +227,9 @@ export async function sessionVariantSales(
       costMinor: 0,
     };
     entry.qtySold += r.qty;
-    entry.revenueMinor += r.priceMinor * r.qty - r.discountMinor - r.attributionMinor;
+    // Gross sale price — a quick lookup of what the variant rang up for. The
+    // worker's cut (attribution) is netted out only by the aggregate reports.
+    entry.revenueMinor += r.priceMinor * r.qty - r.discountMinor;
     entry.costMinor += r.costMinor * r.qty;
     byVariant.set(key, entry);
   }

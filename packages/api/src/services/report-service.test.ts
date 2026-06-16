@@ -293,7 +293,7 @@ describe("sessionVariantSales", () => {
     );
   }
 
-  test("groups by variant, nets returns/attribution, scopes to the session", async () => {
+  test("groups by variant, nets returns, keeps gross revenue, scopes to the session", async () => {
     const sessionId = await seedSession("P1");
     const otherSession = await seedSession("P2");
 
@@ -334,8 +334,8 @@ describe("sessionVariantSales", () => {
     const rows = await sessionVariantSales(sessionId);
     expect(rows).toHaveLength(2);
 
-    // Sorted by revenue desc: A = 2000 + 3000 − 1000 = 4000; B = 5000 − 1200 = 3800.
-    const [a, b] = rows;
+    // Sorted by gross revenue desc: B = 5000 (attribution NOT netted) > A = 2000 + 3000 − 1000 = 4000.
+    const [b, a] = rows;
     expect(a!.sku).toBe("SKU-A");
     expect(a!.productName).toBe("Alpha");
     expect(a!.variantLabel).toBe("Red");
@@ -345,8 +345,25 @@ describe("sessionVariantSales", () => {
 
     expect(b!.sku).toBe("SKU-B");
     expect(b!.qtySold).toBe(1);
-    expect(b!.revenueMinor).toBe(3800); // attribution netted out
+    expect(b!.revenueMinor).toBe(5000); // gross sale price — worker cut not netted here
     expect(b!.costMinor).toBe(3000);
+  });
+
+  test("a fully-attributed service shows its gross sale price, not 0", async () => {
+    // The reported bug: a service priced 100 whose worker takes the whole 100.
+    const sessionId = await seedSession("P1");
+    await seedSessionOrder({
+      posSessionId: sessionId,
+      items: [
+        { sku: "SVC-1", name: "Repair", qty: 1, priceMinor: 100, costMinor: 0, attributionMinor: 100 },
+      ],
+    });
+
+    const [row] = await sessionVariantSales(sessionId);
+    expect(row!.sku).toBe("SVC-1");
+    expect(row!.qtySold).toBe(1);
+    expect(row!.revenueMinor).toBe(100); // the sale price, despite the 100 worker cut
+    expect(row!.costMinor).toBe(0);
   });
 });
 

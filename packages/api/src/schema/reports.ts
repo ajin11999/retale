@@ -88,7 +88,7 @@ export const typeDefs = /* GraphQL */ `
     sku: String!
     "Units sold in the variant's smallest unit; nets returns."
     qtySold: Float!
-    "Revenue net of attribution (price×qty − discount − attribution)."
+    "Gross revenue — the sale price (price×qty − discount), before any worker cut."
     revenueMinor: Float!
     "COGS — snapshot WAC × qty."
     costMinor: Float!
@@ -108,7 +108,7 @@ export const typeDefs = /* GraphQL */ `
       periodStart: String!
       periodEnd: String!
     ): SessionVarianceReport!
-    "Per-variant units / revenue / cost for one POS session. Revenue nets attribution."
+    "Per-variant units / revenue / cost for one POS session — gross sale price, a quick lookup (unlike the aggregate reports, it does not net attribution)."
     sessionVariantSales(sessionId: ID!): [SessionVariantSale!]!
   }
 `;
