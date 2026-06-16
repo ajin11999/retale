@@ -42,6 +42,7 @@ import { ProductError, setBundleComponents } from "./product-service.ts";
 import {
   createTrackingAccount,
   getTrackingAccount,
+  listTrackingAccountLedger,
 } from "./tracking-service.ts";
 
 let userId: string;
@@ -1083,6 +1084,94 @@ describe("tracking attribution", () => {
     });
     await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
     expect((await getTrackingAccount(accountId)).balanceMinor).toBe(0);
+  });
+
+  test("session close posts ONE bulked ledger row per account, not per line item", async () => {
+    const sessionId = await seedSession("P1");
+    const accountId = await seedAccount();
+    const variantA = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const variantB = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    // Two orders, three attributed lines total → 3000 + 2000 + 1000 = 6000.
+    await createPosOrder({
+      posSessionId: sessionId,
+      items: [
+        { variantId: variantA, qty: 3 },
+        { variantId: variantB, qty: 2 },
+      ],
+      payments: [{ amountMinor: 5000 }],
+      createdByUserId: userId,
+    });
+    await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: variantA, qty: 1 }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+
+    await closeSession({ sessionId, closingCashMinor: 6000, closedByUserId: userId });
+
+    const ledger = await listTrackingAccountLedger(accountId);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.type).toBe("attribution");
+    expect(ledger[0]!.amountMinor).toBe(6000);
+    expect(ledger[0]!.refType).toBe("pos_session");
+    expect(ledger[0]!.refId).toBe(sessionId);
+    expect(ledger[0]!.posSessionId).toBe(sessionId);
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(6000);
+  });
+
+  test("a console sale posts ONE bulked ledger row per account, refType order", async () => {
+    const accountId = await seedAccount();
+    const customer = await createCustomer({ name: "Pak Budi", createdByUserId: userId });
+    const variantA = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const variantB = await seedVariant({
+      priceMinor: 1000,
+      priceMode: "tax_exclusive",
+      trackingAccountId: accountId,
+      attributionMode: "full",
+    });
+    const sale = await createCustomerSale({
+      customerId: customer.id,
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId: variantA, qty: 2 },
+      createdByUserId: userId,
+    });
+    await addCustomerSaleItem({
+      orderId: sale.id,
+      item: { variantId: variantB, qty: 3 },
+      createdByUserId: userId,
+    });
+    await addCustomerSalePayment({
+      orderId: sale.id,
+      amountMinor: 5000,
+      createdByUserId: userId,
+    });
+    await closeCustomerSale({ orderId: sale.id, closedByUserId: userId });
+
+    const ledger = await listTrackingAccountLedger(accountId);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.amountMinor).toBe(5000);
+    expect(ledger[0]!.refType).toBe("order");
+    expect(ledger[0]!.refId).toBe(sale.id);
+    expect((await getTrackingAccount(accountId)).balanceMinor).toBe(5000);
   });
 });
 

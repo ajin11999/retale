@@ -16,7 +16,7 @@ export const typeDefs = /* GraphQL */ `
     opening_balance
   }
 
-  enum TrackingLedgerRefType { order_item order manual import adjustment }
+  enum TrackingLedgerRefType { order_item order pos_session manual import adjustment }
 
   type TrackingAccount {
     id: ID!

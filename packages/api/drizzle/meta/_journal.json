@@ -274,6 +274,13 @@
       "when": 1781519860899,
       "tag": "0038_nasty_giant_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1781606391605,
+      "tag": "0039_volatile_talisman",
+      "breakpoints": true
     }
   ]
 }

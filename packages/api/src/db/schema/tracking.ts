@@ -33,6 +33,10 @@ export const TRACKING_LEDGER_TYPES = [
 export const TRACKING_LEDGER_REF_TYPES = [
   "order_item",
   "order",
+  // A bulked attribution row covering a whole POS session — `refId` is the
+  // session id. POS attribution posts one row per account per session, not per
+  // line item; see postBulkAttribution in order-service.ts.
+  "pos_session",
   "manual",
   "import",
   "adjustment",

@@ -551,39 +551,62 @@ async function syncTrackingBalance(tx: Tx, accountId: string): Promise<void> {
 }
 
 /**
- * Post one `attribution` tracking_account_ledger row per non-voided, attributed
- * line of a single order, then stamp `orders.attributionPostedAt`. Touched
- * account ids are collected into `touched` so the caller can sync their
- * balances once (the stamp is what makes posting idempotent at the order level).
+ * Post attribution for a batch of orders in bulk: one `attribution`
+ * tracking_account_ledger row per tracking account, carrying the SUM of every
+ * non-voided, attributed line across the batch — not one row per line item.
+ * The batch's accounting unit is named by `ref` (a POS session, or a single
+ * Console order), which becomes the row's `refType`/`refId`/`posSessionId` so
+ * the bulked row points back at its source. Each touched account's cached
+ * balance is re-synced, and every order in the batch is stamped
+ * `attributionPostedAt` (even zero-attribution ones) so the existing
+ * reopen→reclose / force-close idempotency holds.
  */
-async function postOrderAttributionRows(
+async function postBulkAttribution(
   tx: Tx,
-  orderId: string,
+  orderIds: string[],
+  ref: {
+    refType: "pos_session" | "order";
+    refId: string;
+    posSessionId: string | null;
+  },
   createdByUserId: string,
-  touched: Set<string>,
 ): Promise<void> {
-  const items = await tx
-    .select()
+  if (!orderIds.length) return;
+  const sums = await tx
+    .select({
+      accountId: orderItems.attributionAccountId,
+      // MariaDB returns SUM(DECIMAL) as a string — coerce below.
+      total: sql<number>`SUM(${orderItems.attributionAmountMinor})`,
+    })
     .from(orderItems)
-    .where(eq(orderItems.orderId, orderId));
-  for (const item of items) {
-    if (item.voidedAt) continue;
-    if (!item.attributionAccountId || item.attributionAmountMinor === 0) continue;
+    .where(
+      and(
+        inArray(orderItems.orderId, orderIds),
+        isNull(orderItems.voidedAt),
+        isNotNull(orderItems.attributionAccountId),
+      ),
+    )
+    .groupBy(orderItems.attributionAccountId);
+  for (const s of sums) {
+    const amount = Number(s.total ?? 0);
+    // A sale fully offset by a return in the same batch nets to 0 — no row.
+    if (!s.accountId || amount === 0) continue;
     await tx.insert(trackingAccountLedger).values({
       id: ulid(),
-      trackingAccountId: item.attributionAccountId,
+      trackingAccountId: s.accountId,
       type: "attribution",
-      amountMinor: item.attributionAmountMinor,
-      refType: "order_item",
-      refId: item.id,
+      amountMinor: amount,
+      refType: ref.refType,
+      refId: ref.refId,
+      posSessionId: ref.posSessionId,
       createdByUserId,
     });
-    touched.add(item.attributionAccountId);
+    await syncTrackingBalance(tx, s.accountId);
   }
   await tx
     .update(orders)
     .set({ attributionPostedAt: new Date() })
-    .where(eq(orders.id, orderId));
+    .where(inArray(orders.id, orderIds));
 }
 
 /**
@@ -596,17 +619,18 @@ async function postAttribution(
   orderId: string,
   createdByUserId: string,
 ): Promise<void> {
-  const touched = new Set<string>();
-  await postOrderAttributionRows(tx, orderId, createdByUserId, touched);
-  for (const accountId of touched) {
-    await syncTrackingBalance(tx, accountId);
-  }
+  await postBulkAttribution(
+    tx,
+    [orderId],
+    { refType: "order", refId: orderId, posSessionId: null },
+    createdByUserId,
+  );
 }
 
 /**
  * Post collected attribution for every not-yet-posted, non-cancelled order in a
- * POS session, then re-sync each touched account once. Called at session close
- * / force-close — the POS session is the accounting unit for attribution. The
+ * POS session as a single bulked row per account. Called at session close /
+ * force-close — the POS session is the accounting unit for attribution. The
  * `attributionPostedAt` stamp keeps this safe across reopen→reclose and a
  * force-close followed by a normal close (already-posted orders are skipped).
  */
@@ -625,13 +649,12 @@ export async function postSessionAttribution(
         isNull(orders.attributionPostedAt),
       ),
     );
-  const touched = new Set<string>();
-  for (const o of sessionOrders) {
-    await postOrderAttributionRows(tx, o.id, createdByUserId, touched);
-  }
-  for (const accountId of touched) {
-    await syncTrackingBalance(tx, accountId);
-  }
+  await postBulkAttribution(
+    tx,
+    sessionOrders.map((o) => o.id),
+    { refType: "pos_session", refId: posSessionId, posSessionId },
+    createdByUserId,
+  );
 }
 
 /**

@@ -1,0 +1,1 @@
+ALTER TABLE `tracking_account_ledger` MODIFY COLUMN `ref_type` enum('order_item','order','pos_session','manual','import','adjustment');
