@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun run --filter @retale/api dev",
     "dev:console": "bun run --filter @retale/console dev",
-    "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy offline-first",
+    "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy offline-first --no-web-resources-cdn",
     "build:stockeeper-apk": "cd packages/stockeeper && flutter build apk --release",
     "test": "bun test",
     "backup": "bun scripts/backup.ts",
