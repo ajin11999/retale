@@ -120,7 +120,7 @@ async function seedSession(code: string): Promise<string> {
  * `stockQty` (default 100). Returns the variant id.
  */
 async function seedVariant(opts?: {
-  kind?: "physical" | "service" | "bundle" | "open_price";
+  kind?: "physical" | "service" | "bundle" | "open_price" | "non_stock";
   priceMinor?: number;
   costMinor?: number;
   costRatioBps?: number;
@@ -418,6 +418,54 @@ describe("open-price products", () => {
         createdByUserId: userId,
       }),
     );
+  });
+});
+
+describe("non_stock products", () => {
+  test("snapshots the real variant cost, charges the base price, skips stock", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      kind: "non_stock",
+      priceMinor: 5000,
+      costMinor: 3200, // a real, known cost (margin protection)
+    });
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1 }],
+      payments: [{ amountMinor: 5000 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(5000); // base price, no override needed
+
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.snapshotPriceMinor).toBe(5000);
+    // Real cost — not zero (service) and not derived from price (open_price).
+    expect(items[0]!.snapshotCostMinor).toBe(3200);
+    // non_stock never holds a stock_locations row — nothing moved.
+    expect(await stockOf(variantId)).toBe(0);
+  });
+
+  test("honours a reseller price override while keeping the real cost", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      kind: "non_stock",
+      priceMinor: 5000,
+      costMinor: 3200,
+    });
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1, priceOverrideMinor: 3800 }],
+      payments: [{ amountMinor: 3800 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(3800);
+
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.snapshotPriceMinor).toBe(3800);
+    expect(items[0]!.snapshotCostMinor).toBe(3200); // cost unchanged by override
+    expect(await stockOf(variantId)).toBe(0);
   });
 });
 

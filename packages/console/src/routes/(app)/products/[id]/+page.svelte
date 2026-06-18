@@ -266,7 +266,7 @@
     }
   `);
 
-  const KINDS = ["physical", "service", "bundle", "open_price"];
+  const KINDS = ["physical", "service", "bundle", "open_price", "non_stock"];
   const PRICE_MODES = ["tax_inclusive", "tax_exclusive"];
   const UNITS = ["piece", "g", "ml", "mm"];
 
@@ -1142,6 +1142,13 @@
               >Assumed cost as % of the entered sale price.</span
             >
           </label>
+        {/if}
+        {#if form.kind === "non_stock"}
+          <p class="col-span-2 text-xs text-muted-foreground">
+            Cost-tracked, no stock — sells at a real price (overridable at the
+            register) with its cost auto-maintained from purchases/landed cost.
+            For resale-priced items like fasteners.
+          </p>
         {/if}
       </div>
 

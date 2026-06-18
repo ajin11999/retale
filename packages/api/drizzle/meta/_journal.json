@@ -281,6 +281,13 @@
       "when": 1781606391605,
       "tag": "0039_volatile_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1781748164093,
+      "tag": "0040_marvelous_magik",
+      "breakpoints": true
     }
   ]
 }

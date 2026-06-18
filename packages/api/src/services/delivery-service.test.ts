@@ -86,6 +86,7 @@ async function seedLocation(): Promise<string> {
  * row is written at `locationId`.
  */
 async function seedVariant(opts?: {
+  kind?: "physical" | "non_stock";
   totalQty?: number;
   costMinor?: number;
   locationId?: string;
@@ -95,6 +96,7 @@ async function seedVariant(opts?: {
   await db.insert(products).values({
     id: productId,
     name: "Widget",
+    kind: opts?.kind ?? "physical",
     priceMode: "tax_exclusive",
   });
   await db.insert(productVariants).values({
@@ -205,6 +207,107 @@ const stockAt = async (variantId: string, locationId: string) => {
     );
   return rows[0];
 };
+
+describe("non_stock deliveries", () => {
+  test("a non_stock line absorbs landed cost as a cost-only update — no stock moves", async () => {
+    const locationId = await seedLocation();
+    const vendorId = await seedVendor();
+    // A fastener tracked for cost only; starts at an old cost of 100.
+    const variantId = await seedVariant({ kind: "non_stock", costMinor: 100 });
+    const { purchaseId, itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 600,
+      vendorId,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    // Freight of 100 over the single line (value 6000) → landed 6100, /10 = 610.
+    const freight = await createDeliveryItem({
+      deliveryId: delivery.id,
+      description: "Freight",
+      costMinor: 100,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      parentItemId: freight.id,
+      purchaseItemId: itemId,
+      description: "Bolts",
+      qty: 10,
+      costMinor: 6000,
+    });
+
+    const committed = await commitDelivery(delivery.id, userId);
+    expect(committed.status).toBe("delivered");
+
+    // Cost adopts the landed per-unit; quantity never moves.
+    const variant = await getVariant(variantId);
+    expect(variant?.costMinor).toBe(610);
+    expect(variant?.totalQty).toBe(0);
+
+    // The receipt is a cost-only movement, not a stock receipt.
+    const moves = await movementsFor(variantId);
+    expect(moves).toHaveLength(1);
+    expect(moves[0]?.type).toBe("cost_override");
+    expect(moves[0]?.qtyDelta).toBe(0);
+    expect(moves[0]?.unitCost).toBe(610);
+
+    // No stock_locations row is ever created for a non_stock variant.
+    const stockRows = await db
+      .select()
+      .from(stockLocations)
+      .where(eq(stockLocations.variantId, variantId));
+    expect(stockRows).toHaveLength(0);
+
+    // The line is still marked delivered and the supplier is still owed.
+    expect((await getPurchaseItem(itemId))?.qtyDelivered).toBe(10);
+    expect((await getPurchase(purchaseId))?.status).toBe("complete");
+    expect(await ledgerFor(vendorId)).toHaveLength(1);
+  });
+
+  test("cancelling a non_stock delivery rolls it back but keeps the cost", async () => {
+    const locationId = await seedLocation();
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant({ kind: "non_stock", costMinor: 100 });
+    const { purchaseId, itemId } = await seedPurchaseItem({
+      variantId,
+      qtyOrdered: 10,
+      unitCostMinor: 600,
+      vendorId,
+    });
+
+    const delivery = await createDelivery({
+      date: "2026-05-16",
+      targetLocationId: locationId,
+      createdByUserId: userId,
+    });
+    await createDeliveryItem({
+      deliveryId: delivery.id,
+      purchaseItemId: itemId,
+      description: "Bolts",
+      qty: 10,
+      costMinor: 6000, // 600 per unit, no freight
+    });
+    await commitDelivery(delivery.id, userId);
+    await cancelDelivery(delivery.id, userId);
+
+    // Cost is left as-is on cancel (mirroring the WAC rule); no stock reversal.
+    const variant = await getVariant(variantId);
+    expect(variant?.costMinor).toBe(600);
+    expect(variant?.totalQty).toBe(0);
+    const moves = await movementsFor(variantId);
+    expect(moves).toHaveLength(1); // only the original cost_override; no reversal
+    expect(moves[0]?.type).toBe("cost_override");
+
+    // Delivery is undone: the line is no longer delivered, purchase reopened.
+    expect((await getPurchaseItem(itemId))?.qtyDelivered).toBe(0);
+    expect((await getPurchase(purchaseId))?.status).not.toBe("complete");
+  });
+});
 
 describe("commitDelivery", () => {
   test("receives stock, sets WAC from empty, and completes the purchase", async () => {

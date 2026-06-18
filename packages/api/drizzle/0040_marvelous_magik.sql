@@ -1,0 +1,1 @@
+ALTER TABLE `products` MODIFY COLUMN `kind` enum('physical','service','bundle','open_price','non_stock') NOT NULL DEFAULT 'physical';

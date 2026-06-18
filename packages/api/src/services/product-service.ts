@@ -280,7 +280,7 @@ export async function updateProduct(
     name?: string;
     publicName?: string | null;
     description?: string | null;
-    kind?: "physical" | "service" | "bundle" | "open_price";
+    kind?: "physical" | "service" | "bundle" | "open_price" | "non_stock";
     categoryId?: string | null;
     taxRateBps?: number;
     priceMode?: "tax_inclusive" | "tax_exclusive";
@@ -321,6 +321,18 @@ export async function updateProduct(
         .limit(1);
       if (components.length) {
         throw new ProductError("INVALID_KIND_CHANGE", "cannot change a bundle to a physical product — remove bundle components first");
+      }
+    }
+    // non_stock products never hold stock; converting a stocked physical one
+    // would orphan its stock rows (sales would silently stop decrementing).
+    if (existing.kind === "physical" && patch.kind === "non_stock" && variantIds.length) {
+      const stocked = await db
+        .select({ id: stockLocations.id })
+        .from(stockLocations)
+        .where(and(inArray(stockLocations.variantId, variantIds), ne(stockLocations.qty, 0)))
+        .limit(1);
+      if (stocked.length) {
+        throw new ProductError("INVALID_KIND_CHANGE", "cannot change a physical product to non_stock — clear stock first");
       }
     }
   }

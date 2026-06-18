@@ -12,7 +12,7 @@ import { db } from "../lib/db.ts";
 import * as products from "../services/product-service.ts";
 
 export const typeDefs = /* GraphQL */ `
-  enum ProductKind { physical service bundle open_price }
+  enum ProductKind { physical service bundle open_price non_stock }
   enum PriceMode { tax_inclusive tax_exclusive }
   enum VariantUnit { piece g ml mm }
 

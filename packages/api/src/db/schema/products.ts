@@ -62,9 +62,13 @@ export const ONLINE_STOCK_MODES = ["show_real", "peek", "hide"] as const;
 /**
  * Shared product identity. The sellable SKU lives on `product_variants`;
  * every product has at least one. `kind` distinguishes stock-tracked goods
- * from services (which skip stock movements and allow price overrides) and
+ * from services (which skip stock movements and allow price overrides),
  * `open_price` items — loose hardware (fasteners) sold by a guessed lump
- * price, no stock tracking, with cost derived from `costRatioBps`.
+ * price, no stock tracking, with cost derived from `costRatioBps` — and
+ * `non_stock` items, which sell at a real price and carry a real cost
+ * (auto-maintained from purchases/landed cost as a cost-only update) but
+ * never hold stock. Use `non_stock` for resale-priced fasteners where the
+ * margin must be protected against a known cost.
  */
 export const products = mysqlTable(
   "products",
@@ -76,7 +80,7 @@ export const products = mysqlTable(
     // Null means public surfaces fall back to `name`.
     publicName: varchar({ length: 300 }),
     description: text(),
-    kind: mysqlEnum(["physical", "service", "bundle", "open_price"]).notNull().default("physical"),
+    kind: mysqlEnum(["physical", "service", "bundle", "open_price", "non_stock"]).notNull().default("physical"),
     categoryId: ulidRef().references(() => productCategories.id, { onDelete: "set null" }),
     taxRateBps: int().notNull().default(0),
     priceMode: mysqlEnum(["tax_inclusive", "tax_exclusive"]).notNull(),

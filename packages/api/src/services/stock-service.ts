@@ -36,7 +36,8 @@ export type StockErrorCode =
   | "VARIANT_NOT_FOUND"
   | "INVALID_INPUT"
   | "NO_STOCK_TO_PULL"
-  | "BUNDLE_NO_STOCK";
+  | "BUNDLE_NO_STOCK"
+  | "NON_STOCK_NO_QTY";
 
 export class StockError extends Error {
   constructor(
@@ -107,6 +108,12 @@ async function recordMovementTx(tx: Tx, input: RecordMovementInput): Promise<Mov
   const product = await tx.query.products.findFirst({ where: eq(products.id, variant.productId) });
   if (product?.kind === "bundle") {
     throw new StockError("BUNDLE_NO_STOCK", "bundle products do not carry stock — adjust the component variants instead");
+  }
+  // non_stock products hold no inventory — their cost is maintained via
+  // cost-only movements (cost_override, qtyDelta 0, e.g. on delivery). Reject
+  // anything that would move quantity (sales, adjustments, purchase receipts).
+  if (product?.kind === "non_stock" && input.qtyDelta !== 0) {
+    throw new StockError("NON_STOCK_NO_QTY", "non_stock products hold no stock — only their cost may change");
   }
 
   if (COST_AFFECTING.has(input.type) && input.unitCost == null) {

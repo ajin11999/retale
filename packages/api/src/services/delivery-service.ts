@@ -900,13 +900,14 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       const pi = lines.get(leaf.purchaseItemId as string);
       if (!pi?.variantId) continue;
 
-      // Bundles cannot be received as stock — their components hold inventory.
+      // Resolve the variant's product kind: bundles cannot be received at all,
+      // and non_stock items take a cost-only receipt (no stock moves).
       const v = await tx.query.productVariants.findFirst({ where: eq(productVariants.id, pi.variantId) });
-      if (v) {
-        const prd = await tx.query.products.findFirst({ where: eq(products.id, v.productId) });
-        if (prd?.kind === "bundle") {
-          throw new DeliveryError("BUNDLE_NOT_STOCKED", `variant ${pi.variantId} is a bundle — it cannot be received as stock`);
-        }
+      const prd = v
+        ? await tx.query.products.findFirst({ where: eq(products.id, v.productId) })
+        : undefined;
+      if (prd?.kind === "bundle") {
+        throw new DeliveryError("BUNDLE_NOT_STOCKED", `variant ${pi.variantId} is a bundle — it cannot be received as stock`);
       }
 
       const qty = leaf.qty as number;
@@ -914,13 +915,34 @@ export async function commitDelivery(id: string, userId: string): Promise<Delive
       const landed = roundMoney(
         leaf.costMinor + (freightByLeaf.get(leaf.id) ?? 0) + qty * rate,
       );
+      const unitCost = roundMoney(landed / qty);
+
+      // non_stock: set the variant cost to this landed per-unit but hold no
+      // stock. cost_override (qtyDelta 0) leaves totalQty at 0 and writes no
+      // stock_locations row, while still recording previous/next cost for audit.
+      if (prd?.kind === "non_stock") {
+        await recordMovement(
+          {
+            variantId: pi.variantId,
+            type: "cost_override",
+            qtyDelta: 0,
+            unitCost,
+            refType: "purchase",
+            refId: delivery.id,
+            createdByUserId: userId,
+          },
+          tx,
+        );
+        continue;
+      }
+
       await recordMovement(
         {
           variantId: pi.variantId,
           locationId: delivery.targetLocationId,
           type: "purchase_receive",
           qtyDelta: qty,
-          unitCost: roundMoney(landed / qty),
+          unitCost,
           refType: "purchase",
           refId: delivery.id,
           createdByUserId: userId,
@@ -1019,10 +1041,24 @@ export async function cancelDelivery(id: string, userId: string): Promise<Delive
       for (const v of rows) variants.set(v.id, v);
     }
 
+    // non_stock variants never received stock — there is nothing to reverse,
+    // and their cost is left as-is (mirroring the "WAC not re-valued on cancel"
+    // rule). Identify them so the reversal loop can skip them.
+    const nonStockVariants = new Set<string>();
+    if (variantIds.length > 0) {
+      const rows = await tx
+        .select({ variantId: productVariants.id })
+        .from(productVariants)
+        .innerJoin(products, eq(products.id, productVariants.productId))
+        .where(and(inArray(productVariants.id, variantIds), eq(products.kind, "non_stock")));
+      for (const r of rows) nonStockVariants.add(r.variantId);
+    }
+
     // Reverse the stock with non-cost-affecting outbound movements.
     for (const leaf of leaves) {
       const pi = lines.get(leaf.purchaseItemId as string);
       if (!pi?.variantId) continue;
+      if (nonStockVariants.has(pi.variantId)) continue;
       const variant = variants.get(pi.variantId);
       await recordMovement(
         {

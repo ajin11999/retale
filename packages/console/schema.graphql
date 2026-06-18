@@ -625,6 +625,7 @@ enum ProductKind {
   service
   bundle
   open_price
+  non_stock
 }
 
 enum PriceMode {
