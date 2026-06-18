@@ -8,6 +8,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
+  import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
   // Per-location count sheet — refetched whenever the location changes.
@@ -174,14 +175,17 @@
   }
   const shownIds = $derived(new Set(displayRows.map((r) => r.variantId)));
   const hits = $derived.by<VariantHit[]>(() => {
-    const q = search.trim().toLowerCase();
-    if (q.length < 2) return [];
+    // AND-match whitespace tokens across name, SKU, label, and barcode, so word
+    // order and gaps don't matter — "sproc m6" matches "M6 … sprocket". Mirrors
+    // the Products screen / Combobox search rather than one contiguous match.
+    if (search.trim().length < 2) return [];
+    const tokens = searchTokens(search);
+    if (tokens.length === 0) return [];
     const out: VariantHit[] = [];
     for (const p of products) {
       for (const v of p.variants) {
         if (shownIds.has(v.id)) continue;
-        const hay = `${p.name} ${v.sku} ${v.label ?? ""} ${v.barcode ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) continue;
+        if (!matchesTokens(tokens, p.name, v.sku, v.label, v.barcode)) continue;
         out.push({
           variantId: v.id,
           productName: p.name,
@@ -212,6 +216,19 @@
     added = added.filter((a) => a.variantId !== variantId);
     delete counted[variantId];
   }
+
+  // ---- Row filter ----------------------------------------------------------
+  // The same query narrows the rows already at this location, so a long count
+  // sheet collapses to the item you're after. Edits live in `counted` (keyed by
+  // variantId), so filtering only hides rows — pending counts and the save set
+  // (`changedRows`, computed over the full list) are untouched.
+  const visibleRows = $derived.by<DisplayRow[]>(() => {
+    const tokens = searchTokens(search);
+    if (tokens.length === 0) return displayRows;
+    return displayRows.filter((r) =>
+      matchesTokens(tokens, r.productName, r.sku, r.label),
+    );
+  });
 
   // ---- Save ----------------------------------------------------------------
   let reason = $state("");
@@ -282,8 +299,9 @@
 
   <p class="text-sm text-muted-foreground">
     Type the counted on-hand for each item; the system records the difference as
-    a stock adjustment against the chosen location. Use the search to pull in
-    items that hold no stock here yet. One reason applies to the whole save.
+    a stock adjustment against the chosen location. Use the search to filter the
+    list below, or to pull in items that hold no stock here yet. One reason
+    applies to the whole save.
   </p>
 
   {#if feedback}
@@ -296,7 +314,7 @@
   <div class="relative max-w-md">
     <Input
       bind:value={search}
-      placeholder="Add an item by name, SKU, or barcode…"
+      placeholder="Search or add items by name, SKU, or barcode…"
       disabled={!canAdjust}
     />
     {#if hits.length > 0}
@@ -337,7 +355,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each displayRows as r (r.variantId)}
+          {#each visibleRows as r (r.variantId)}
             {@const d = delta(r)}
             <tr
               class="border-b last:border-0 hover:bg-muted/40
@@ -380,11 +398,15 @@
               </td>
             </tr>
           {/each}
-          {#if displayRows.length === 0}
+          {#if visibleRows.length === 0}
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                No stock recorded at this location. Use the search above to add
-                items and set their counts.
+                {#if search.trim() && displayRows.length > 0}
+                  No items here match your search. Pick a result above to add it.
+                {:else}
+                  No stock recorded at this location. Use the search above to add
+                  items and set their counts.
+                {/if}
               </td>
             </tr>
           {/if}
