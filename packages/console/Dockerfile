@@ -30,7 +30,8 @@ RUN bun install --frozen-lockfile --production
 
 COPY --from=build /app/packages/console/build packages/console/build
 
-# GRAPHQL_URL and ORIGIN are provided at container start (compose).
+# GRAPHQL_URL and the proxy origin headers (PROTOCOL_HEADER / HOST_HEADER) are
+# provided at container start (compose).
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 WORKDIR /app/packages/console
 EXPOSE 3000

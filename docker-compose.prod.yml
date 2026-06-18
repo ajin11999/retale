@@ -56,7 +56,12 @@ services:
     restart: unless-stopped
     environment:
       GRAPHQL_URL: http://api:3000/graphql
-      ORIGIN: https://${HOST_IP} # adapter-node needs ORIGIN behind a proxy
+      # Derive the origin from Caddy's forwarded headers instead of pinning one
+      # host: the console is served on both https://localhost and https://HOST_IP
+      # (see deploy/Caddyfile), and a single ORIGIN makes SvelteKit's CSRF guard
+      # 403 the login POST from the other host ("Cross-site … forbidden").
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
     depends_on:
       - api
 
