@@ -53,18 +53,54 @@
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
   const canCreate = $derived(has("customer.create"));
 
-  // ---- Search --------------------------------------------------------------
+  // ---- Search + sort -------------------------------------------------------
+  // Archived customers always sink below active ones; within each group the
+  // chosen column decides the order (default: name). Sorting by AR balance
+  // descending surfaces the biggest active debtors first.
+  type SortKey = "name" | "balance" | "limit";
   let search = $state("");
+  let sortKey = $state<SortKey>("name");
+  let sortDir = $state<"asc" | "desc">("asc");
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      // Money columns are most useful largest-first; names read better A→Z.
+      sortDir = key === "name" ? "asc" : "desc";
+    }
+  }
+
+  const sortGlyph = (key: SortKey) =>
+    sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
   const rows = $derived.by(() => {
     const tokens = searchTokens(search.trim());
     const list = tokens.length
       ? customers.filter((c) => matchesTokens(tokens, c.name, c.phone, c.email))
       : customers;
-    // Active first, then by name.
+    const dir = sortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => {
       const av = a.archivedAt ? 1 : 0;
       const bv = b.archivedAt ? 1 : 0;
-      return av - bv || a.name.localeCompare(b.name);
+      if (av !== bv) return av - bv;
+      let cmp = 0;
+      if (sortKey === "balance") {
+        cmp = (a.balanceMinor - b.balanceMinor) * dir;
+      } else if (sortKey === "limit") {
+        // Customers with no limit set sort to the end regardless of direction.
+        const al = a.creditLimitMinor ?? null;
+        const bl = b.creditLimitMinor ?? null;
+        if (al == null && bl == null) cmp = 0;
+        else if (al == null) return 1;
+        else if (bl == null) return -1;
+        else cmp = (al - bl) * dir;
+      } else {
+        cmp = a.name.localeCompare(b.name) * dir;
+      }
+      // Stable tiebreak by name so equal values keep a sensible order.
+      return cmp || a.name.localeCompare(b.name);
     });
   });
 
@@ -163,11 +199,32 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Customer</th>
+            <th class="px-4 py-2 font-medium">
+              <button
+                class="inline-flex items-center hover:text-foreground"
+                onclick={() => toggleSort("name")}
+              >
+                Customer{sortGlyph("name")}
+              </button>
+            </th>
             <th class="px-4 py-2 font-medium">Phone</th>
             <th class="px-4 py-2 font-medium">Email</th>
-            <th class="px-4 py-2 text-right font-medium">AR balance</th>
-            <th class="px-4 py-2 text-right font-medium">Credit limit</th>
+            <th class="px-4 py-2 text-right font-medium">
+              <button
+                class="inline-flex items-center hover:text-foreground"
+                onclick={() => toggleSort("balance")}
+              >
+                AR balance{sortGlyph("balance")}
+              </button>
+            </th>
+            <th class="px-4 py-2 text-right font-medium">
+              <button
+                class="inline-flex items-center hover:text-foreground"
+                onclick={() => toggleSort("limit")}
+              >
+                Credit limit{sortGlyph("limit")}
+              </button>
+            </th>
             <th class="px-4 py-2 font-medium">Status</th>
           </tr>
         </thead>
