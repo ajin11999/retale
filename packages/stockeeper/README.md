@@ -58,8 +58,10 @@ flutter build apk --release        # or from the repo root: bun run build:stocke
 The APK lands in `build/app/outputs/flutter-apk/app-release.apk`; install it
 directly on staff phones (local-network deployment, no store).
 
-On first launch the app asks for the API base URL
-(e.g. `http://192.168.1.10:3000`) — it appends `/graphql` itself.
+On first launch the app asks for the API base URL — it appends `/graphql`
+itself. In production that is the Caddy HTTPS endpoint, e.g.
+`https://192.168.1.10:8443` (dev against a local API can use plain
+`http://192.168.1.10:3000`, but the prod stack only exposes HTTPS).
 
 ## Notes
 
@@ -69,3 +71,13 @@ On first launch the app asks for the API base URL
   the runtime prompt itself. `minSdk = 23` (mobile_scanner requirement).
 - Receiving quantities are integers (server-enforced); reconcile honours each
   variant's `qtyDecimals`.
+- **TLS / CA:** the prod API is served by Caddy's self-signed local CA over
+  HTTPS. The CA root is **bundled into the APK** as a Flutter asset
+  (`assets/retale_ca.crt`) and trusted at the Dart TLS layer in
+  `graphql_service.dart` (`loadTrustedCertificate`). This is required because
+  graphql_flutter talks through Dart's `HttpClient`, which verifies TLS with
+  BoringSSL against its own trust store — it ignores Android's
+  `network_security_config.xml` and user-installed CAs, so a per-phone cert
+  install would not help anyway. If the CA is rotated (the `caddy-data` volume
+  is wiped — see `deploy/README.md` §6), re-export `root.crt` over
+  `assets/retale_ca.crt` and rebuild the APK.

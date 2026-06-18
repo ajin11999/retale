@@ -15,6 +15,8 @@ Future<void> main() async {
 
   // Wire token injection without an auth<->graphql import cycle.
   GraphQLService.instance.tokenProvider = AuthService.instance.bearerToken;
+  // Trust the bundled Caddy local-CA root so HTTPS to the prod stack verifies.
+  await GraphQLService.instance.loadTrustedCertificate();
   if (AppConfig.instance.hasApiUrl) {
     GraphQLService.instance.rebuild();
   }

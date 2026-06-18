@@ -43,6 +43,9 @@ yarn-error.log*
 *.crt
 *.key
 *.pem
+# …except the Caddy local-CA *public* root bundled into the Stockeeper APK so
+# Android phones trust the prod HTTPS endpoint without a per-device cert install.
+!packages/stockeeper/assets/retale_ca.crt
 
 # Drizzle
 packages/api/drizzle/meta/_journal.json.bak

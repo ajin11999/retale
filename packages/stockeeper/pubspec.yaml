@@ -15,6 +15,10 @@ dependencies:
   # GraphQL client (same choice as the POS app).
   graphql_flutter: ^5.2.0
 
+  # Custom HTTP client so we can hand graphql_flutter a SecurityContext that
+  # trusts the bundled Caddy local-CA root (see graphql_service.dart).
+  http: ^1.6.0
+
   # Local config + token storage.
   shared_preferences: ^2.5.2
   flutter_secure_storage: ^9.2.2
@@ -36,3 +40,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo.png
+    # Caddy local-CA root, trusted at the Dart TLS layer so HTTPS to the prod
+    # stack works without a per-phone cert install. See graphql_service.dart.
+    - assets/retale_ca.crt
