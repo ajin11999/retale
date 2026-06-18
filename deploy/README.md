@@ -96,13 +96,22 @@ part of this stack.
 
 ## Day-to-day
 
-- **Update app code:** pull, then
+These update paths are independent — run only the one(s) whose code actually
+changed. The Flutter POS/workshop bundles are built on the host, **not** by
+`up -d --build`, so an api/console deploy never rebuilds them, and a POS- or
+workshop-only change needs neither `up -d --build` nor the *other* app's build.
+
+- **Update api / console:** pull, then
   `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
-  (rebuilds api/console images; migrations apply automatically).
-- **Update POS / workshop web:** `bun run build:pos-web` (or
-  `bun run build:workshop-web`), then
+  (rebuilds api/console images; migrations apply automatically). This does not
+  touch the POS or workshop web bundles.
+- **Update POS web** (only when `packages/pos` changed):
+  `bun run build:pos-web`, then
   `docker compose -f docker-compose.prod.yml restart caddy` (it's a bind mount;
   the restart just clears any cached file handles).
+- **Update workshop web** (only when `packages/workshop` changed):
+  `bun run build:workshop-web`, then the same `restart caddy`. You do **not**
+  need this if only the api/console/POS changed.
 - **Logs:** `docker compose -p retale-prod logs -f api` (or `console`, `caddy`).
 - **Stop:** `docker compose -p retale-prod down` — data persists in named
   volumes (`dbdata`, `uploads`, `caddy-data`). Never `down -v` in production.
