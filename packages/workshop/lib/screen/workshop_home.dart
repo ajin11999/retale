@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:retale_workshop/component/job_list.dart';
 import 'package:retale_workshop/config.dart';
+import 'package:retale_workshop/graphql/client.dart';
 import 'package:retale_workshop/schema/project.dart';
 import 'package:retale_workshop/screen/job_sheet.dart';
+import 'package:retale_workshop/services/catalog_repo.dart';
 import 'package:retale_workshop/services/project_repo.dart';
 
 /// Two-pane workshop shell: active jobs on the left, the selected job sheet on
@@ -20,9 +22,11 @@ class WorkshopHome extends StatefulWidget {
 
 class _WorkshopHomeState extends State<WorkshopHome> {
   final _repo = ProjectRepo();
+  final _catalog = CatalogRepo();
   StreamSubscription<List<Project>>? _sub;
   List<Project> _jobs = const [];
   int? _selectedId;
+  bool _syncing = false;
 
   @override
   void initState() {
@@ -32,6 +36,37 @@ class _WorkshopHomeState extends State<WorkshopHome> {
     _sub = _repo.watchActive().listen((jobs) {
       if (mounted) setState(() => _jobs = jobs);
     });
+    // Refresh the offline product cache while we (presumably) have the network.
+    // Best-effort: if offline, line entry keeps using the last cached catalog.
+    _syncCatalog(manual: false);
+  }
+
+  /// Pull the latest catalog into the local cache so product search works
+  /// offline. Silent on the startup pass; reports outcome on a manual refresh.
+  Future<void> _syncCatalog({required bool manual}) async {
+    if (_syncing) return;
+    if (mounted) setState(() => _syncing = true);
+    try {
+      await _catalog.sync(AppGraphQL.notifier.value);
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Catalog updated.')),
+        );
+      }
+    } catch (e) {
+      // Offline / API error — keep the existing cache; search still works from
+      // it. Only surface the failure when the user asked for a refresh.
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Theme.of(context).colorScheme.errorContainer,
+            content: Text('Catalog not refreshed (offline?): $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
   }
 
   @override
@@ -68,6 +103,17 @@ class _WorkshopHomeState extends State<WorkshopHome> {
         ),
         title: const Text('Retale Workshop'),
         actions: [
+          IconButton(
+            tooltip: 'Refresh product catalog',
+            onPressed: _syncing ? null : () => _syncCatalog(manual: true),
+            icon: _syncing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync),
+          ),
           IconButton(
             tooltip: 'Change register',
             onPressed: _changePos,

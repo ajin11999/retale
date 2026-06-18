@@ -2,9 +2,9 @@ import 'package:retale_workshop/schema/project.dart';
 
 /// Recursively sum a line tree: a leaf contributes `qty × unitPriceMinor`, a
 /// group contributes the sum of its children. Groups are organisational only.
-int linesTotalMinor(List<WorkLine>? lines) {
+double linesTotalMinor(List<WorkLine>? lines) {
   if (lines == null) return 0;
-  var sum = 0;
+  var sum = 0.0;
   for (final l in lines) {
     if (l.isGroup) {
       sum += linesTotalMinor(l.children);
@@ -15,12 +15,12 @@ int linesTotalMinor(List<WorkLine>? lines) {
   return sum;
 }
 
-int paymentsTotalMinor(List<WorkPayment>? payments) {
+double paymentsTotalMinor(List<WorkPayment>? payments) {
   if (payments == null) return 0;
-  return payments.fold(0, (sum, p) => sum + p.amountMinor);
+  return payments.fold(0.0, (sum, p) => sum + p.amountMinor);
 }
 
-int remainingMinor(Project p) =>
+double remainingMinor(Project p) =>
     linesTotalMinor(p.lines) - paymentsTotalMinor(p.payments);
 
 /// Margin math over a [WorkLine]'s cost snapshot. Lives here (not on the model
@@ -30,10 +30,10 @@ extension WorkLineMargin on WorkLine {
   /// cost from the price via the snapshotted ratio (the API's snapshot rule);
   /// everything else uses the cost captured at pick time. Null when the line
   /// predates cost snapshots.
-  int? unitCostAt(int priceMinor) {
+  double? unitCostAt(double priceMinor) {
     final ratio = costRatioBps;
     if (variantKind == 'open_price' && ratio != null) {
-      return (priceMinor * ratio / 10000).round();
+      return priceMinor * ratio / 10000;
     }
     return unitCostMinor;
   }

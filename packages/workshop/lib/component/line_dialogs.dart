@@ -50,7 +50,7 @@ class _LeafEditorState extends State<_LeafEditor> {
   /// Live margin preview at the currently typed price, from the line's cost
   /// snapshot. Null (no pill) when the cost is unknown or there is no price.
   double? get _previewMarginFraction {
-    final price = parseMinor(_price.text) ?? 0;
+    final price = parseMinor(_price.text) ?? 0.0;
     if (price <= 0) return null;
     final cost = widget.existing.unitCostAt(price);
     if (cost == null) return null;
@@ -69,7 +69,7 @@ class _LeafEditorState extends State<_LeafEditor> {
     final qty = int.tryParse(_qty.text.trim()) ?? 0;
     if (qty <= 0) return;
     final price = _priceEditable
-        ? (parseMinor(_price.text) ?? 0)
+        ? (parseMinor(_price.text) ?? 0.0)
         : widget.existing.unitPriceMinor;
 
     final line = widget.existing
@@ -82,7 +82,7 @@ class _LeafEditorState extends State<_LeafEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final price = parseMinor(_price.text) ?? 0;
+    final price = parseMinor(_price.text) ?? 0.0;
     // Null on legacy lines saved before cost snapshots — then no cost line.
     final cost = widget.existing.unitCostAt(price);
     return AlertDialog(
@@ -111,8 +111,8 @@ class _LeafEditorState extends State<_LeafEditor> {
                   child: TextField(
                     controller: _price,
                     enabled: _priceEditable,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: const [ThousandsInputFormatter()],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: const [MoneyInputFormatter()],
                     decoration: InputDecoration(
                       labelText: _priceEditable ? 'Price' : 'Bundle price',
                       prefixText: 'Rp ',

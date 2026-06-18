@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:graphql_flutter/graphql_flutter.dart';
 import 'package:retale_workshop/component/margin_pill.dart';
 import 'package:retale_workshop/schema/project.dart';
+import 'package:retale_workshop/services/catalog_repo.dart';
 import 'package:retale_workshop/services/product_service.dart';
 import 'package:retale_workshop/util/money.dart';
 
@@ -75,8 +75,9 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
   /// options overlay can match it.
   double _fieldWidth = 0;
 
-  ProductService get _service =>
-      ProductService(GraphQLProvider.of(context).value);
+  /// Product search reads the local catalog cache, so it works offline. The
+  /// cache is refreshed from the API by the workshop home while online.
+  final _catalog = CatalogRepo();
 
   static const _kindLabel = {
     'service': 'Service',
@@ -97,7 +98,7 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
   double? get _previewMarginFraction {
     final v = _variant;
     if (v == null) return null;
-    final price = parseMinor(_price.text) ?? 0;
+    final price = parseMinor(_price.text) ?? 0.0;
     if (price <= 0) return null;
     return (price - v.costForPrice(price)) / price;
   }
@@ -126,11 +127,11 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
         return;
       }
       try {
-        completer.complete(await _service.search(text));
+        completer.complete(await _catalog.search(text));
       } catch (e) {
         completer.complete(const <CatalogVariant>[]);
         // Surface the failure — a silent empty dropdown reads as "no results"
-        // and hides real problems (auth expiry, server down, bad query).
+        // and hides real problems (e.g. a corrupt cache).
         if (mounted) {
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
@@ -202,8 +203,8 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
                 child: TextField(
                   controller: _price,
                   enabled: _variant != null && !isBundle,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: const [ThousandsInputFormatter()],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: const [MoneyInputFormatter()],
                   onSubmitted: (_) => _submit(),
                   decoration: InputDecoration(
                     isDense: true,
@@ -255,7 +256,7 @@ class _InlineLeafFormState extends State<InlineLeafForm> {
   }
 
   Widget _costPreview() {
-    final price = parseMinor(_price.text) ?? 0;
+    final price = parseMinor(_price.text) ?? 0.0;
     return Padding(
       padding: const EdgeInsets.only(top: 6, left: 2),
       child: CostMarginLine(

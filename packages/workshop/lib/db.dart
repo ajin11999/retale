@@ -10,6 +10,12 @@ class DatabaseService {
   static final StoreRef<int, Map<String, Object?>> projects =
       intMapStoreFactory.store('projects');
 
+  /// Cached catalog variants, keyed by variantId, so product entry works
+  /// offline. Refreshed from the API whenever the app is online. See
+  /// [CatalogRepo].
+  static final StoreRef<String, Map<String, Object?>> catalog =
+      stringMapStoreFactory.store('catalog');
+
   static Future<void> setup() async {
     db = await openWorkshopDb();
   }

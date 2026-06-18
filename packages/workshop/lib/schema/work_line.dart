@@ -30,14 +30,14 @@ class WorkLine {
 
   int qty = 1;
 
-  /// Chosen unit price, minor units. Sent as the price override on submit
-  /// (except bundles, which always use the catalog price).
-  int unitPriceMinor = 0;
+  /// Chosen unit price, literal rupiah (up to 2 decimals). Sent as the price
+  /// override on submit (except bundles, which always use the catalog price).
+  double unitPriceMinor = 0;
 
-  /// The variant's weighted-average unit cost at pick time, minor units —
+  /// The variant's weighted-average unit cost at pick time, literal rupiah —
   /// local-only, feeds the margin pill. Null on groups and on lines saved
   /// before cost snapshots existed (those simply show no margin).
-  int? unitCostMinor;
+  double? unitCostMinor;
 
   /// Cost ratio (basis points) snapshot for open-price variants, where cost is
   /// a fraction of the entered price — kept so the margin pill stays correct
@@ -67,8 +67,8 @@ class WorkLine {
     ..variantKind = json['variantKind'] as String?
     ..snapshotName = (json['snapshotName'] as String?) ?? ''
     ..qty = (json['qty'] as int?) ?? 1
-    ..unitPriceMinor = (json['unitPriceMinor'] as int?) ?? 0
-    ..unitCostMinor = json['unitCostMinor'] as int?
+    ..unitPriceMinor = (json['unitPriceMinor'] as num?)?.toDouble() ?? 0
+    ..unitCostMinor = (json['unitCostMinor'] as num?)?.toDouble()
     ..costRatioBps = json['costRatioBps'] as int?
     ..children = workLinesFromJson(json['children']);
 }

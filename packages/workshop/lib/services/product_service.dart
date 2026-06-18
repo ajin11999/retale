@@ -18,10 +18,12 @@ class CatalogVariant {
   final String kind; // physical | service | open_price | bundle
   final String name;
   final String sku;
-  final int priceMinor;
 
-  /// Weighted-average unit cost from the catalog, minor units.
-  final int costMinor;
+  /// Catalog price, literal rupiah (up to 2 decimals).
+  final double priceMinor;
+
+  /// Weighted-average unit cost from the catalog, literal rupiah.
+  final double costMinor;
 
   /// Product-level cost ratio (basis points) for open-price products, where
   /// cost is a fraction of whatever price the clerk enters. Null elsewhere.
@@ -38,13 +40,37 @@ class CatalogVariant {
   /// Per-unit cost at [priceMinor]: open-price products derive cost from the
   /// entered price via the product's ratio (the API's snapshot rule, same as
   /// the POS); everything else uses the variant's weighted-average cost.
-  int costForPrice(int priceMinor) {
+  double costForPrice(double priceMinor) {
     final ratio = costRatioBps;
     if (isOpenPrice && ratio != null) {
-      return (priceMinor * ratio / 10000).round();
+      return priceMinor * ratio / 10000;
     }
     return costMinor;
   }
+
+  /// Serialised for the local catalog cache (sembast). The flattened [name] is
+  /// stored as-is so offline search and rendering need no re-derivation.
+  Map<String, Object?> toJson() => {
+        'variantId': variantId,
+        'kind': kind,
+        'name': name,
+        'sku': sku,
+        'priceMinor': priceMinor,
+        'costMinor': costMinor,
+        'costRatioBps': costRatioBps,
+        'unit': unit,
+      };
+
+  factory CatalogVariant.fromJson(Map<String, Object?> json) => CatalogVariant(
+        variantId: json['variantId'] as String,
+        kind: json['kind'] as String,
+        name: json['name'] as String,
+        sku: json['sku'] as String,
+        priceMinor: (json['priceMinor'] as num?)?.toDouble() ?? 0,
+        costMinor: (json['costMinor'] as num?)?.toDouble() ?? 0,
+        costRatioBps: (json['costRatioBps'] as num?)?.round(),
+        unit: (json['unit'] as String?) ?? 'piece',
+      );
 }
 
 class ProductException implements Exception {
@@ -69,10 +95,13 @@ class ProductService {
   ProductService(this.client);
   final GraphQLClient client;
 
-  Future<List<CatalogVariant>> search(String keyword) async {
+  /// Fetch the whole catalog (all non-archived products, flattened to variants)
+  /// for the local cache. Requires the network — callers cache the result so
+  /// product search itself stays offline. See [CatalogRepo].
+  Future<List<CatalogVariant>> fetchAll() async {
     final res = await client.query(QueryOptions(
       document: gql(_productsQuery),
-      variables: {'search': keyword.trim().isEmpty ? null : keyword.trim()},
+      variables: const {'search': null},
       fetchPolicy: FetchPolicy.networkOnly,
     ));
     if (res.hasException) {
@@ -95,8 +124,8 @@ class ProductService {
           kind: kind,
           name: label == null || label.isEmpty ? productName : '$productName — $label',
           sku: v['sku'] as String,
-          priceMinor: (v['priceMinor'] as num).round(),
-          costMinor: (v['costMinor'] as num?)?.round() ?? 0,
+          priceMinor: (v['priceMinor'] as num).toDouble(),
+          costMinor: (v['costMinor'] as num?)?.toDouble() ?? 0,
           costRatioBps: costRatioBps,
           unit: v['unit'] as String,
         ));

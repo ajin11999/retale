@@ -1,22 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:graphql_flutter/graphql_flutter.dart';
+import 'package:sembast/sembast_memory.dart';
 import 'package:retale_workshop/component/inline_line_forms.dart';
-
-/// A GraphQL link whose every response is an error — simulates an expired
-/// session / unreachable API for the product search.
-class _FailingLink extends Link {
-  @override
-  Stream<Response> request(Request request, [NextLink? forward]) =>
-      Stream.value(Response(
-        errors: const [GraphQLError(message: 'Authentication required')],
-        response: const {},
-      ));
-}
+import 'package:retale_workshop/db.dart';
+import 'package:retale_workshop/services/catalog_repo.dart';
+import 'package:retale_workshop/services/product_service.dart';
 
 void main() {
   Widget host(Widget form) => MaterialApp(home: Scaffold(body: form));
+
+  // The add-line form searches the local catalog cache, so it needs an
+  // initialised sembast store (offline-first — no network involved).
+  setUpAll(() async {
+    DatabaseService.db =
+        await newDatabaseFactoryMemory().openDatabase('inline_forms_test');
+    await CatalogRepo().replaceAll([
+      CatalogVariant(
+        variantId: 'v1',
+        kind: 'physical',
+        name: 'Oli Mesin',
+        sku: 'OLI-1',
+        priceMinor: 50000,
+        costMinor: 30000,
+        costRatioBps: null,
+        unit: 'pcs',
+      ),
+    ]);
+  });
 
   group('inline form Esc-to-cancel', () {
     testWidgets('Esc in the add-line form search field cancels', (tester) async {
@@ -50,15 +61,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
     });
 
-    testWidgets('search failure shows a snackbar, not a silent empty dropdown',
-        (tester) async {
-      final client = ValueNotifier(GraphQLClient(
-        link: _FailingLink(),
-        cache: GraphQLCache(store: InMemoryStore()),
-      ));
-      await tester.pumpWidget(GraphQLProvider(
-        client: client,
-        child: host(InlineLeafForm(onSubmit: (_) {}, onCancel: () {})),
+    testWidgets('search filters the offline catalog cache', (tester) async {
+      await tester.pumpWidget(host(
+        InlineLeafForm(onSubmit: (_) {}, onCancel: () {}),
       ));
       await tester.pump();
 
@@ -67,14 +72,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350)); // search debounce
       await tester.pumpAndSettle();
 
-      expect(
-        find.textContaining('Product search failed'),
-        findsOneWidget,
-      );
-
-      // Let the snackbar's display timer elapse so no timer outlives the test.
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      // The cached product surfaces with no network involved.
+      expect(find.text('Oli Mesin'), findsOneWidget);
     });
 
     testWidgets('Esc in the add-section form cancels', (tester) async {

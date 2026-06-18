@@ -26,13 +26,17 @@ class PaymentSection extends StatefulWidget {
   State<PaymentSection> createState() => _PaymentSectionState();
 }
 
+/// Below this (half a cent) a balance counts as cleared — absorbs the tiny
+/// float drift that summing 2-decimal rupiah amounts can produce.
+const double _settleEpsilon = 0.005;
+
 class _PaymentSectionState extends State<PaymentSection> {
   bool _busy = false;
 
   Project get _p => widget.project;
-  int get _total => linesTotalMinor(_p.lines);
-  int get _paid => paymentsTotalMinor(_p.payments);
-  int get _remaining => _total - _paid;
+  double get _total => linesTotalMinor(_p.lines);
+  double get _paid => paymentsTotalMinor(_p.payments);
+  double get _remaining => _total - _paid;
 
   Future<void> _takePayment() async {
     final result = await _showPaymentDialog(remaining: _remaining);
@@ -46,7 +50,7 @@ class _PaymentSectionState extends State<PaymentSection> {
 
     // A settling (non-deposit) payment that clears the balance triggers upload.
     final paidAfter = _paid + result.amountMinor;
-    if (!result.isDeposit && _total > 0 && paidAfter >= _total) {
+    if (!result.isDeposit && _total > 0 && paidAfter >= _total - _settleEpsilon) {
       await _submit();
     }
   }
@@ -84,7 +88,7 @@ class _PaymentSectionState extends State<PaymentSection> {
   @override
   Widget build(BuildContext context) {
     final uploaded = _p.isUploaded;
-    final settled = _total > 0 && _remaining <= 0;
+    final settled = _total > 0 && _remaining <= _settleEpsilon;
 
     return Card(
       child: Padding(
@@ -155,7 +159,7 @@ class _PaymentSectionState extends State<PaymentSection> {
     );
   }
 
-  Widget _row(BuildContext context, String label, int minor,
+  Widget _row(BuildContext context, String label, double minor,
       {bool emphasise = false}) {
     final style = emphasise
         ? Theme.of(context).textTheme.titleMedium
@@ -169,7 +173,7 @@ class _PaymentSectionState extends State<PaymentSection> {
     );
   }
 
-  Future<_PaymentResult?> _showPaymentDialog({required int remaining}) {
+  Future<_PaymentResult?> _showPaymentDialog({required double remaining}) {
     return showDialog<_PaymentResult>(
       context: context,
       builder: (_) => _PaymentDialog(remaining: remaining),
@@ -179,13 +183,13 @@ class _PaymentSectionState extends State<PaymentSection> {
 
 class _PaymentResult {
   _PaymentResult(this.amountMinor, this.isDeposit);
-  final int amountMinor;
+  final double amountMinor;
   final bool isDeposit;
 }
 
 class _PaymentDialog extends StatefulWidget {
   const _PaymentDialog({required this.remaining});
-  final int remaining;
+  final double remaining;
 
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
@@ -198,7 +202,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   @override
   void initState() {
     super.initState();
-    final preset = widget.remaining > 0 ? widget.remaining : 0;
+    final preset = widget.remaining > 0 ? widget.remaining : 0.0;
     _amount = TextEditingController(text: preset == 0 ? '' : groupMinor(preset));
   }
 
@@ -209,7 +213,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   }
 
   void _save() {
-    final amount = parseMinor(_amount.text) ?? 0;
+    final amount = parseMinor(_amount.text) ?? 0.0;
     if (amount <= 0) return;
     Navigator.of(context).pop(_PaymentResult(amount, _isDeposit));
   }
@@ -224,8 +228,8 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           TextField(
             controller: _amount,
             autofocus: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: const [ThousandsInputFormatter()],
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: const [MoneyInputFormatter()],
             decoration: const InputDecoration(
               labelText: 'Amount',
               prefixText: 'Rp ',

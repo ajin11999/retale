@@ -1,59 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:graphql_flutter/graphql_flutter.dart';
+import 'package:sembast/sembast_memory.dart';
 import 'package:retale_workshop/component/inline_line_forms.dart';
 import 'package:retale_workshop/component/job_lines.dart';
 import 'package:retale_workshop/component/line_dialogs.dart';
 import 'package:retale_workshop/component/margin_pill.dart';
+import 'package:retale_workshop/db.dart';
 import 'package:retale_workshop/schema/project.dart';
+import 'package:retale_workshop/services/catalog_repo.dart';
+import 'package:retale_workshop/services/product_service.dart';
 import 'package:retale_workshop/util/project_calc.dart';
 
-/// A GraphQL link that answers every request with the same canned payload —
-/// lets the add-line form's product search run for real in widget tests.
-class _CannedLink extends Link {
-  _CannedLink(this.data);
-  final Map<String, dynamic> data;
-
-  @override
-  Stream<Response> request(Request request, [NextLink? forward]) =>
-      Stream.value(Response(data: data, response: const {}));
-}
-
-Widget _withClient(Widget child) {
-  final client = ValueNotifier(GraphQLClient(
-    // __typename everywhere: the client adds it to the query and the cache
-    // write rejects responses missing it.
-    link: _CannedLink({
-      '__typename': 'Query',
-      'products': [
-        {
-          '__typename': 'Product',
-          'name': 'Oli Mesin',
-          'kind': 'physical',
-          'costRatioBps': null,
-          'variants': [
-            {
-              '__typename': 'ProductVariant',
-              'id': 'v1',
-              'sku': 'OLI-1',
-              'label': '',
-              'priceMinor': 50000,
-              'costMinor': 30000,
-              'unit': 'pcs',
-            },
-          ],
-        },
-      ],
-    }),
-    cache: GraphQLCache(store: InMemoryStore()),
-  ));
-  return GraphQLProvider(
-    client: client,
-    child: MaterialApp(home: Scaffold(body: child)),
-  );
-}
+/// The add-line form searches the local catalog cache (offline-first), so tests
+/// seed an in-memory sembast cache rather than mocking the network.
+Widget _wrap(Widget child) =>
+    MaterialApp(home: Scaffold(body: child));
 
 void main() {
+  setUpAll(() async {
+    DatabaseService.db =
+        await newDatabaseFactoryMemory().openDatabase('catalog_test');
+    await CatalogRepo().replaceAll([
+      CatalogVariant(
+        variantId: 'v1',
+        kind: 'physical',
+        name: 'Oli Mesin',
+        sku: 'OLI-1',
+        priceMinor: 50000,
+        costMinor: 30000,
+        costRatioBps: null,
+        unit: 'pcs',
+      ),
+    ]);
+  });
+
   group('WorkLineMargin', () {
     test('physical lines use the snapshotted unit cost', () {
       final l = WorkLine()
@@ -170,7 +150,7 @@ void main() {
 
   group('margin pill in the add-line form price field', () {
     testWidgets('appears on pick and tracks the typed price', (tester) async {
-      await tester.pumpWidget(_withClient(
+      await tester.pumpWidget(_wrap(
         InlineLeafForm(onSubmit: (_) {}, onCancel: () {}),
       ));
       await tester.pump();
@@ -196,7 +176,7 @@ void main() {
 
     testWidgets('submitted line carries the cost snapshot', (tester) async {
       WorkLine? submitted;
-      await tester.pumpWidget(_withClient(
+      await tester.pumpWidget(_wrap(
         InlineLeafForm(onSubmit: (l) => submitted = l, onCancel: () {}),
       ));
       await tester.pump();
@@ -241,15 +221,15 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
-      // 50.000 price − 30.000 cost = 20.000 margin.
-      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
-      expect(find.textContaining('Margin Rp 20.000'), findsOneWidget);
+      // 50,000 price − 30,000 cost = 20,000 margin.
+      expect(find.textContaining('Cost Rp 30,000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp 20,000'), findsOneWidget);
 
       await tester.enterText(find.widgetWithText(TextField, 'Price'), '25000');
       await tester.pump();
       // Physical cost is fixed; margin goes negative below cost.
-      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
-      expect(find.textContaining('Margin Rp -5.000'), findsOneWidget);
+      expect(find.textContaining('Cost Rp 30,000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp -5,000'), findsOneWidget);
     });
 
     testWidgets('legacy line (no cost snapshot) shows no cost line',
@@ -278,7 +258,7 @@ void main() {
 
   group('cost line in the add-line form', () {
     testWidgets('appears on pick with the catalog cost', (tester) async {
-      await tester.pumpWidget(_withClient(
+      await tester.pumpWidget(_wrap(
         InlineLeafForm(onSubmit: (_) {}, onCancel: () {}),
       ));
       await tester.pump();
@@ -291,9 +271,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
-      // Catalog cost 30.000 against the seeded 50.000 price.
-      expect(find.textContaining('Cost Rp 30.000'), findsOneWidget);
-      expect(find.textContaining('Margin Rp 20.000'), findsOneWidget);
+      // Catalog cost 30,000 against the seeded 50,000 price.
+      expect(find.textContaining('Cost Rp 30,000'), findsOneWidget);
+      expect(find.textContaining('Margin Rp 20,000'), findsOneWidget);
     });
   });
 }

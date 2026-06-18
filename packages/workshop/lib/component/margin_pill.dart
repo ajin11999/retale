@@ -13,8 +13,8 @@ class CostMarginLine extends StatelessWidget {
     required this.priceMinor,
   });
 
-  final int costMinor;
-  final int priceMinor;
+  final double costMinor;
+  final double priceMinor;
 
   @override
   Widget build(BuildContext context) {
