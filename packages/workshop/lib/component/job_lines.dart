@@ -8,7 +8,7 @@ import 'package:retale_workshop/util/project_calc.dart';
 
 /// The job's line tree: stock/service/open-price leaves, optionally grouped into
 /// sections. Edits mutate the tree in place and report the whole root list via
-/// [onChanged]; the parent persists it to Isar (the source of truth).
+/// [onChanged]; the parent persists it to the local store (the source of truth).
 ///
 /// Adding a line or section happens through an inline form rendered in place
 /// (at the bottom of the card, or under the target section); editing an
@@ -37,14 +37,14 @@ class JobLines extends StatefulWidget {
 class _JobLinesState extends State<JobLines> {
   /// Which inline add form is open. The leaf form targets either the top level
   /// (null index) or a top-level section by its index — sections only ever
-  /// live at the top level, and an index survives the Isar reload that
+  /// live at the top level, and an index survives the store reload that
   /// follows a save where an object reference would not.
   bool _leafFormOpen = false;
   int? _leafFormGroupIndex;
   bool _groupFormOpen = false;
 
   /// Collapsed sections, by top-level index (same identity scheme as the leaf
-  /// form target — survives the Isar reload after a save). Remapped on
+  /// form target — survives the store reload after a save). Remapped on
   /// top-level delete/reorder so the right section stays collapsed.
   final Set<int> _collapsed = {};
 
@@ -246,7 +246,7 @@ class _JobLinesState extends State<JobLines> {
       final collapsed = depth == 0 && _collapsed.contains(index);
       return Column(
         // ObjectKey: identity is stable within a build/drag; a fresh tree from
-        // Isar after save just yields fresh keys, which is fine.
+        // the store after save just yields fresh keys, which is fine.
         key: ObjectKey(line),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

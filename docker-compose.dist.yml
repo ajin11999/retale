@@ -65,6 +65,7 @@ services:
       - "443:443"
       - "8443:8443"
       - "8081:8081"
+      - "8082:8082"
     volumes:
       - caddy-data:/data # persists the local CA — clients only trust it once
       - caddy-config:/config

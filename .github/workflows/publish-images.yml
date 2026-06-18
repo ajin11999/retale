@@ -28,15 +28,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The POS web bundle is baked into the caddy image, so build it on the
-      # runner first (Flutter is not containerized). Needs Dart >= 3.7 (stable).
-      # --no-web-resources-cdn bundles CanvasKit locally instead of pulling it
-      # from gstatic, so the LAN-only PWA boots offline without public internet.
+      # The POS and workshop web bundles are baked into the caddy image, so
+      # build them on the runner first (Flutter is not containerized). Needs
+      # Dart >= 3.7 (stable). --no-web-resources-cdn bundles CanvasKit locally
+      # instead of pulling it from gstatic, so the LAN-only PWAs boot offline
+      # without public internet.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
       - name: Build POS web bundle
         working-directory: packages/pos
+        run: flutter build web --pwa-strategy offline-first --no-web-resources-cdn
+      - name: Build workshop web bundle
+        working-directory: packages/workshop
         run: flutter build web --pwa-strategy offline-first --no-web-resources-cdn
 
       - name: Resolve image prefix + tag

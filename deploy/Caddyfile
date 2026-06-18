@@ -45,3 +45,11 @@
 	try_files {path} /index.html
 	file_server
 }
+
+# Workshop web/PWA — static Flutter build (bind-mounted in prod, baked into the
+# caddy image for the distributable stack), SPA fallback to index.html.
+{$HOST_IP}:8082, localhost:8082 {
+	root * /srv/workshop-web
+	try_files {path} /index.html
+	file_server
+}

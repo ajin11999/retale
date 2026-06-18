@@ -20,7 +20,7 @@ GraphQLClient buildClient(String apiUrl) {
   return GraphQLClient(
     link: authLink.concat(httpLink),
     // No persisted normalized cache: workshop reads are live one-shots and the
-    // source of truth is the local Isar store, not the GraphQL cache.
+    // source of truth is the local sembast store, not the GraphQL cache.
     cache: GraphQLCache(),
     defaultPolicies: DefaultPolicies(
       query: Policies(fetch: FetchPolicy.networkOnly),

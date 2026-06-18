@@ -9,6 +9,7 @@ part of this stack.
 | `https://<HOST_IP>`            | Console (back-office admin) |
 | `https://<HOST_IP>:8443`       | API — GraphQL at `/graphql` + HTTP routes |
 | `https://<HOST_IP>:8081`       | POS web/PWA (static Flutter build) |
+| `https://<HOST_IP>:8082`       | Workshop web/PWA (static Flutter build) |
 
 > **Two ways to install.** This page builds the images from source on the host
 > (`up -d --build`, needs the repo + Bun + Flutter). To install with **only
@@ -23,10 +24,12 @@ part of this stack.
    On a Windows host, `./deploy/gen-secrets.ps1 -Write` creates `.env.prod`
    and fills the secret placeholders (hex DB passwords, base64 API keys);
    then just set `HOST_IP`.
-3. Build the POS web bundle on the host (Flutter is not containerized):
+3. Build the POS + workshop web bundles on the host (Flutter is not
+   containerized):
 
    ```
    bun run build:pos-web
+   bun run build:workshop-web
    ```
 
 4. Bring the stack up:
@@ -96,7 +99,8 @@ part of this stack.
 - **Update app code:** pull, then
   `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
   (rebuilds api/console images; migrations apply automatically).
-- **Update POS web:** `bun run build:pos-web`, then
+- **Update POS / workshop web:** `bun run build:pos-web` (or
+  `bun run build:workshop-web`), then
   `docker compose -f docker-compose.prod.yml restart caddy` (it's a bind mount;
   the restart just clears any cached file handles).
 - **Logs:** `docker compose -p retale-prod logs -f api` (or `console`, `caddy`).
@@ -146,7 +150,7 @@ non-interactively without `--yes`. Test the restore path on the dev stack
 
 - The dev `docker-compose.yml` (MariaDB only, port 3306) is unrelated; the prod
   stack uses project name `retale-prod`, its own volumes, and publishes only
-  443/8443/8081. Both can run on the same machine.
+  443/8443/8081/8082. Both can run on the same machine.
 - Console browser traffic goes through the console's own same-origin `/graphql`
   proxy; only the POS web origin calls the API cross-origin, and Caddy answers
   CORS for it at `:8443`.

@@ -23,7 +23,7 @@ This builds three images for the tag and `latest`, and pushes them to GHCR:
 
 - `ghcr.io/fransiscowijaya1999/retale-api`
 - `ghcr.io/fransiscowijaya1999/retale-console`
-- `ghcr.io/fransiscowijaya1999/retale-caddy` (Caddyfile + POS web bundle baked in)
+- `ghcr.io/fransiscowijaya1999/retale-caddy` (Caddyfile + POS and workshop web bundles baked in)
 
 You can also trigger it manually from the repo's **Actions** tab
 (workflow_dispatch), optionally overriding the tag.
@@ -71,7 +71,7 @@ anywhere: `docker-compose.dist.yml` and a filled-in `.env.prod`.
    works the same against the pre-built caddy image.
 
 Addresses once up: console at `https://<HOST_IP>`, API at `https://<HOST_IP>:8443`,
-POS web at `https://<HOST_IP>:8081`.
+POS web at `https://<HOST_IP>:8081`, workshop web at `https://<HOST_IP>:8082`.
 
 ---
 

@@ -4,8 +4,9 @@
 #
 # Prereqs:
 #   - .env.prod filled in (copy from .env.prod.example, generate real secrets)
-#   - POS web built on the host: `bun run build:pos-web` (bind-mounted into
-#     caddy below; after rebuilding it, `docker compose ... restart caddy`)
+#   - POS + workshop web built on the host: `bun run build:pos-web` and
+#     `bun run build:workshop-web` (bind-mounted into caddy below; after
+#     rebuilding either, `docker compose ... restart caddy`)
 # See deploy/README.md for client cert trust and operations.
 #
 # Explicit project name so this stack never collides with the dev
@@ -69,9 +70,11 @@ services:
       - "443:443"
       - "8443:8443"
       - "8081:8081"
+      - "8082:8082"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./packages/pos/build/web:/srv/pos-web:ro
+      - ./packages/workshop/build/web:/srv/workshop-web:ro
       - caddy-data:/data # persists the local CA — clients only trust it once
       - caddy-config:/config
     depends_on:

@@ -23,8 +23,8 @@ int paymentsTotalMinor(List<WorkPayment>? payments) {
 int remainingMinor(Project p) =>
     linesTotalMinor(p.lines) - paymentsTotalMinor(p.payments);
 
-/// Margin math over a [WorkLine]'s cost snapshot. Lives here (not on the Isar
-/// class) so the computed values stay out of the generated schema.
+/// Margin math over a [WorkLine]'s cost snapshot. Lives here (not on the model
+/// class) so the computed values stay out of the stored document.
 extension WorkLineMargin on WorkLine {
   /// Per-unit cost at a hypothetical [priceMinor]: open-price lines derive
   /// cost from the price via the snapshotted ratio (the API's snapshot rule);

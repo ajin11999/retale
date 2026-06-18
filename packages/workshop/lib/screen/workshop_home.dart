@@ -27,11 +27,9 @@ class _WorkshopHomeState extends State<WorkshopHome> {
   @override
   void initState() {
     super.initState();
-    final query = _repo.activeQuery();
-    query.findAll().then((jobs) {
-      if (mounted) setState(() => _jobs = jobs);
-    });
-    _sub = query.watch(fireImmediately: true).listen((jobs) {
+    // Live active-jobs list: sembast fires immediately with the current set,
+    // then on every change.
+    _sub = _repo.watchActive().listen((jobs) {
       if (mounted) setState(() => _jobs = jobs);
     });
   }

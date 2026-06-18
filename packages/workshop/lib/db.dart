@@ -1,14 +1,16 @@
-import 'package:isar/isar.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:retale_workshop/schema/project.dart';
+import 'package:sembast/sembast.dart';
+import 'package:retale_workshop/platform/db_opener.dart';
 
-/// Owns the single Isar instance for the app. Call [setup] once at startup
-/// before any access to [db].
+/// Owns the single sembast [Database] for the app and the `projects` store.
+/// Call [setup] once at startup before any access to [db].
 class DatabaseService {
-  static late final Isar db;
+  static late final Database db;
+
+  /// Job documents, keyed by auto-incrementing int (mirrored onto `Project.id`).
+  static final StoreRef<int, Map<String, Object?>> projects =
+      intMapStoreFactory.store('projects');
 
   static Future<void> setup() async {
-    final dir = await getApplicationDocumentsDirectory();
-    db = await Isar.open([ProjectSchema], directory: dir.path);
+    db = await openWorkshopDb();
   }
 }

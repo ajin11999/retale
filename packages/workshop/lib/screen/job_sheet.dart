@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:retale_workshop/component/job_lines.dart';
 import 'package:retale_workshop/component/payment_section.dart';
-import 'package:retale_workshop/db.dart';
 import 'package:retale_workshop/schema/project.dart';
 import 'package:retale_workshop/services/project_repo.dart';
 import 'package:retale_workshop/util/money.dart';
 import 'package:retale_workshop/util/project_calc.dart';
 
 /// The right-pane job sheet: header details, the line tree, and the payment
-/// section. Watches the project in Isar so external changes reflect live.
+/// section. Watches the project in the local store so external changes reflect
+/// live.
 class JobSheet extends StatefulWidget {
   const JobSheet({
     super.key,
@@ -30,7 +30,7 @@ class JobSheet extends StatefulWidget {
 
 class _JobSheetState extends State<JobSheet> {
   final _repo = ProjectRepo();
-  StreamSubscription<void>? _sub;
+  StreamSubscription<Project?>? _sub;
   Project? _project;
 
   final _label = TextEditingController();
@@ -50,7 +50,7 @@ class _JobSheetState extends State<JobSheet> {
   void dispose() {
     _sub?.cancel();
     // Flush a pending header edit before tearing down, so a fast job switch
-    // can't drop the last keystrokes (fire-and-forget; Isar write is local).
+    // can't drop the last keystrokes (fire-and-forget; the store write is local).
     if (_headerDebounce?.isActive ?? false) {
       _headerDebounce!.cancel();
       if (_seeded) {
@@ -69,16 +69,13 @@ class _JobSheetState extends State<JobSheet> {
     super.dispose();
   }
 
-  Future<void> _watch() async {
-    final initial = await _repo.get(widget.projectId);
-    if (!mounted) return;
-    setState(() => _project = initial);
-    _seed(initial);
-    _sub = DatabaseService.db.projects
-        .watchObject(widget.projectId, fireImmediately: false)
-        .listen((_) async {
-      final fresh = await _repo.get(widget.projectId);
-      if (mounted) setState(() => _project = fresh);
+  void _watch() {
+    // Fires immediately with the current record, then on every change. The
+    // first emission seeds the header controllers (guarded by [_seeded]).
+    _sub = _repo.watch(widget.projectId).listen((fresh) {
+      if (!mounted) return;
+      setState(() => _project = fresh);
+      _seed(fresh);
     });
   }
 
