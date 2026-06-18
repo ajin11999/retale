@@ -70,10 +70,31 @@ class CartLine {
         ? product.publicDisplayName
         : '${product.publicDisplayName} — $label';
   }
+
+  /// Serialise for the durable cart store. The full product and variant are
+  /// kept so a parked line restores exactly as rung — its name, price and cost
+  /// — even if the catalog later changes or the variant is deleted.
+  Map<String, dynamic> toJson() => {
+        'product': product.toJson(),
+        'variant': variant.toJson(),
+        'qty': qty,
+        if (discountMinor != 0) 'discountMinor': discountMinor,
+        if (overridePriceMinor != null) 'overridePriceMinor': overridePriceMinor,
+      };
+
+  factory CartLine.fromJson(Map<String, dynamic> j) => CartLine(
+        product: Product.fromJson(j['product'] as Map<String, dynamic>),
+        variant: Variant.fromJson(j['variant'] as Map<String, dynamic>),
+        qty: (j['qty'] as num?)?.toInt() ?? 1,
+        discountMinor: (j['discountMinor'] as num?) ?? 0,
+        overridePriceMinor: j['overridePriceMinor'] as num?,
+      );
 }
 
 /// The current sale. A [ChangeNotifier] so the register UI rebuilds on edits.
 class Cart extends ChangeNotifier {
+  Cart();
+
   /// Cashier-set name shown on the rail; null falls back to an auto "C{n}".
   String? label;
 
@@ -166,6 +187,19 @@ class Cart extends ChangeNotifier {
               'priceOverrideMinor': l.overridePriceMinor,
           })
       .toList();
+
+  /// Serialise for the durable cart store.
+  Map<String, dynamic> toJson() => {
+        if (label != null) 'label': label,
+        'lines': _lines.map((l) => l.toJson()).toList(),
+      };
+
+  factory Cart.fromJson(Map<String, dynamic> j) {
+    final cart = Cart()..label = j['label'] as String?;
+    cart._lines.addAll((j['lines'] as List<dynamic>? ?? [])
+        .map((e) => CartLine.fromJson(e as Map<String, dynamic>)));
+    return cart;
+  }
 }
 
 /// The open carts for one register screen, with the active one tracked.
@@ -178,6 +212,26 @@ class Register extends ChangeNotifier {
     _add(Cart());
   }
 
+  /// Builds a register with no carts — only for [Register.fromJson], which then
+  /// adds the saved carts back. Every other path keeps at least one cart open.
+  Register._empty();
+
+  /// Restore a register persisted by the cart store. Falls back to a fresh
+  /// register if nothing was saved, so there is always one cart to ring against.
+  factory Register.fromJson(Map<String, dynamic> j) {
+    final carts = (j['carts'] as List<dynamic>? ?? [])
+        .map((e) => Cart.fromJson(e as Map<String, dynamic>))
+        .toList();
+    if (carts.isEmpty) return Register();
+    final register = Register._empty();
+    for (final c in carts) {
+      register._add(c);
+    }
+    final saved = (j['activeIndex'] as num?)?.toInt() ?? 0;
+    register._activeIndex = saved.clamp(0, carts.length - 1);
+    return register;
+  }
+
   final List<Cart> _carts = [];
   int _activeIndex = 0;
 
@@ -185,6 +239,16 @@ class Register extends ChangeNotifier {
   int get activeIndex => _activeIndex;
   Cart get active => _carts[_activeIndex];
   int get count => _carts.length;
+
+  /// True for a brand-new register: a single empty, unnamed cart. Used to
+  /// decide whether restoring saved carts would clobber work already in hand.
+  bool get isPristine =>
+      _carts.length == 1 && _carts.first.isEmpty && _carts.first.label == null;
+
+  Map<String, dynamic> toJson() => {
+        'activeIndex': _activeIndex,
+        'carts': _carts.map((c) => c.toJson()).toList(),
+      };
 
   /// Display name for a tab: the custom label, else the auto "C{n}".
   String labelFor(int index) => _carts[index].label ?? 'C${index + 1}';

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../auth/auth_service.dart';
+import '../cache/cart_store.dart';
 import '../cache/product_cache.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
@@ -33,7 +34,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _register = Register();
+  Register _register = Register();
   final _searchController = TextEditingController();
   final _cache = ProductCache.instance;
   final _sync = SyncService.instance;
@@ -50,6 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void initState() {
     super.initState();
+    _restoreCarts();
     _connectivity.addListener(_onConnectivityChanged);
     _refreshCatalog();
     _sync.flushQueue();
@@ -65,8 +67,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _debounce?.cancel();
     _connectivity.removeListener(_onConnectivityChanged);
     _searchController.dispose();
+    _register.removeListener(_persistCarts);
     _register.dispose();
     super.dispose();
+  }
+
+  /// Bring back the carts parked on this POS — they outlive a shift close and an
+  /// app restart. Runs before the cashier can touch the placeholder register, so
+  /// it only swaps in the saved carts when nothing has been rung yet.
+  Future<void> _restoreCarts() async {
+    final posId = AppConfig.instance.posId;
+    final restored = posId == null ? null : await CartStore.instance.load(posId);
+    if (!mounted) {
+      restored?.dispose();
+      return;
+    }
+    if (restored != null && _register.isPristine) {
+      _register.dispose();
+      _register = restored;
+    } else {
+      restored?.dispose();
+    }
+    _register.addListener(_persistCarts);
+    setState(() {});
+  }
+
+  /// Save the register on every edit so a parked sale is never lost. Writes
+  /// coalesce in [CartStore], so rapid edits don't hammer storage.
+  void _persistCarts() {
+    final posId = AppConfig.instance.posId;
+    if (posId != null) CartStore.instance.save(posId, _register);
   }
 
   /// Global key handler for the register. Only acts while the register is the
