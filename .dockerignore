@@ -18,7 +18,12 @@ packages/pos/*
 packages/pos/build/*
 !packages/pos/build/web
 packages/stockeeper
-packages/workshop
+# packages/workshop is likewise heavy and excluded, but the caddy image bakes in
+# its pre-built web bundle. Re-include only packages/workshop/build/web:
+packages/workshop/*
+!packages/workshop/build
+packages/workshop/build/*
+!packages/workshop/build/web
 assets
 docs
 plugins
