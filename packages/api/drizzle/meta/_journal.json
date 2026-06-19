@@ -288,6 +288,13 @@
       "when": 1781748164093,
       "tag": "0040_marvelous_magik",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1781873227739,
+      "tag": "0041_sudden_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }

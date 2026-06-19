@@ -4,9 +4,13 @@ import '../config/app_config.dart';
 
 /// Thrown when a GraphQL operation fails — network error or server `errors[]`.
 class GraphQLAppException implements Exception {
-  GraphQLAppException(this.message, {this.isNetworkError = false});
+  GraphQLAppException(this.message, {this.isNetworkError = false, this.code});
   final String message;
   final bool isNetworkError;
+
+  /// Server-supplied stable error code (GraphQL `extensions.code`), when the
+  /// failure was a real server error rather than a transport one.
+  final String? code;
   @override
   String toString() => message;
 }
@@ -83,10 +87,15 @@ class GraphQLService {
           isNetworkError: true,
         );
       }
-      final msg = ex.graphqlErrors.isNotEmpty
-          ? ex.graphqlErrors.map((e) => e.message).join('; ')
-          : 'Unknown server error';
-      throw GraphQLAppException(msg);
+      final errors = ex.graphqlErrors;
+      String? code;
+      var msg = 'Unknown server error';
+      if (errors.isNotEmpty) {
+        final raw = errors.first.extensions?['code'];
+        if (raw is String) code = raw;
+        msg = errors.map((e) => e.message).join('; ');
+      }
+      throw GraphQLAppException(msg, code: code);
     }
     return result.data ?? const <String, dynamic>{};
   }

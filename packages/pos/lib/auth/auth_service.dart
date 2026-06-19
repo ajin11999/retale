@@ -24,7 +24,20 @@ class AuthService {
 
   final _store = TokenStore.instance;
   final _gql = GraphQLService.instance;
+
+  /// Set only while the refresh mutation itself is in flight, so its own token
+  /// fetch doesn't recurse back into another refresh.
   bool _refreshing = false;
+
+  /// The single in-flight rotation. Concurrent callers share it so the rotating
+  /// refresh token is spent exactly once — a double-spend reads as token reuse
+  /// (theft) on the server and revokes the whole session.
+  Future<void>? _refreshInFlight;
+
+  /// Invoked when a refresh is rejected as `SESSION_INVALID` (the session was
+  /// revoked or expired server-side). The token store is already cleared by the
+  /// time this fires; `main()` wires it to drop the UI back to the login screen.
+  void Function()? onSessionExpired;
 
   AppUser? get currentUser => _store.user;
   bool get isAuthenticated => _store.hasRefreshToken;
@@ -39,6 +52,12 @@ class AuthService {
   /// Refresh the access token if it is missing or expires within 60s.
   Future<void> ensureFreshToken() async {
     if (_refreshing) return; // re-entrancy guard (refresh mutation itself).
+    // Coalesce onto an already-running rotation instead of starting a second.
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
     final token = _store.accessToken;
     if (token == null) return;
     final stale = JwtDecoder.isExpired(token) ||
@@ -80,8 +99,18 @@ class AuthService {
     await _persist(data['loginTwoFactor'] as Map<String, dynamic>);
   }
 
-  /// Rotate the token pair using the stored refresh token.
-  Future<void> refresh() async {
+  /// Rotate the token pair using the stored refresh token. Single-flighted:
+  /// concurrent callers await the same rotation rather than each spending the
+  /// (rotating) refresh token, which the server would treat as reuse.
+  Future<void> refresh() {
+    final existing = _refreshInFlight;
+    if (existing != null) return existing;
+    final future = _doRefresh();
+    _refreshInFlight = future;
+    return future.whenComplete(() => _refreshInFlight = null);
+  }
+
+  Future<void> _doRefresh() async {
     if (!_store.hasRefreshToken) {
       throw GraphQLAppException('Session expired. Please log in again.');
     }
@@ -91,6 +120,16 @@ class AuthService {
         'refreshToken': _store.refreshToken,
       });
       await _persist(data['refreshToken'] as Map<String, dynamic>);
+    } on GraphQLAppException catch (e) {
+      // The server rejected the refresh token: the session is dead (revoked or
+      // expired). Clear it so the app falls back to login, and tell the UI to
+      // redirect there now — otherwise this surfaces as a misleading
+      // "cannot reach the server" inside whatever operation triggered it.
+      if (e.code == 'SESSION_INVALID') {
+        await _store.clear();
+        onSessionExpired?.call();
+      }
+      rethrow;
     } finally {
       _refreshing = false;
     }

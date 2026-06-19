@@ -233,8 +233,15 @@ export async function loginTwoFactor(input: {
 /**
  * Rotate a refresh token. Each successful refresh slides the session expiry
  * out another REFRESH_TTL_MS, so active sessions never hit a hard deadline.
- * Presenting a stale secret against a live session (rotation already
- * happened) is treated as theft: the session is revoked.
+ *
+ * Rotation keeps a one-deep history: the secret just used stays valid as
+ * `prevRefreshTokenHash` until the client proves it received the rotation by
+ * presenting the *new* secret. This tolerates a lost rotation response — a
+ * flaky network, or an app killed mid-refresh, where the server rotated but the
+ * client never got the new token — by letting the client retry with the secret
+ * it still holds instead of being mistaken for a thief. Only a secret that is
+ * neither the current nor the previous one (two generations stale) is treated
+ * as reuse, and that revokes the session.
  */
 export async function refresh(input: {
   refreshToken: string;
@@ -250,11 +257,19 @@ export async function refresh(input: {
 
   const revoked = session.revokedAt != null;
   const expired = new Date(session.expiresAt) <= new Date();
-  const secretOk = await verifyRefreshSecret(session.refreshTokenHash, parsed.secret);
+  // Accept the current secret, or — for a lost-response retry — the immediately
+  // previous one. Verify current first; only fall back to prev on a miss.
+  const currentOk =
+    !revoked && !expired &&
+    (await verifyRefreshSecret(session.refreshTokenHash, parsed.secret));
+  const prevOk =
+    !revoked && !expired && !currentOk && session.prevRefreshTokenHash != null &&
+    (await verifyRefreshSecret(session.prevRefreshTokenHash, parsed.secret));
 
-  if (revoked || expired || !secretOk) {
-    // Stale secret on a live session → reuse; kill it.
-    if (!revoked && !expired && !secretOk) {
+  if (revoked || expired || (!currentOk && !prevOk)) {
+    // A live session presented an unknown secret (neither current nor the grace
+    // previous) → genuine reuse; kill the session.
+    if (!revoked && !expired) {
       await db
         .update(sessions)
         .set({ revokedAt: new Date() })
@@ -266,14 +281,17 @@ export async function refresh(input: {
   const user = await db.query.users.findFirst({ where: eq(users.id, session.userId) });
   if (!user || user.archivedAt) throw new AuthError("SESSION_INVALID");
 
-  // Rotate the refresh secret in place and slide the expiry: every successful
-  // refresh buys another REFRESH_TTL_MS, so only true inactivity ends a session.
+  // Rotate the secret in place and slide the expiry. The just-used secret
+  // (whichever it was) stays on as the previous one, so a retry of *this*
+  // rotation — should its response also be lost — still works.
+  const usedHash = currentOk ? session.refreshTokenHash : session.prevRefreshTokenHash;
   const { token, secretHash } = await createRefreshToken(session.id);
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
   await db
     .update(sessions)
     .set({
       refreshTokenHash: secretHash,
+      prevRefreshTokenHash: usedHash,
       expiresAt: refreshExpiresAt,
       lastUsedAt: new Date(),
       userAgent: input.ctx?.userAgent ?? session.userAgent,

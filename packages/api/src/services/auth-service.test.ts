@@ -107,16 +107,35 @@ describe("refresh token rotation", () => {
     expect(new Date(row!.expiresAt).getTime()).toBeGreaterThan(in29Days);
   });
 
-  test("reusing a rotated-away token revokes the session", async () => {
+  test("a lost-response retry with the previous token is tolerated", async () => {
     await registerUser({ username: "alice", password: PASSWORD, name: "Alice" });
-    const tokens = await loginTokens("alice");
+    const t1 = await loginTokens("alice");
 
-    const { tokens: rotated } = await refresh({ refreshToken: tokens.refreshToken });
+    const { tokens: t2 } = await refresh({ refreshToken: t1.refreshToken });
 
-    // Presenting the pre-rotation token is treated as theft…
+    // The rotation response was "lost", so the client retries with the token it
+    // still holds (t1, now the previous secret). The grace accepts it and
+    // rotates again — no theft, no revocation.
+    const { tokens: t3 } = await refresh({ refreshToken: t1.refreshToken });
+    expect(t3.refreshToken).not.toBe(t2.refreshToken);
+
+    // The session is alive: the newest token keeps refreshing.
+    const { tokens: t4 } = await refresh({ refreshToken: t3.refreshToken });
+    expect(t4.refreshToken).toBeTruthy();
+  });
+
+  test("a twice-superseded token is reuse and revokes the session", async () => {
+    await registerUser({ username: "alice", password: PASSWORD, name: "Alice" });
+    const t1 = await loginTokens("alice");
+
+    const { tokens: t2 } = await refresh({ refreshToken: t1.refreshToken });
+    const { tokens: t3 } = await refresh({ refreshToken: t2.refreshToken });
+
+    // t1 is now two generations stale — neither current nor previous — so it
+    // reads as reuse…
     let code = "ok";
     try {
-      await refresh({ refreshToken: tokens.refreshToken });
+      await refresh({ refreshToken: t1.refreshToken });
     } catch (e) {
       if (!(e instanceof AuthError)) throw e;
       code = e.code;
@@ -126,7 +145,7 @@ describe("refresh token rotation", () => {
     // …and kills the whole session: even the current token is now refused.
     code = "ok";
     try {
-      await refresh({ refreshToken: rotated.refreshToken });
+      await refresh({ refreshToken: t3.refreshToken });
     } catch (e) {
       if (!(e instanceof AuthError)) throw e;
       code = e.code;

@@ -84,6 +84,10 @@ export const userRoles = mysqlTable(
  * A login session backing one rotating refresh token. The opaque refresh
  * token is `{id}.{secret}`; only the argon2 hash of the secret is stored.
  * Rotated on every use; `revokedAt` set on logout or reuse detection.
+ *
+ * `prevRefreshTokenHash` keeps the immediately-previous secret valid as a grace
+ * for a lost rotation response (see `refresh()`); only a secret older than that
+ * counts as reuse.
  */
 export const sessions = mysqlTable(
   "sessions",
@@ -93,6 +97,7 @@ export const sessions = mysqlTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     refreshTokenHash: varchar({ length: 255 }).notNull(),
+    prevRefreshTokenHash: varchar({ length: 255 }),
     userAgent: varchar({ length: 255 }),
     ip: varchar({ length: 45 }),
     createdAt: timestamp()
