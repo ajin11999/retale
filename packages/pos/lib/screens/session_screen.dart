@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../auth/auth_service.dart';
+import '../cache/session_store.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
@@ -7,6 +9,7 @@ import '../models/money.dart';
 import '../models/pos.dart';
 import '../widgets/common.dart';
 import 'register_screen.dart';
+import 'router_screen.dart';
 
 /// Resolves whether the bound POS already has an open session. If it does,
 /// jumps straight to the register; otherwise shows the open-shift form.
@@ -28,14 +31,42 @@ class _SessionGateState extends State<SessionGate> {
 
   Future<PosSession?> _findOpenSession() async {
     final posId = AppConfig.instance.posId!;
-    final data = await GraphQLService.instance
-        .query(Ops.posSessions, variables: {'posId': posId});
-    final sessions = (data['posSessions'] as List<dynamic>)
-        .map((s) => PosSession.fromJson(s as Map<String, dynamic>));
-    for (final s in sessions) {
-      if (s.isOpen) return s;
+    try {
+      final data = await GraphQLService.instance
+          .query(Ops.posSessions, variables: {'posId': posId});
+      final sessions = (data['posSessions'] as List<dynamic>)
+          .map((s) => PosSession.fromJson(s as Map<String, dynamic>));
+      PosSession? open;
+      for (final s in sessions) {
+        if (s.isOpen) {
+          open = s;
+          break;
+        }
+      }
+      // The server is reachable, so it is authoritative: cache the open shift so
+      // the register can resume offline next time, or drop a stale cache when
+      // the server reports none is open.
+      if (open != null) {
+        await SessionStore.instance.save(posId, open);
+      } else {
+        await SessionStore.instance.clear(posId);
+      }
+      return open;
+    } on GraphQLAppException catch (e) {
+      if (!e.isNetworkError) rethrow;
+      // A rejected refresh token also surfaces as a network error here, but it
+      // has already cleared the auth and redirected to login — don't resurrect
+      // the register from cache in that case.
+      if (!AuthService.instance.isAuthenticated) rethrow;
+      // Offline: fall back to the last shift the server told us was open, so the
+      // cashier reaches the register and keeps ringing into the offline queue.
+      return SessionStore.instance.load(posId);
     }
-    return null;
+  }
+
+  Future<void> _signOut() async {
+    await AuthService.instance.logout();
+    if (mounted) RouterScreen.goHome(context);
   }
 
   @override
@@ -53,6 +84,7 @@ class _SessionGateState extends State<SessionGate> {
               message: describeError(snapshot.error!),
               onRetry: () =>
                   setState(() => _future = _findOpenSession()),
+              onSignOut: _signOut,
             ),
           );
         }
@@ -100,6 +132,9 @@ class _OpenSessionScreenState extends State<OpenSessionScreen> {
       );
       final session =
           PosSession.fromJson(data['openSession'] as Map<String, dynamic>);
+      // Cache the freshly-opened shift so a restart before the next online
+      // SessionGate query can still resume the register offline.
+      await SessionStore.instance.save(AppConfig.instance.posId!, session);
       if (mounted) {
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => RegisterScreen(session: session),

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../auth/auth_service.dart';
 import '../cache/cart_store.dart';
 import '../cache/product_cache.dart';
+import '../cache/session_store.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
@@ -270,6 +271,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'id': widget.session.id,
         'closingCashMinor': Money.parse(controller.text),
       });
+      // The shift is closed server-side; drop the offline-resume cache so the
+      // next launch can't reopen the register on a dead session.
+      final posId = AppConfig.instance.posId;
+      if (posId != null) await SessionStore.instance.clear(posId);
       if (mounted) RouterScreen.goHome(context);
     } on GraphQLAppException catch (e) {
       _toast(e.message);

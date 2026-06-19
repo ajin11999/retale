@@ -6,12 +6,19 @@ import '../graphql/graphql_service.dart';
 String describeError(Object error) =>
     error is GraphQLAppException ? error.message : error.toString();
 
-/// Centred error message with a retry button.
+/// Centred error message with a retry button, and an optional "Log out" escape
+/// for when retrying can't help (e.g. a dead session that needs a fresh login).
 class ErrorRetry extends StatelessWidget {
-  const ErrorRetry({super.key, required this.message, required this.onRetry});
+  const ErrorRetry({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.onSignOut,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback? onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +33,10 @@ class ErrorRetry extends StatelessWidget {
             Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('Retry')),
+            if (onSignOut != null) ...[
+              const SizedBox(height: 8),
+              TextButton(onPressed: onSignOut, child: const Text('Log out')),
+            ],
           ],
         ),
       ),

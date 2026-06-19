@@ -45,4 +45,12 @@ class PosSession {
         openedAt: j['openedAt'] as String,
         closedAt: j['closedAt'] as String?,
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'posId': posId,
+        'openingCashMinor': openingCashMinor,
+        'openedAt': openedAt,
+        'closedAt': closedAt,
+      };
 }
