@@ -31,17 +31,25 @@ class CatalogRepo {
   /// Cached variants matching [keyword] (name or sku, case-insensitive),
   /// ordered by name. A blank keyword returns the whole catalog. The catalog of
   /// a single workshop is small, so this loads and filters in memory.
+  ///
+  /// Matching mirrors the console/API product search: the keyword is split on
+  /// whitespace and every token must appear as a substring of the variant's
+  /// name or sku — so "oli mesin" and "mesin oli" both match "Oli Mesin",
+  /// regardless of token order.
   Future<List<CatalogVariant>> search(String keyword) async {
     final records = await _store.find(_db);
     final all = [for (final r in records) CatalogVariant.fromJson(r.value)];
-    final q = keyword.trim().toLowerCase();
-    final hits = q.isEmpty
+    final tokens = keyword
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toList();
+    final hits = tokens.isEmpty
         ? all
-        : all
-            .where((v) =>
-                v.name.toLowerCase().contains(q) ||
-                v.sku.toLowerCase().contains(q))
-            .toList();
+        : all.where((v) {
+            final haystack = '${v.name} ${v.sku}'.toLowerCase();
+            return tokens.every(haystack.contains);
+          }).toList();
     hits.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return hits;
   }
