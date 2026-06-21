@@ -43,7 +43,7 @@ const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong.";
 
 export const load: PageServerLoad = ({ cookies }) => {
-  if (cookies.get("access_token")) redirect(303, "/products");
+  if (cookies.get("access_token")) redirect(303, "/");
 };
 
 export const actions: Actions = {
@@ -73,7 +73,7 @@ export const actions: Actions = {
     }
 
     storeSession(cookies, login.auth);
-    redirect(303, "/products");
+    redirect(303, "/");
   },
 
   // Step 2 — the TOTP or recovery code for the challenge from step 1.
@@ -103,6 +103,6 @@ export const actions: Actions = {
     }
 
     storeSession(cookies, auth);
-    redirect(303, "/products");
+    redirect(303, "/");
   },
 };
