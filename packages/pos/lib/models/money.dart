@@ -21,13 +21,18 @@ class Money {
   /// Plain (non-grouped) major-unit text for editable fields. e.g. 75000.
   static String editText(num value) => _plain.format(value);
 
+  /// Snap a computed money value to 2 decimals, clearing binary-float drift
+  /// (e.g. `9.8 * 2` -> `19.600000000000001` -> `19.6`). Apply after any
+  /// multiply/sum so drift never reaches the wire — the API rejects amounts
+  /// that aren't exactly 2-decimal. Mirrors the API's `roundMoney`.
+  static num round(num value) => (value * 100).round() / 100;
+
   /// Parse an entered string back into a money value (up to 2 decimals).
   /// Tolerates international grouping, so "1,500,000.5" and "1500000.5" both
   /// yield 1500000.5.
   static num parse(String input) {
     final s = input.trim().replaceAll(',', ''); // drop thousands grouping
-    final value = double.tryParse(s) ?? 0;
-    return (value * 100).round() / 100; // snap to 2 decimals
+    return round(double.tryParse(s) ?? 0);
   }
 }
 

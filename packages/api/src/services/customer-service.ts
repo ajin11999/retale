@@ -218,7 +218,7 @@ export async function recordDebtPayment(input: {
   if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
     throw new CustomerError(
       "INVALID_INPUT",
-      "payment amount must be a positive integer",
+      "payment amount must be a positive amount",
     );
   }
   return db.transaction(async (tx) => {

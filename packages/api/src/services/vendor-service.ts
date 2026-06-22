@@ -270,7 +270,7 @@ export async function recordVendorPayment(input: {
   createdByUserId: string;
 }): Promise<Vendor> {
   if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
-    throw new VendorError("INVALID_INPUT", "payment amount must be a positive integer");
+    throw new VendorError("INVALID_INPUT", "payment amount must be a positive amount");
   }
   return db.transaction(async (tx) => {
     const vendor = await tx.query.vendors.findFirst({

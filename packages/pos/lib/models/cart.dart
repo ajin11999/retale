@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'money.dart';
 import 'product.dart';
 
 /// One line in the in-progress sale.
@@ -24,9 +25,11 @@ class CartLine {
   /// The effective unit price: an entered override wins over the base price.
   num get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
 
-  /// qty * price - discount, never below zero.
+  /// qty * price - discount, never below zero. Rounded to 2 decimals so
+  /// `unitPriceMinor * qty` drift never reaches the wire (the API rejects
+  /// amounts that aren't exactly 2-decimal).
   num get lineTotalMinor {
-    final gross = unitPriceMinor * qty - discountMinor;
+    final gross = Money.round(unitPriceMinor * qty - discountMinor);
     return gross < 0 ? 0 : gross;
   }
 
@@ -103,11 +106,11 @@ class Cart extends ChangeNotifier {
   List<CartLine> get lines => List.unmodifiable(_lines);
   bool get isEmpty => _lines.isEmpty;
   num get totalMinor =>
-      _lines.fold<num>(0, (sum, l) => sum + l.lineTotalMinor);
+      Money.round(_lines.fold<num>(0, (sum, l) => sum + l.lineTotalMinor));
 
   /// Cost of goods across every line.
   num get totalCostMinor =>
-      _lines.fold<num>(0, (sum, l) => sum + l.lineCostMinor);
+      Money.round(_lines.fold<num>(0, (sum, l) => sum + l.lineCostMinor));
 
   /// Total revenue minus total cost.
   num get totalMarginMinor => totalMinor - totalCostMinor;

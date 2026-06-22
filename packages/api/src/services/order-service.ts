@@ -314,7 +314,9 @@ async function buildSnapshotRow(opts: {
   attributionOverrideMinor?: number | null;
 }): Promise<BuiltLine> {
   const { tx, variant, product, qty, priceMinor, discountMinor } = opts;
-  const lineTotal = qty * priceMinor - discountMinor;
+  // Round after the multiply so `qty * priceMinor` drift never reaches the DB
+  // or skews the order-total / remainder comparisons (e.g. 9.8 * 2).
+  const lineTotal = roundMoney(qty * priceMinor - discountMinor);
   if (lineTotal < 0) {
     throw new OrderError("INVALID_INPUT", "discount exceeds the line subtotal");
   }
@@ -675,10 +677,13 @@ export async function createPosOrder(input: {
   let paid = 0;
   for (const p of input.payments) {
     if (!isMoney(p.amountMinor) || p.amountMinor <= 0) {
-      throw new OrderError("INVALID_INPUT", "payment amount must be a positive integer");
+      throw new OrderError("INVALID_INPUT", "payment amount must be a positive amount");
     }
     paid += p.amountMinor;
   }
+  paid = roundMoney(paid); // clear drift from summing multiple payments
+
+
 
   return db.transaction(async (tx) => {
     const session = await tx.query.posSessions.findFirst({
@@ -703,7 +708,7 @@ export async function createPosOrder(input: {
     for (const item of input.items) {
       lines.push(...(await buildLines(tx, orderId, item, customerId)));
     }
-    const total = lines.reduce((sum, l) => sum + l.lineTotal, 0);
+    const total = roundMoney(lines.reduce((sum, l) => sum + l.lineTotal, 0));
 
     if (paid > total) {
       throw new OrderError("OVERPAID", "payments exceed the order total");
@@ -1118,7 +1123,7 @@ export async function addCustomerSalePayment(input: {
   createdByUserId: string;
 }): Promise<Order> {
   if (!isMoney(input.amountMinor) || input.amountMinor <= 0) {
-    throw new OrderError("INVALID_INPUT", "payment amount must be a positive integer");
+    throw new OrderError("INVALID_INPUT", "payment amount must be a positive amount");
   }
   return db.transaction(async (tx) => {
     const order = await loadOpenOrder(tx, input.orderId);

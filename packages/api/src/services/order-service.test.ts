@@ -226,6 +226,22 @@ describe("walk-in orders", () => {
     expect(order.totalMinor).toBe(1500);
   });
 
+  test("rounds line totals so float drift never trips overpaid/remainder", async () => {
+    // 2.8 * 7 === 19.599999999999998 in IEEE-754 (drifts below the canonical
+    // 19.6). Without rounding, the order total drifts low and a clean 19.6
+    // payment looks like an overpayment. The total must snap back to 19.6.
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 2.8, stockQty: 100 });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 7 }],
+      payments: [{ amountMinor: 19.6 }],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(19.6);
+    expect(order.closedAt).not.toBeNull();
+  });
+
   test("rejects an underpaid walk-in order", async () => {
     const sessionId = await seedSession("P1");
     const variantId = await seedVariant({ priceMinor: 1000 });
