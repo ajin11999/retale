@@ -7,6 +7,17 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
+ * Round a computed money value to the currency's 2-decimal precision. Apply
+ * after any multiply/divide before sending to the API so binary-float drift
+ * (e.g. `19.99 * 3 === 59.970000000000006`) never reaches the wire, where the
+ * API's `isMoney` check rejects anything with more than 2 decimals. Mirrors
+ * roundMoney on the API.
+ */
+export function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
  * Format a money value (the literal rupiah amount, up to 2 decimals) for
  * display: "Rp 1,500,000.5". International grouping — comma thousands, dot
  * decimal — with trailing zeros trimmed. Mirrors formatRp on the API.

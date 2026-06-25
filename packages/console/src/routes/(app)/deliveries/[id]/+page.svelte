@@ -2,7 +2,7 @@
   import { graphql, CachePolicy } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
+  import { formatMoney, roundMoney, statusLabel, treePathMap } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -525,7 +525,7 @@
           purchaseItemId: line.itemId,
           description: line.label,
           qty,
-          costMinor: line.unitCostMinor * qty,
+          costMinor: roundMoney(line.unitCostMinor * qty),
         });
         if (res.errors?.length) {
           error = res.errors[0].message;
@@ -624,7 +624,7 @@
         res = await UpdateDeliveryItem.mutate({
           id: editingId,
           qty: eGoodsQty,
-          costMinor: eUnitCost * eGoodsQty,
+          costMinor: roundMoney(eUnitCost * eGoodsQty),
           parentItemId: eParentId || null,
         });
       } else {
