@@ -42,6 +42,13 @@
 # routes resolve to index.html.
 {$HOST_IP}:8081, localhost:8081 {
 	root * /srv/pos-web
+	# Flutter web's entry files (index.html, flutter_bootstrap.js, flutter.js,
+	# main.dart.js) and asset manifests are NOT content-hashed and change every
+	# build, so a heuristically-cached copy goes stale — the browser runs old
+	# code against the new assets and the app breaks until the cache is cleared.
+	# On a LAN, just revalidate everything: file_server's ETag/Last-Modified make
+	# an unchanged file a cheap 304, while a rebuilt file is always re-fetched.
+	header Cache-Control "no-cache"
 	try_files {path} /index.html
 	file_server
 }
@@ -50,6 +57,9 @@
 # caddy image for the distributable stack), SPA fallback to index.html.
 {$HOST_IP}:8082, localhost:8082 {
 	root * /srv/workshop-web
+	# Same as POS: revalidate so a rebuild's non-hashed main.dart.js / bootstrap
+	# never serves stale from the browser cache.
+	header Cache-Control "no-cache"
 	try_files {path} /index.html
 	file_server
 }

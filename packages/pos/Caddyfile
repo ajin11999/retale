@@ -18,11 +18,12 @@ https://192.168.0.29 {
 	root * build/web
 	encode zstd gzip
 
-	# Never cache the entry point, service worker, or manifest, so a fresh
-	# `build:pos-web` is picked up immediately. The hashed asset files Flutter
-	# emits are content-addressed and safe to cache hard (default behavior).
-	@noCache path /index.html /flutter_service_worker.js /manifest.json
-	header @noCache Cache-Control "no-cache, no-store, must-revalidate"
+	# Revalidate everything so a fresh `build:pos-web` is picked up immediately.
+	# Flutter's entry files (index.html, flutter_bootstrap.js, flutter.js,
+	# main.dart.js) and asset manifests are NOT content-hashed and change every
+	# build, so caching them hard serves stale code against new assets. On a LAN,
+	# file_server's ETag/Last-Modified make an unchanged file a cheap 304.
+	header Cache-Control "no-cache"
 
 	# SPA fallback: any unknown path resolves to the app shell.
 	try_files {path} /index.html
