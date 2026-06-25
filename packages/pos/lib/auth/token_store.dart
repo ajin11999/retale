@@ -55,6 +55,13 @@ class TokenStore {
     refreshToken = null;
     refreshExpiresAt = null;
     user = null;
-    await _storage.deleteAll();
+    // Delete only our own keys — never deleteAll(). On web the secure-storage
+    // backend is localStorage, and its deleteAll() clears the *entire* store,
+    // which would also wipe the parked carts, POS binding, catalog cache and
+    // queued offline orders that shared_preferences keeps there.
+    await _storage.delete(key: _kAccess);
+    await _storage.delete(key: _kRefresh);
+    await _storage.delete(key: _kRefreshExp);
+    await _storage.delete(key: _kUser);
   }
 }
