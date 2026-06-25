@@ -12,6 +12,7 @@ import { purchaseDeliveries, purchaseDeliveryItems } from "../db/schema/deliveri
 import { productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { db } from "../lib/db.ts";
+import { roundMoney } from "../lib/money.ts";
 import * as deliveries from "./delivery-service.ts";
 import { resolveVendorCode } from "./vendor-variant-code-service.ts";
 
@@ -160,7 +161,10 @@ export async function setReceivingCheckLine(input: {
 
   // Cost just flows from the PO line — a receiving check counts quantity, not
   // money. The delivery commit needs a positive costMinor to derive unit cost.
-  const costMinor = pi.unitCostMinor * input.qty;
+  // Round the product: a 2-decimal unit cost times qty drifts past 2 decimals
+  // in binary float (e.g. 19.99 * 3 = 59.97000000000001), which the delivery
+  // item's isMoney check would otherwise reject.
+  const costMinor = roundMoney(pi.unitCostMinor * input.qty);
 
   if (existing) {
     await deliveries.updateDeliveryItem(existing.id, { qty: input.qty, costMinor });
