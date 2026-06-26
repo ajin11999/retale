@@ -9,7 +9,7 @@
 // and the Dart layer takes over for the API.
 //
 // Bump CACHE_VERSION to discard everything cached by a previous worker.
-const CACHE_VERSION = 'retale-workshop-v1';
+const CACHE_VERSION = 'retale-workshop-v2';
 
 // Best-effort precache so the very first offline launch after one online visit
 // boots. The heavier/variable assets (canvaskit, fonts, lazy chunks) are filled
