@@ -9,6 +9,7 @@ import 'config/app_config.dart';
 import 'graphql/graphql_service.dart';
 import 'screens/router_screen.dart';
 import 'sync/connectivity.dart';
+import 'sync/sync_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +40,11 @@ Future<void> main() async {
   };
 
   await ConnectivityService.instance.start();
+
+  // Drain any orders left queued from a previous run — even if the device was
+  // never "offline" at the link level (e.g. the API was unreachable), the retry
+  // loop keeps trying until they flush.
+  SyncService.instance.start();
 
   runApp(const PosApp());
 }

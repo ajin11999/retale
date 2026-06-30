@@ -562,7 +562,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _lastSale = sale);
       _announceSale(sale);
     } else {
-      _toast('Offline — sale queued, will sync when reconnected');
+      // Offline: the sale is queued and will sync once reconnected, but the
+      // receipt is assembled and rendered entirely on-device, so it can still
+      // be printed now. The server-assigned number isn't known yet (null →
+      // "recorded" on the receipt); it'll appear once the queue flushes.
+      final sale = _CompletedSale(
+        displayNumber: null,
+        lines: lines,
+        totalMinor: totalMinor,
+        paidMinor: outcome.paidMinor,
+        onAccountMinor: outcome.onAccountMinor,
+        customer: outcome.customer,
+        createdAt: DateTime.now(),
+      );
+      setState(() => _lastSale = sale);
+      _announceSale(sale, queued: true);
     }
   }
 
@@ -611,15 +625,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   /// Confirm the sale with a snackbar whose action opens the receipt choices
   /// (print or WhatsApp). Ctrl+P is the faster path to the same print.
-  void _announceSale(_CompletedSale sale) {
+  ///
+  /// The snackbar is persistent (it won't auto-dismiss) so the cashier never
+  /// loses the chance to print: it stays until they print, tap the close icon,
+  /// or ring the next sale. [queued] flags an offline sale — the receipt still
+  /// prints locally, it just hasn't synced to the server yet.
+  void _announceSale(_CompletedSale sale, {bool queued = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Sale completed · ${sale.displayNumber ?? 'recorded'}'),
-      action: SnackBarAction(
-        label: 'Receipt',
-        onPressed: () => _openReceiptActions(sale),
-      ),
-    ));
+    final label = queued
+        ? 'Sale queued — offline, will sync when reconnected'
+        : 'Sale completed · ${sale.displayNumber ?? 'recorded'}';
+    ScaffoldMessenger.of(context)
+      // Replace any prior sale's lingering alert rather than queueing behind it.
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(label),
+        duration: const Duration(days: 365),
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: 'Receipt',
+          onPressed: () => _openReceiptActions(sale),
+        ),
+      ));
   }
 
   /// Fetch the store header and assemble a [Receipt] for [sale].

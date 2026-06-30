@@ -9,7 +9,7 @@
 // gone, and the Dart layer (ProductCache + OrderQueue) takes over for the API.
 //
 // Bump CACHE_VERSION to discard everything cached by a previous worker.
-const CACHE_VERSION = 'retale-pos-v2';
+const CACHE_VERSION = 'retale-pos-v3';
 
 // Best-effort precache so the very first offline launch after one online visit
 // boots. The heavier/variable assets (canvaskit, fonts, lazy chunks) are filled
@@ -54,34 +54,31 @@ self.addEventListener('fetch', (event) => {
   // queueing, so we never want to serve a stale API response from here.
   if (url.origin !== self.location.origin) return;
 
-  // App-shell navigations: network-first so an online launch picks up a rebuild,
-  // falling back to the cached index.html so the PWA still boots with no Wi‑Fi.
-  if (req.mode === 'navigate') {
-    event.respondWith((async () => {
-      try {
-        const fresh = await fetch(req);
-        const cache = await caches.open(CACHE_VERSION);
-        cache.put('index.html', fresh.clone());
-        return fresh;
-      } catch (_) {
-        const cache = await caches.open(CACHE_VERSION);
-        return (await cache.match('index.html')) || (await cache.match('./')) || Response.error();
-      }
-    })());
-    return;
-  }
-
-  // Everything else (JS, wasm, fonts, images, manifests): stale-while-revalidate.
-  // Serve the cached copy instantly, refresh it in the background so the next
-  // launch gets a rebuild. Matches the LAN "no-cache, always revalidate" intent
-  // while still working with the network unplugged.
+  // Network-first for the whole same-origin app shell — navigations *and* the
+  // scripts (index.html, flutter_bootstrap.js, main.dart.js, flutter.js, wasm,
+  // fonts, …). These must load as one matched set: index.html and the bootstrap
+  // embed the build's main.dart.js, so serving any one of them stale while the
+  // others are fresh leaves Flutter unable to initialise — a blank canvas until
+  // the next reload. On a LAN the network is normally there and fast, so an
+  // online launch always boots a fresh, self-consistent bundle; when the network
+  // is gone we fall back to the last cached copy so the PWA still launches.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_VERSION);
-    const cached = await cache.match(req);
-    const network = fetch(req).then((res) => {
-      if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
-      return res;
-    }).catch(() => null);
-    return cached || (await network) || Response.error();
+    try {
+      const fresh = await fetch(req);
+      if (fresh && fresh.ok && fresh.type === 'basic') {
+        // Navigations vary by path (deep links) but all serve the same shell —
+        // cache under a stable key so the offline fallback can always find it.
+        cache.put(req.mode === 'navigate' ? 'index.html' : req, fresh.clone());
+      }
+      return fresh;
+    } catch (_) {
+      if (req.mode === 'navigate') {
+        return (await cache.match('index.html')) ||
+            (await cache.match('./')) ||
+            Response.error();
+      }
+      return (await cache.match(req)) || Response.error();
+    }
   })());
 });

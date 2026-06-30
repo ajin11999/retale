@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../cache/order_queue.dart';
@@ -30,6 +32,28 @@ class SyncService extends ChangeNotifier {
   bool _busy = false;
   bool get busy => _busy;
   int get pendingCount => _queue.length;
+
+  /// Background retry loop. Connectivity events are link-level only and on web
+  /// (PWA) are unreliable — and orders are queued on *any* network failure,
+  /// including the API being unreachable while the link stays up. So a link
+  /// "return" event may never fire. This timer is the real safety net: while
+  /// orders are pending it keeps attempting a flush until the queue drains.
+  Timer? _retryTimer;
+  static const _retryInterval = Duration(seconds: 15);
+
+  /// Kick the background retry loop for orders restored from disk at startup.
+  /// Call once after [OrderQueue.load].
+  void start() => _scheduleRetries();
+
+  void _scheduleRetries() {
+    if (_retryTimer != null || _queue.isEmpty) return;
+    _retryTimer = Timer.periodic(_retryInterval, (_) => flushQueue());
+  }
+
+  void _stopRetries() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+  }
 
   /// Pull the whole active catalog into the offline cache.
   Future<void> refreshCatalog() async {
@@ -83,6 +107,7 @@ class SyncService extends ChangeNotifier {
         createdAt: DateTime.now().toIso8601String(),
         totalMinor: totalMinor,
       ));
+      _scheduleRetries();
       notifyListeners();
       return SubmitResult(SubmitStatus.queued);
     }
@@ -114,6 +139,7 @@ class SyncService extends ChangeNotifier {
       }
     } finally {
       _setBusy(false);
+      if (_queue.isEmpty) _stopRetries();
       notifyListeners();
     }
     return flushed;
