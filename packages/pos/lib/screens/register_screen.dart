@@ -908,14 +908,15 @@ class _CartLineTile extends StatelessWidget {
     );
   }
 
-  /// Edit dialog reached by tapping the line: override the unit price and set
-  /// an exact quantity. Prefilled with plain (non-grouped) numbers so they
-  /// parse back cleanly.
+  /// Edit dialog reached by tapping the line: override the unit price (0 is
+  /// valid — a bonus / free item) and set an exact quantity. "Reset price"
+  /// drops the override, reverting to the base price. Prefilled with plain
+  /// (non-grouped) numbers so they parse back cleanly.
   Future<void> _edit(BuildContext context) async {
     final priceController =
         TextEditingController(text: Money.format(line.unitPriceMinor));
     final qtyController = TextEditingController(text: '${line.qty}');
-    final saved = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(line.displayName),
@@ -927,7 +928,7 @@ class _CartLineTile extends StatelessWidget {
               autofocus: true,
               keyboardType: TextInputType.number,
               inputFormatters: [ThousandsSeparatorInputFormatter()],
-              onSubmitted: (_) => Navigator.pop(ctx, true),
+              onSubmitted: (_) => Navigator.pop(ctx, 'save'),
               decoration: const InputDecoration(
                 labelText: 'Unit price',
                 border: OutlineInputBorder(),
@@ -964,7 +965,7 @@ class _CartLineTile extends StatelessWidget {
             TextField(
               controller: qtyController,
               keyboardType: TextInputType.number,
-              onSubmitted: (_) => Navigator.pop(ctx, true),
+              onSubmitted: (_) => Navigator.pop(ctx, 'save'),
               decoration: const InputDecoration(
                 labelText: 'Quantity',
                 border: OutlineInputBorder(),
@@ -973,22 +974,36 @@ class _CartLineTile extends StatelessWidget {
           ],
         ),
         actions: [
+          // Open-price lines have no base price to revert to, so no reset.
+          if (line.overridePriceMinor != null &&
+              line.product.kind != 'open_price')
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'reset'),
+                child: const Text('Reset price')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(ctx, null),
               child: const Text('Cancel')),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () => Navigator.pop(ctx, 'save'),
               child: const Text('Save')),
         ],
       ),
     );
-    if (saved != true) return;
+    if (action == null) return;
     final qty = int.tryParse(qtyController.text.trim()) ?? line.qty;
     if (qty <= 0) {
       cart.setQty(line, qty); // 0 or less removes the line
       return;
     }
-    cart.setPrice(line, Money.parse(priceController.text));
+    if (action == 'reset') {
+      cart.setPrice(line, null);
+    } else {
+      // A blank field keeps the current price — only an explicit "0" makes
+      // the line free. Skip a no-op entry so it doesn't become an override.
+      final text = priceController.text.trim();
+      final price = text.isEmpty ? line.unitPriceMinor : Money.parse(text);
+      if (price != line.unitPriceMinor) cart.setPrice(line, price);
+    }
     cart.setQty(line, qty);
   }
 }

@@ -396,6 +396,30 @@ describe("service products", () => {
     expect(items[0]!.snapshotCostMinor).toBe(400);
     expect(await stockOf(variantId)).toBe(99);
   });
+
+  test("a zero price override (bonus item) is accepted, keeps the cost, moves stock", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      kind: "physical",
+      priceMinor: 1000,
+      costMinor: 400,
+      stockQty: 100,
+    });
+
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 2, priceOverrideMinor: 0 }],
+      payments: [],
+      createdByUserId: userId,
+    });
+    expect(order.totalMinor).toBe(0);
+
+    const items = await listOrderItems(order.id);
+    expect(items[0]!.snapshotPriceMinor).toBe(0);
+    // The giveaway still carries its real cost, so reports show the margin hit.
+    expect(items[0]!.snapshotCostMinor).toBe(400);
+    expect(await stockOf(variantId)).toBe(98);
+  });
 });
 
 describe("open-price products", () => {

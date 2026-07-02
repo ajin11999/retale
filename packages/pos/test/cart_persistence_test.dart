@@ -82,6 +82,46 @@ void main() {
       expect(line.unitCostMinor, 1000);
     });
 
+    test('a zero price override (bonus item) sticks and reaches the wire', () {
+      final cart = Register().active;
+      final p = _product();
+      cart.add(p, p.variants.first);
+      final line = cart.lines.single;
+
+      cart.setPrice(line, 0);
+      expect(line.overridePriceMinor, 0);
+      expect(line.unitPriceMinor, 0);
+      expect(line.lineTotalMinor, 0);
+      // The margin is the full cost given away, shown against no revenue.
+      expect(line.unitMarginMinor, -600);
+      expect(line.unitMarginFraction, isNull);
+
+      // The zero override must be sent, not dropped as "no override".
+      expect(cart.toOrderItemsInput().single['priceOverrideMinor'], 0);
+
+      // And it survives the durable cart store.
+      final restored = Cart.fromJson(
+          jsonDecode(jsonEncode(cart.toJson())) as Map<String, dynamic>);
+      expect(restored.lines.single.overridePriceMinor, 0);
+    });
+
+    test('null or negative setPrice clears the override', () {
+      final cart = Register().active;
+      final p = _product();
+      cart.add(p, p.variants.first);
+      final line = cart.lines.single;
+
+      cart.setPrice(line, 0);
+      cart.setPrice(line, null);
+      expect(line.overridePriceMinor, isNull);
+      expect(line.unitPriceMinor, 1000); // back to the base price
+
+      cart.setPrice(line, -50);
+      expect(line.overridePriceMinor, isNull);
+      expect(cart.toOrderItemsInput().single.containsKey('priceOverrideMinor'),
+          isFalse);
+    });
+
     test('a fresh register is pristine; one with items is not', () {
       final register = Register();
       expect(register.isPristine, isTrue);

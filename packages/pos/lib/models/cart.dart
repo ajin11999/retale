@@ -155,11 +155,13 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Override a line's unit price. A non-positive value clears the override,
-  /// reverting to the variant's base price.
+  /// Override a line's unit price. Zero is a valid override (a bonus / free
+  /// item — the API accepts it and the snapshot keeps the real cost). Null or
+  /// a negative value clears the override, reverting to the variant's base
+  /// price.
   void setPrice(CartLine line, num? priceMinor) {
     line.overridePriceMinor =
-        (priceMinor != null && priceMinor > 0) ? priceMinor : null;
+        (priceMinor != null && priceMinor >= 0) ? priceMinor : null;
     notifyListeners();
   }
 
