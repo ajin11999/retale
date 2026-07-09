@@ -38,7 +38,7 @@
           costMinor
           allocatedFreightMinor
           sortOrder
-          purchaseItem { id purchaseId qtyOrdered qtyDelivered }
+          purchaseItem { id purchaseId variantId qtyOrdered qtyDelivered }
         }
         leafLandings {
           itemId
@@ -214,6 +214,25 @@
       id ? (m.get(id) ?? fallback ?? "Unknown") : (fallback ?? "—");
   });
 
+  // Split display parts per variant so goods rows can put the product name on
+  // the main line and the SKU underneath — inlining both bloats the row.
+  type VariantParts = { name: string; sku: string };
+  const variantParts = $derived.by(() => {
+    const m = new Map<string, VariantParts>();
+    for (const p of productList) {
+      for (const v of p.variants) {
+        m.set(v.id, { name: p.name, sku: v.label ? `${v.sku} · ${v.label}` : v.sku });
+      }
+    }
+    return m;
+  });
+  // Variant behind a goods leaf; null for cost lines or when the variant (or
+  // its PO line) is gone — callers fall back to the stored description.
+  const goodsParts = (it: { purchaseItem: { variantId: string | null } | null }) =>
+    it.purchaseItem?.variantId
+      ? (variantParts.get(it.purchaseItem.variantId) ?? null)
+      : null;
+
   // PO lines still owing goods, across every open purchase — the goods picker.
   // A delivery can draw lines from several purchases; `remaining` is what's left
   // to receive on the PO (this draft's own staged qty is enforced at commit).
@@ -221,8 +240,10 @@
     itemId: string;
     purchaseId: string;
     vendorName: string;
-    /** Product / SKU label without the vendor prefix. */
-    lineLabel: string;
+    /** Main display line: product name, else the PO line's free text. */
+    productName: string;
+    /** SKU (· variant label) shown under the name; null for non-stock lines. */
+    sku: string | null;
     /** Full label (vendor · line) used when written onto a delivery item. */
     label: string;
     remaining: number;
@@ -235,11 +256,13 @@
         const remaining = it.qtyOrdered - it.qtyDelivered;
         if (remaining <= 0) continue;
         const lineLabel = variantLabel(it.variantId, it.description);
+        const parts = it.variantId ? variantParts.get(it.variantId) : undefined;
         out.push({
           itemId: it.id,
           purchaseId: p.id,
           vendorName: p.snapshotVendorName,
-          lineLabel,
+          productName: parts?.name ?? it.description ?? lineLabel,
+          sku: parts?.sku ?? null,
           label: `${p.snapshotVendorName} · ${lineLabel}`,
           remaining,
           unitCostMinor: it.unitCostMinor,
@@ -1196,7 +1219,12 @@
                     class="text-left hover:underline"
                     onclick={() => togglePick(l)}
                   >
-                    <span class="font-medium">{l.lineLabel}</span>
+                    <span class="block font-medium">{l.productName}</span>
+                    {#if l.sku}
+                      <span class="block text-xs font-normal text-muted-foreground">
+                        {l.sku}
+                      </span>
+                    {/if}
                   </button>
                 </td>
                 <td class="px-3 py-2 text-right tabular-nums">{l.remaining}</td>
@@ -1244,6 +1272,7 @@
 {/if}
 
 {#snippet renderNode(node: Node, depth: number)}
+  {@const parts = goodsParts(node.item)}
   <li>
     <div
       class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40"
@@ -1251,7 +1280,14 @@
     >
       {#if editingId === node.item.id}
         {#if eIsLeaf}
-          <span class="flex-1 truncate text-sm">{node.item.description}</span>
+          <span class="min-w-0 flex-1 text-sm">
+            <span class="block truncate">{parts?.name ?? node.item.description}</span>
+            {#if parts}
+              <span class="block truncate text-xs text-muted-foreground">
+                {parts.sku}
+              </span>
+            {/if}
+          </span>
           <Input bind:value={eQty} class="w-24" inputmode="numeric" placeholder="qty" />
           <span class="w-32 text-right text-sm">
             {formatMoney(eUnitCost * (eGoodsValid ? eGoodsQty : 0))}
@@ -1290,27 +1326,34 @@
             aria-label="Select goods line"
           />
         {/if}
-        <span class="flex-1 truncate text-sm">
-          {node.item.description}
-          {#if node.item.purchaseItem}
-            {@const pi = node.item.purchaseItem}
-            {@const over =
-              isDraft && pi.qtyDelivered + (node.item.qty ?? 0) > pi.qtyOrdered}
-            <span
-              class="ml-1 text-xs {over ? 'text-amber-600' : 'text-muted-foreground'}"
-              title="Received of ordered on the linked PO line"
-            >
-              · PO {pi.qtyDelivered}{#if isDraft && node.item.qty}&nbsp;+{node.item
-                  .qty}{/if} / {pi.qtyOrdered}
+        <span class="min-w-0 flex-1 text-sm">
+          <span class="block truncate">
+            {parts?.name ?? node.item.description}
+            {#if node.item.purchaseItem}
+              {@const pi = node.item.purchaseItem}
+              {@const over =
+                isDraft && pi.qtyDelivered + (node.item.qty ?? 0) > pi.qtyOrdered}
+              <span
+                class="ml-1 text-xs {over ? 'text-amber-600' : 'text-muted-foreground'}"
+                title="Received of ordered on the linked PO line"
+              >
+                · PO {pi.qtyDelivered}{#if isDraft && node.item.qty}&nbsp;+{node.item
+                    .qty}{/if} / {pi.qtyOrdered}
+              </span>
+            {:else if node.item.purchaseItemId}
+              <span class="ml-1 text-xs text-muted-foreground">
+                · PO line {node.item.purchaseItemId.slice(-6)}
+              </span>
+            {:else if node.item.vendor}
+              <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
+                → {node.item.vendor.name}
+              </Badge>
+            {/if}
+          </span>
+          {#if parts}
+            <span class="block truncate text-xs text-muted-foreground">
+              {parts.sku}
             </span>
-          {:else if node.item.purchaseItemId}
-            <span class="ml-1 text-xs text-muted-foreground">
-              · PO line {node.item.purchaseItemId.slice(-6)}
-            </span>
-          {:else if node.item.vendor}
-            <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
-              → {node.item.vendor.name}
-            </Badge>
           {/if}
         </span>
         {#if node.item.qty != null}
