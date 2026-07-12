@@ -52,6 +52,9 @@ bun run dev:console         # console → http://localhost:5173
 
 # Flutter apps run from their package dir, e.g. the POS register:
 cd packages/pos && flutter run -d windows    # or -d chrome / -d linux
+
+# Build the Stockeeper Android APK (requires Flutter):
+bun run build:stockeeper-apk
 ```
 
 The Flutter packages ship `lib/` + `pubspec` only — on first checkout run

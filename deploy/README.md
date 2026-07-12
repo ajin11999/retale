@@ -25,11 +25,12 @@ part of this stack.
    and fills the secret placeholders (hex DB passwords, base64 API keys);
    then just set `HOST_IP`.
 3. Build the POS + workshop web bundles on the host (Flutter is not
-   containerized):
+   containerized), and optionally the Stockeeper APK:
 
    ```
    bun run build:pos-web
    bun run build:workshop-web
+   bun run build:stockeeper-apk
    ```
 
 4. Bring the stack up:
@@ -112,6 +113,8 @@ workshop-only change needs neither `up -d --build` nor the *other* app's build.
 - **Update workshop web** (only when `packages/workshop` changed):
   `bun run build:workshop-web`, then the same `restart caddy`. You do **not**
   need this if only the api/console/POS changed.
+- **Update Stockeeper APK** (only when `packages/stockeeper` changed):
+  `bun run build:stockeeper-apk`, then sideload the new APK onto staff Android devices.
 - **Logs:** `docker compose -p retale-prod logs -f api` (or `console`, `caddy`).
 - **Stop:** `docker compose -p retale-prod down` — data persists in named
   volumes (`dbdata`, `uploads`, `caddy-data`). Never `down -v` in production.
