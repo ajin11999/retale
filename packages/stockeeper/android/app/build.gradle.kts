@@ -23,7 +23,7 @@ android {
     defaultConfig {
         applicationId = "com.retale.retale_stockeeper"
         // mobile_scanner requires API 23+ (Flutter's default is 21).
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
