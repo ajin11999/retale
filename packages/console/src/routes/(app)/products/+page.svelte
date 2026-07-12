@@ -29,7 +29,10 @@
         archivedAt
         variants {
           id
+          sku
+          label
           priceMinor
+          costMinor
           totalQty
         }
       }
@@ -202,6 +205,7 @@
     maxPrice: number;
     stock: number;
     archived: boolean;
+    minMarginBps: number | null;
   }
 
   // Filtering/sorting/pagination run in plain runes here rather than through a
@@ -216,6 +220,8 @@
   // Archived products are hidden by default; toggled by the header checkbox.
   let showArchived = $state(false);
   let search = $state("");
+  let maxMarginInput = $state("");
+  let maxMarginFilter = $state<number | null>(null);
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   function onSearchInput(value: string) {
@@ -224,6 +230,17 @@
     debounceTimer = setTimeout(() => {
       search = value.trim();
       // Filtered set shrinks — jump back so results aren't on a stale page.
+      pageIndex = 0;
+    }, 500);
+  }
+
+  let marginDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  function onMarginInput(value: string) {
+    maxMarginInput = value;
+    clearTimeout(marginDebounceTimer);
+    marginDebounceTimer = setTimeout(() => {
+      const parsed = parseFloat(value);
+      maxMarginFilter = isNaN(parsed) ? null : parsed * 100;
       pageIndex = 0;
     }, 500);
   }
@@ -240,6 +257,24 @@
       const category = p.categoryId
         ? (catName.get(p.categoryId) ?? "Unknown")
         : "Uncategorized";
+
+      let variantHaystack = "";
+      let minMarginBps: number | null = null;
+      for (const v of p.variants) {
+        variantHaystack += ` ${v.sku} ${v.label || ""}`;
+        let marginBps: number | null = null;
+        if (v.priceMinor > 0 && v.costMinor > 0) {
+          marginBps = Math.round(((v.priceMinor - v.costMinor) / v.priceMinor) * 10000);
+        } else if (v.priceMinor <= 0 && v.costMinor > 0) {
+          marginBps = -10000;
+        }
+        if (marginBps !== null) {
+          if (minMarginBps === null || marginBps < minMarginBps) {
+            minMarginBps = marginBps;
+          }
+        }
+      }
+
       return {
         id: p.id,
         name: p.name,
@@ -252,7 +287,8 @@
         maxPrice: prices.length ? Math.max(...prices) : 0,
         stock: p.variants.reduce((sum, v) => sum + v.totalQty, 0),
         archived: p.archivedAt != null,
-        haystack: `${p.name} ${category} ${p.kind}`.toLowerCase(),
+        minMarginBps,
+        haystack: `${p.name} ${category} ${p.kind} ${variantHaystack}`.toLowerCase(),
       };
     });
   });
@@ -285,6 +321,9 @@
     let base = allRows;
     if (!showArchived) base = base.filter((r) => !r.archived);
     if (categoryFilter) base = base.filter((r) => r.categoryId === categoryFilter);
+    if (maxMarginFilter !== null) {
+      base = base.filter((r) => r.minMarginBps !== null && r.minMarginBps <= maxMarginFilter);
+    }
     // AND-match whitespace tokens, so "sproc sss" matches "sprocket … sss"
     // regardless of word order — mirrors the server-side listProducts search
     // rather than a single contiguous match.
@@ -555,6 +594,14 @@
           placeholder="Search products…"
           value={searchInput}
           oninput={(e) => onSearchInput(e.currentTarget.value)}
+        />
+      </div>
+      <div class="w-32">
+        <Input
+          type="number"
+          placeholder="Max margin %"
+          value={maxMarginInput}
+          oninput={(e) => onMarginInput(e.currentTarget.value)}
         />
       </div>
       {#if canCreate}
