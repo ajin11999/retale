@@ -131,9 +131,9 @@ class StockLevel {
   final int qtyDecimals;
   final num onHand;
 
-  /// Display name: `Product · sku · label` (label only when present).
+  /// Display name: `Product · label` (label only when present).
   String get displayName =>
-      [productName, sku, if (label != null && label!.isNotEmpty) label!]
+      [productName, if (label != null && label!.isNotEmpty) label!]
           .join(' · ');
 
   factory StockLevel.fromJson(Map<String, dynamic> j) => StockLevel(
@@ -164,11 +164,25 @@ class LocationNode {
       );
 }
 
-/// Builds `variantId -> "Product · sku · label"` from the products query.
+class VariantInfo {
+  final String productName;
+  final String? sku;
+  final String? label;
+
+  VariantInfo(this.productName, this.sku, this.label);
+
+  String get displayName => [
+        productName,
+        if (sku != null && sku!.isNotEmpty) sku,
+        if (label != null && label!.isNotEmpty) label,
+      ].join(' · ');
+}
+
+/// Builds `variantId -> VariantInfo` from the products query.
 /// PurchaseItem carries no variant label, so receiving lines look up here
 /// and fall back to the line's free-text description.
-Map<String, String> buildVariantLabelMap(List<dynamic> products) {
-  final map = <String, String>{};
+Map<String, VariantInfo> buildVariantLabelMap(List<dynamic> products) {
+  final map = <String, VariantInfo>{};
   for (final p in products) {
     final product = p as Map<String, dynamic>;
     final name = product['name'] as String;
@@ -176,11 +190,7 @@ Map<String, String> buildVariantLabelMap(List<dynamic> products) {
       final variant = v as Map<String, dynamic>;
       final sku = variant['sku'] as String?;
       final label = variant['label'] as String?;
-      map[variant['id'] as String] = [
-        name,
-        if (sku != null && sku.isNotEmpty) sku,
-        if (label != null && label.isNotEmpty) label,
-      ].join(' · ');
+      map[variant['id'] as String] = VariantInfo(name, sku, label);
     }
   }
   return map;

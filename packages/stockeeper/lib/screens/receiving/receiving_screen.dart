@@ -25,7 +25,7 @@ class ReceivingScreen extends StatefulWidget {
 
 class _ReceivingScreenState extends State<ReceivingScreen> {
   List<ReceivingLine>? _lines;
-  Map<String, String> _labels = const {};
+  Map<String, VariantInfo> _labels = const {};
   Object? _loadError;
 
   final _scanField = TextEditingController();
@@ -63,10 +63,13 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
   String _fmt(num v) =>
       v == v.truncate() ? v.toInt().toString() : v.toString();
 
-  String _labelOf(ReceivingLine line) {
-    final fromVariant =
-        line.variantId == null ? null : _labels[line.variantId];
-    return fromVariant ?? line.description ?? '(unnamed line)';
+  VariantInfo? _variantOf(ReceivingLine line) {
+    return line.variantId == null ? null : _labels[line.variantId];
+  }
+
+  String _titleOf(ReceivingLine line) {
+    final v = _variantOf(line);
+    return v?.productName ?? line.description ?? '(unnamed line)';
   }
 
   Future<void> _load() async {
@@ -156,7 +159,7 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
     if (qty > line.remaining) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Only ${_fmt(line.remaining)} left to receive '
-              'on ${_labelOf(line)}')));
+              'on ${_titleOf(line)}')));
       if (fromField) _syncController(line);
       return;
     }
@@ -228,7 +231,7 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, line),
               child: Text(
-                '${_labelOf(line)}\n'
+                '${_titleOf(line)}\n'
                 '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} counted',
                 style: const TextStyle(fontSize: 16),
               ),
@@ -372,11 +375,18 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                       ? null
                       : (_) => _save(line, full ? 0 : line.remaining),
                 ),
-          title: Text(_labelOf(line), style: const TextStyle(fontSize: 18)),
-          subtitle: Text(done
-              ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
-              : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
-                  'to receive · ordered ${_fmt(line.qtyOrdered)}'),
+          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_variantOf(line)?.sku?.isNotEmpty == true)
+                Text(_variantOf(line)!.sku!, style: const TextStyle(color: Colors.grey)),
+              Text(done
+                  ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
+                  : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
+                      'to receive · ordered ${_fmt(line.qtyOrdered)}'),
+            ],
+          ),
           trailing: done
               ? const Icon(Icons.done_all)
               : SizedBox(
@@ -414,10 +424,12 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
           selected: _lastScanHitId == line.purchaseItemId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(_labelOf(line), style: const TextStyle(fontSize: 18)),
+          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (_variantOf(line)?.sku?.isNotEmpty == true)
+                Text(_variantOf(line)!.sku!, style: const TextStyle(color: Colors.grey)),
               Text(done
                   ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
                   : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
@@ -443,7 +455,7 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => CountScreen(
         target: CountTarget(
-          title: _labelOf(line),
+          title: _titleOf(line),
           expected: line.remaining,
           initial: line.qtyInCheck,
           allowOverage: false,

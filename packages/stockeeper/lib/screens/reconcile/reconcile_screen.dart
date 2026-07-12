@@ -430,10 +430,17 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
             onChanged: (_) =>
                 confirmed ? _clearCount(row) : _setCount(row, row.onHand),
           ),
-          title: Text(row.displayName, style: const TextStyle(fontSize: 18)),
-          subtitle: Text(counted == null
-              ? 'system ${_fmt(row.onHand)} · not counted'
-              : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
+          title: Text(row.displayName, style: const TextStyle(fontSize: 15)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (row.sku.isNotEmpty)
+                Text(row.sku, style: const TextStyle(color: Colors.grey)),
+              Text(counted == null
+                  ? 'system ${_fmt(row.onHand)} · not counted'
+                  : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
+            ],
+          ),
           trailing: SizedBox(
             width: 72,
             child: TextField(
@@ -472,10 +479,12 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           selected: _lastScanHitId == row.variantId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(row.displayName, style: const TextStyle(fontSize: 18)),
+          title: Text(row.displayName, style: const TextStyle(fontSize: 15)),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (row.sku.isNotEmpty)
+                Text(row.sku, style: const TextStyle(color: Colors.grey)),
               Text(counted == null
                   ? 'system ${_fmt(row.onHand)} · not counted'
                   : 'counted ${_fmt(counted)} of ${_fmt(row.onHand)}'),
@@ -560,7 +569,8 @@ class _ReviewSheet extends StatelessWidget {
                           : Colors.red.shade700;
                   return ListTile(
                     dense: true,
-                    title: Text(row.displayName),
+                    title: Text(row.displayName, style: const TextStyle(fontSize: 14)),
+                    subtitle: row.sku.isNotEmpty ? Text(row.sku, style: const TextStyle(color: Colors.grey, fontSize: 12)) : null,
                     trailing: Text(
                       delta == 0
                           ? '${fmt(qty)} ✓'

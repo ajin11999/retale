@@ -70,8 +70,8 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Image.asset('assets/logo.png', height: 56),
-              const SizedBox(height: 12),
+              Image.asset('assets/logo.jpg', height: 80),
+              const SizedBox(height: 16),
               const Text('Sign in',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),

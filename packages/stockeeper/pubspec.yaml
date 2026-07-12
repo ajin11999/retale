@@ -39,7 +39,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/logo.png
+    - assets/logo.jpg
     # Caddy local-CA root, trusted at the Dart TLS layer so HTTPS to the prod
     # stack works without a per-phone cert install. See graphql_service.dart.
     - assets/retale_ca.crt
