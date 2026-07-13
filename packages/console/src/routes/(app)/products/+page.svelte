@@ -1,10 +1,10 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Check, Pencil, X } from "@lucide/svelte";
   import { formatMoney, matchesTokens, searchTokens, statusLabel, treePathMap } from "$lib/utils";
-  import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -111,12 +111,6 @@
   const categoryPaths = $derived(
     treePathMap($ProductList.data?.categories ?? []),
   );
-
-  // A category (or product) created in another tab — e.g. the Categories
-  // screen — won't appear here, since Houdini serves the cached query. The
-  // in-progress new-product form is plain component state, so the refetch
-  // doesn't disturb it.
-  refetchOnVisible(() => ProductList.fetch({ policy: CachePolicy.NetworkOnly }));
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -322,7 +316,8 @@
     if (!showArchived) base = base.filter((r) => !r.archived);
     if (categoryFilter) base = base.filter((r) => r.categoryId === categoryFilter);
     if (maxMarginFilter !== null) {
-      base = base.filter((r) => r.minMarginBps !== null && r.minMarginBps <= maxMarginFilter);
+      const mm = maxMarginFilter;
+      base = base.filter((r) => r.minMarginBps !== null && r.minMarginBps <= mm);
     }
     // AND-match whitespace tokens, so "sproc sss" matches "sprocket … sss"
     // regardless of word order — mirrors the server-side listProducts search
@@ -597,8 +592,7 @@
         />
       </div>
       <div class="w-32">
-        <Input
-          type="number"
+        <NumericInput
           placeholder="Max margin %"
           value={maxMarginInput}
           oninput={(e) => onMarginInput(e.currentTarget.value)}
@@ -670,8 +664,7 @@
         {#if draft.kind === "open_price"}
           <label class="space-y-1">
             <span class="text-xs font-medium">Cost ratio (%)</span>
-            <Input
-              type="number"
+            <NumericInput
               step="0.1"
               value={draft.costRatioBps == null ? null : draft.costRatioBps / 100}
               oninput={(e) => {

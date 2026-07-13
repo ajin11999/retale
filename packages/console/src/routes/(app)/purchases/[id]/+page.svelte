@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { tick } from "svelte";
   import { fly } from "svelte/transition";
   import { graphql } from "$houdini";
@@ -1885,7 +1886,7 @@
 
   const sends = $derived(purchase?.sends ?? []);
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
+    iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 
   const statusClass = (s: string) =>
     s === "open"
@@ -2123,8 +2124,7 @@
           class="flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
         >
           <span>Input discount %</span>
-          <Input
-            type="number"
+          <NumericInput
             min="0"
             max="100"
             class="h-7 w-20"
@@ -2132,8 +2132,7 @@
             placeholder="0"
           />
           <span>Input tax %</span>
-          <Input
-            type="number"
+          <NumericInput
             min="0"
             class="h-7 w-20"
             bind:value={inputTaxPct}
@@ -2314,8 +2313,7 @@
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Line discount %</span>
-                <Input
-                  type="number"
+                <NumericInput
                   min="0"
                   max="100"
                   bind:value={itemDraft.lineDiscountPct}
@@ -2334,8 +2332,7 @@
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Line tax %</span>
-                <Input
-                  type="number"
+                <NumericInput
                   min="0"
                   bind:value={itemDraft.lineTaxPct}
                   placeholder="0"
@@ -2508,10 +2505,10 @@
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">
                         {#if cellEdit?.id === i.id && cellEdit.field === "qty"}
-                          <input
-                            type="number"
+                          <NumericInput
+                            
                             bind:value={cellStr}
-                            use:selectOnMount
+                            autofocus={true}
                             onkeydown={cellKeydown}
                             onblur={commitCell}
                             class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -2912,7 +2909,7 @@
                     placeholder="Description (for a non-stock line)"
                     class="flex-1"
                   />
-                  <Input type="number" min="1" bind:value={r.qty} class="w-20" aria-label="Quantity" />
+                  <NumericInput min="1" bind:value={r.qty} class="w-20" aria-label="Quantity" />
                   <MoneyInput bind:value={r.unitCostMinor} placeholder="Unit cost" class="w-36" />
                 </div>
               </div>
@@ -3024,8 +3021,7 @@
                             {s.vendorName ?? "—"}
                           </td>
                           <td class="py-2">
-                            <Input
-                              type="number"
+                            <NumericInput
                               class="w-24"
                               bind:value={reorderPicks[s.id].qty}
                             />
@@ -3074,8 +3070,7 @@
                           <td class="py-2 font-medium">{r.label}</td>
                           <td class="py-2 text-right">{r.totalQty}</td>
                           <td class="py-2">
-                            <Input
-                              type="number"
+                            <NumericInput
                               class="w-24"
                               bind:value={stockPicks[r.variantId].qty}
                             />
@@ -3244,8 +3239,7 @@
                       {/if}
                     </td>
                     <td class="py-2 pr-3">
-                      <Input
-                        type="number"
+                      <NumericInput
                         class="w-20"
                         bind:value={resourceRows[idx].qty}
                       />

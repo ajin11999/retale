@@ -171,7 +171,7 @@ class _JobSheetState extends State<JobSheet> {
         leading: const Icon(Icons.cloud_done),
         title: const Text('Submitted to Retale'),
         subtitle: Text('Order ${p.uploadedOrderId ?? ''} · '
-            '${p.uploadedAt != null ? DateFormat.yMMMd().add_jm().format(p.uploadedAt!) : ''}'),
+            '${p.uploadedAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(p.uploadedAt!) : ''}'),
       ),
     );
   }

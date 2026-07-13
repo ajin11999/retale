@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { marked } from "marked";
@@ -1101,8 +1102,7 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Tax rate (basis points)</span>
-          <Input
-            type="number"
+          <NumericInput
             bind:value={form.taxRateBps}
             disabled={!canEdit || !canEditTax}
           />
@@ -1114,12 +1114,11 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min qty</span>
-          <Input type="number" bind:value={form.minQty} disabled={!canEdit} />
+          <NumericInput bind:value={form.minQty} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min margin (%)</span>
-          <Input
-            type="number"
+          <NumericInput
             step="0.1"
             value={bpsToPct(form.minMarginBps)}
             oninput={(e) =>
@@ -1130,8 +1129,7 @@
         {#if form.kind === "open_price"}
           <label class="space-y-1">
             <span class="text-sm font-medium">Cost ratio (%)</span>
-            <Input
-              type="number"
+            <NumericInput
               step="0.1"
               value={bpsToPct(form.costRatioBps)}
               oninput={(e) =>
@@ -1494,16 +1492,14 @@
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Qty decimals</span>
-              <Input
-                type="number"
+              <NumericInput
                 bind:value={variantDraft.qtyDecimals}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">Sort order</span>
-              <Input
-                type="number"
+              <NumericInput
                 bind:value={variantDraft.sortOrder}
                 disabled={!canEdit}
               />
@@ -1587,8 +1583,7 @@
                             {row.sku}
                           </td>
                           <td class="w-20 py-1">
-                            <Input
-                              type="number"
+                            <NumericInput
                               min={1}
                               step={1}
                               bind:value={row.qty}
@@ -1764,7 +1759,7 @@
               <span class="text-xs font-medium">
                 Quantity delta (± smallest unit)
               </span>
-              <Input type="number" bind:value={stockDraft.qtyDelta} />
+              <NumericInput bind:value={stockDraft.qtyDelta} />
             </label>
             <label class="space-y-1 col-span-2">
               <span class="text-xs font-medium">Reason (required)</span>

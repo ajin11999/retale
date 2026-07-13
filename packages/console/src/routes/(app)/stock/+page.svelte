@@ -1,4 +1,6 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
+  import { untrack } from "svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
@@ -80,7 +82,7 @@
   const ROOT = "";
   // Seed from `?location=<id>` (set when arriving from the Locations list); the
   // server load already fetched levels for this bucket. Null param → root.
-  let locValue = $state(data.initialLocationId ?? ROOT);
+  let locValue = $state(untrack(() => data.initialLocationId) ?? ROOT);
 
   async function changeLocation() {
     // NetworkOnly: switching buckets must reflect live on-hand, not a cached
@@ -372,8 +374,7 @@
               </td>
               <td class="px-4 py-2 text-right tabular-nums">{r.onHand}</td>
               <td class="px-4 py-2">
-                <Input
-                  type="number"
+                <NumericInput
                   class="w-24"
                   bind:value={counted[r.variantId]}
                   disabled={!canAdjust || busy}

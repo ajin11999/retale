@@ -10,7 +10,7 @@ COPY packages/api/package.json packages/api/
 COPY packages/catalog/package.json packages/catalog/
 COPY packages/console/package.json packages/console/
 COPY packages/shared/package.json packages/shared/
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install
 
 COPY packages/shared packages/shared
 COPY packages/console packages/console
@@ -29,7 +29,7 @@ COPY packages/shared/package.json packages/shared/
 # Flaky-link resilience: the install corrupts ~1 random tarball per run; with the
 # cache mount, each retry re-fetches only the failed package until it comes clean.
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    sh -c 'i=1; while [ $i -le 8 ]; do bun install --frozen-lockfile --production && exit 0; echo "install attempt $i failed, retrying..."; i=$((i+1)); done; exit 1'
+    sh -c 'i=1; while [ $i -le 8 ]; do bun install --production && exit 0; echo "install attempt $i failed, retrying..."; i=$((i+1)); done; exit 1'
 
 COPY --from=build /app/packages/console/build packages/console/build
 

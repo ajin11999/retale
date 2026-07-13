@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
@@ -379,8 +380,7 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Sort order</span>
-          <Input
-            type="number"
+          <NumericInput
             bind:value={draft.sortOrder}
             disabled={!canEdit}
           />

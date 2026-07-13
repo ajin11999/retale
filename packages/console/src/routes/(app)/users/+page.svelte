@@ -159,7 +159,7 @@
   }
 
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
+    iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 </script>
 
 <svelte:head><title>Users · Retale Console</title></svelte:head>

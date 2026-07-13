@@ -105,3 +105,22 @@ export function treePathMap(
   for (const n of nodes) build(n.id, new Set([n.id]));
   return cache;
 }
+
+/**
+ * Safely evaluates a simple arithmetic expression string (e.g., "20+5").
+ * Strips all characters except digits, ., +, -, *, /, (, ).
+ * Returns null if invalid or evaluating fails.
+ */
+export function evaluateMath(expr: string): number | null {
+  const safeExpr = expr.replace(/[^\d.+\-*/()]/g, "");
+  if (!safeExpr) return null;
+  try {
+    const result = new Function("return " + safeExpr)();
+    if (typeof result === "number" && !Number.isNaN(result) && Number.isFinite(result)) {
+      return result;
+    }
+  } catch {
+    // Ignore syntax errors from incomplete/invalid math
+  }
+  return null;
+}

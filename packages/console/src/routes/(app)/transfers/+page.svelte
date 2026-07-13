@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -106,7 +107,7 @@
         : s === "received"
           ? "bg-emerald-100 text-emerald-700"
           : "bg-amber-100 text-amber-800";
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("id-ID");
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-CA");
 
   // ---- New-transfer composer ----------------------------------------------
   interface ItemRow {
@@ -231,7 +232,7 @@
                 placeholder="Search variant…"
               />
             </div>
-            <Input type="number" bind:value={row.qty} class="w-24" />
+            <NumericInput bind:value={row.qty} class="w-24" />
             <IconButton
               icon={Trash2}
               label="Remove row"

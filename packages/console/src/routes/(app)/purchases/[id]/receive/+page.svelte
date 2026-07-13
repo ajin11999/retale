@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../../+layout.server";
@@ -347,7 +348,7 @@
         : "bg-muted text-muted-foreground";
 
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
+    iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 </script>
 
 <svelte:head>
@@ -526,8 +527,7 @@
                 <td class="px-4 py-2 text-right tabular-nums">{l.qtyDelivered}</td>
                 <td class="px-4 py-2 text-right tabular-nums">{l.remaining}</td>
                 <td class="px-4 py-2 text-right">
-                  <Input
-                    type="number"
+                  <NumericInput
                     min="0"
                     class="w-20 text-right"
                     value={qtyDrafts[l.purchaseItem.id] ?? 0}

@@ -356,7 +356,7 @@
   );
 
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
+    iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
   const fmtDateTime = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
   // marginBps → percent, e.g. 2750 → "27.5%".
