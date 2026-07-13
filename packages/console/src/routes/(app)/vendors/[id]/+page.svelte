@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -549,7 +550,7 @@
       codeVariantId = "";
       codeText = "";
       codePreferred = false;
-      await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+      await VendorCodes.fetch({ policy: CachePolicy.NetworkOnly, variables: { vendorId: vendor.id } });
     }
   }
 
@@ -563,7 +564,7 @@
         isPreferred: !c.isPreferred,
       }),
     );
-    if (ok) await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+    if (ok) await VendorCodes.fetch({ policy: CachePolicy.NetworkOnly, variables: { vendorId: vendor.id } });
   }
 
   async function removeCode(id: string) {
@@ -571,7 +572,7 @@
     const ok = await run("Code", () =>
       DeleteVendorVariantCode.mutate({ id }),
     );
-    if (ok) await VendorCodes.fetch({ variables: { vendorId: vendor.id } });
+    if (ok) await VendorCodes.fetch({ policy: CachePolicy.NetworkOnly, variables: { vendorId: vendor.id } });
   }
 
   async function adjustBalance() {
@@ -681,16 +682,14 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Lead time (days)</span>
-          <Input
-            type="number"
+          <NumericInput
             bind:value={form.leadTimeDays}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Payment terms (days)</span>
-          <Input
-            type="number"
+          <NumericInput
             bind:value={form.paymentTermsDays}
             disabled={!canEdit}
           />

@@ -843,7 +843,7 @@
   }
 
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("id-ID") : "—";
+    iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 
   function statusBadge(s: string) {
     if (s === "delivered") return "bg-emerald-100 text-emerald-700";

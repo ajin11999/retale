@@ -68,6 +68,10 @@
     return { text, value: value != null && Number.isNaN(value) ? null : value };
   }
 
+  import { evaluateMath } from "$lib/utils";
+
+  let isEditingExpr = $state(false);
+
   /** The string the input shows, seeded from `value` and re-synced by the effect
    *  below when the value changes from outside (load / reset). */
   let text = $state(fmt(value));
@@ -75,7 +79,7 @@
   $effect(() => {
     // Don't fight mid-entry text (a trailing "." / "0" fmt would discard) — only
     // re-sync when the bound value disagrees with what the text parses to.
-    if (normalize(text).value !== value) text = fmt(value);
+    if (!isEditingExpr && normalize(text).value !== value) text = fmt(value);
   });
 
   // Caret index just past the `keptLeft`-th significant char (digit or dot) of
@@ -94,6 +98,22 @@
   async function handleInput(e: Event) {
     const node = e.currentTarget as HTMLInputElement;
     const raw = node.value;
+
+    const hasMath = /[+*/()]/.test(raw) || (allowNegative ? raw.lastIndexOf("-") > 0 : raw.includes("-"));
+    if (hasMath) {
+      isEditingExpr = true;
+      const safe = raw.replace(/[^\d.+\-*/() ]/g, "");
+      text = safe;
+      node.value = safe;
+      
+      const evaled = evaluateMath(safe);
+      if (evaled != null) {
+        value = evaled;
+      }
+      return;
+    }
+
+    isEditingExpr = false;
     const caret = node.selectionStart ?? raw.length;
     const neg = allowNegative && raw.trimStart().startsWith("-");
     const keptLeft = (raw.slice(0, caret).match(/[\d.]/g) ?? []).length;
@@ -107,6 +127,28 @@
     if (el) {
       const pos = caretAfter(el.value, keptLeft, neg);
       el.setSelectionRange(pos, pos);
+    }
+  }
+
+  function commitMath() {
+    if (isEditingExpr) {
+      const evaled = evaluateMath(text);
+      if (evaled != null) {
+        value = evaled;
+      }
+      isEditingExpr = false;
+      text = fmt(value);
+      if (el) el.value = text;
+    }
+  }
+
+  function handleBlur() {
+    commitMath();
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      commitMath();
     }
   }
 
@@ -128,4 +170,6 @@
   )}
   {...rest}
   oninput={handleInput}
+  onblur={handleBlur}
+  onkeydown={handleKeydown}
 />

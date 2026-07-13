@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { X } from "@lucide/svelte";
@@ -289,8 +290,7 @@
               <td class="px-4 py-2 text-right">{s.reorderPoint}</td>
               <td class="px-4 py-2">
                 {#if statusFilter === "open" && review[s.id]}
-                  <Input
-                    type="number"
+                  <NumericInput
                     class="w-24"
                     bind:value={review[s.id].qty}
                     disabled={!canAct}

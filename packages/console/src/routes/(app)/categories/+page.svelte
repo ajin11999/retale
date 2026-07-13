@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { Archive, ArchiveRestore, Check, Pencil, Trash2, X } from "@lucide/svelte";
@@ -462,8 +463,7 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min qty</span>
-          <Input
-            type="number"
+          <NumericInput
             bind:value={draft.minQty}
             placeholder="Inherited / none"
             disabled={!canEdit}
@@ -471,8 +471,7 @@
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Min margin (%)</span>
-          <Input
-            type="number"
+          <NumericInput
             step="0.1"
             value={bpsToPct(draft.minMarginBps)}
             oninput={(e) =>
@@ -560,13 +559,13 @@
               </td>
               <td class="px-4 py-2 text-right">
                 {#if quick?.id === n.id}
-                  <input
-                    type="number"
+                  <NumericInput
+                    
                     class="{quickInputClass} ml-auto w-20 text-right"
                     bind:value={quick.minQty}
                     placeholder="—"
                     onkeydown={quickKeydown}
-                    use:autofocus={quick.focus === "minQty"}
+                    autofocus={quick.focus === "minQty"}
                   />
                 {:else if canEdit}
                   <button

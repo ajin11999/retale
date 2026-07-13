@@ -86,7 +86,7 @@
         ? "bg-emerald-100 text-emerald-700"
         : "bg-muted text-muted-foreground";
 
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("id-ID");
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-CA");
 
   // ---- New-purchase panel --------------------------------------------------
   interface NewDraft {
@@ -149,12 +149,15 @@
           bind:value={search}
         />
       </div>
-      <div class="w-40">
-        <Select bind:value={statusFilter}>
-          {#each STATUSES as s (s)}
-            <option value={s}>{s === "all" ? "All statuses" : s}</option>
-          {/each}
-        </Select>
+      <div class="flex items-center gap-1 rounded-md border p-1 bg-muted/30">
+        {#each STATUSES as s (s)}
+          <button
+            class="rounded px-3 py-1.5 text-sm font-medium capitalize transition-colors {statusFilter === s ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'}"
+            onclick={() => statusFilter = s}
+          >
+            {s === "all" ? "All" : s}
+          </button>
+        {/each}
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={startNew}>
         New purchase

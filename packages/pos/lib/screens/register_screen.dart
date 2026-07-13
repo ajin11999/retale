@@ -626,9 +626,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// Confirm the sale with a snackbar whose action opens the receipt choices
   /// (print or WhatsApp). Ctrl+P is the faster path to the same print.
   ///
-  /// The snackbar is persistent (it won't auto-dismiss) so the cashier never
-  /// loses the chance to print: it stays until they print, tap the close icon,
-  /// or ring the next sale. [queued] flags an offline sale — the receipt still
+  /// The snackbar is temporary and dismisses automatically after a few seconds.
+  /// [queued] flags an offline sale — the receipt still
   /// prints locally, it just hasn't synced to the server yet.
   void _announceSale(_CompletedSale sale, {bool queued = false}) {
     if (!mounted) return;
@@ -640,7 +639,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         content: Text(label),
-        duration: const Duration(days: 365),
         showCloseIcon: true,
         action: SnackBarAction(
           label: 'Receipt',

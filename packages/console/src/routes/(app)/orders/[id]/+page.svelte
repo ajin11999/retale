@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { tick } from "svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
@@ -937,11 +938,11 @@
               </td>
               <td class="px-4 py-2 text-right">
                 {#if cellEdit?.id === i.id && cellEdit.field === "qty"}
-                  <input
-                    type="number"
+                  <NumericInput
+                    
                     min="1"
                     bind:value={cellStr}
-                    use:selectOnMount
+                    autofocus={true}
                     onkeydown={cellKeydown}
                     onblur={commitCell}
                     class="h-7 w-16 rounded-md border border-input bg-background px-2 text-right text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1142,8 +1143,7 @@
                 <span class="block text-[11px] font-medium text-muted-foreground">
                   Qty
                 </span>
-                <Input
-                  type="number"
+                <NumericInput
                   min={1}
                   bind:value={addQty}
                   bind:ref={qtyInput}

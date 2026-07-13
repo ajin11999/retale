@@ -85,7 +85,7 @@ class _PoListScreenState extends State<PoListScreen> {
 
   String _fmtDate(String iso) {
     final parsed = DateTime.tryParse(iso);
-    return parsed == null ? iso : DateFormat('d MMM yyyy').format(parsed);
+    return parsed == null ? iso : DateFormat('yyyy-MM-dd').format(parsed);
   }
 
   @override
