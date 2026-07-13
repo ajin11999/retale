@@ -14,7 +14,7 @@ COPY packages/api/package.json packages/api/
 COPY packages/catalog/package.json packages/catalog/
 COPY packages/console/package.json packages/console/
 COPY packages/shared/package.json packages/shared/
-RUN bun install --frozen-lockfile
+RUN bun install
 
 COPY packages/shared packages/shared
 COPY packages/api packages/api
