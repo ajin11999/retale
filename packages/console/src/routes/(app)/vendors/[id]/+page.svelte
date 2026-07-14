@@ -1087,7 +1087,7 @@
 
         <dialog
           bind:this={bulkDialog}
-          class="w-full max-w-2xl rounded-lg border bg-background p-0 shadow-lg backdrop:bg-black/50"
+          class="m-auto w-full max-w-2xl rounded-lg border bg-background p-0 shadow-lg backdrop:bg-black/50"
           onclose={() => {
             bulkSearch = "";
             bulkCodes = {};
