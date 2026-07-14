@@ -38,10 +38,10 @@ jobs:
           channel: stable
       - name: Build POS web bundle
         working-directory: packages/pos
-        run: flutter build web --pwa-strategy offline-first --no-web-resources-cdn
+        run: flutter build web --no-web-resources-cdn
       - name: Build workshop web bundle
         working-directory: packages/workshop
-        run: flutter build web --pwa-strategy offline-first --no-web-resources-cdn
+        run: flutter build web --no-web-resources-cdn
 
       - name: Resolve image prefix + tag
         id: meta

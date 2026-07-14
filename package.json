@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "bun run --filter @retale/api dev",
     "dev:console": "bun run --filter @retale/console dev",
-    "build:pos-web": "cd packages/pos && flutter build web --pwa-strategy none --no-web-resources-cdn --no-tree-shake-icons",
-    "build:workshop-web": "cd packages/workshop && flutter build web --pwa-strategy none --no-web-resources-cdn --no-tree-shake-icons",
+    "build:pos-web": "cd packages/pos && flutter build web --no-web-resources-cdn --no-tree-shake-icons",
+    "build:workshop-web": "cd packages/workshop && flutter build web --no-web-resources-cdn --no-tree-shake-icons",
     "build:stockeeper-apk": "cd packages/stockeeper && flutter build apk --release --split-per-abi",
     "test": "bun test",
     "backup": "bun scripts/backup.ts",

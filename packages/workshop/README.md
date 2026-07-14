@@ -53,7 +53,7 @@ flutter run -d chrome
 # build the installable PWA (output in build/web/) — offline-first with
 # CanvasKit bundled locally so it boots on the LAN with no public internet.
 # From the repo root this is exposed as `bun run build:workshop-web`.
-flutter build web --pwa-strategy offline-first --no-web-resources-cdn
+flutter build web --no-web-resources-cdn
 ```
 
 In the LAN deploy stack the build is served by Caddy at

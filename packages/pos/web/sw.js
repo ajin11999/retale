@@ -4,7 +4,7 @@
 //
 // Flutter 3.44's bundled flutter_service_worker.js is a deprecated no-op that
 // unregisters itself on activate and caches nothing (flutter/flutter#156910),
-// so `--pwa-strategy offline-first` no longer produces an offline build. This
+// so the flutter web build no longer produces an offline build. This
 // hand-written worker restores it: the register boots from cache when Wi‑Fi is
 // gone, and the Dart layer (ProductCache + OrderQueue) takes over for the API.
 //
