@@ -21,6 +21,7 @@
         id
         name
         parentId
+        preferredVariantId
         minQty
         minMarginBps
         archivedAt
@@ -28,6 +29,12 @@
       products(includeArchived: true) {
         id
         categoryId
+        publicDisplayName
+        variants {
+          id
+          sku
+          label
+        }
       }
     }
   `);
