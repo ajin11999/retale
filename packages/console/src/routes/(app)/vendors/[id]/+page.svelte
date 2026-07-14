@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, statusLabel } from "$lib/utils";
+  import { formatMoney, statusLabel, searchTokens, matchesTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -581,14 +581,13 @@
   let bulkCodes = $state<Record<string, string>>({});
   let bulkBusy = $state(false);
 
-  const bulkFilteredVariants = $derived(
-    availableVariants.filter(
-      (v) =>
-        !bulkSearch ||
-        v.label.toLowerCase().includes(bulkSearch.toLowerCase()) ||
-        v.productName.toLowerCase().includes(bulkSearch.toLowerCase()),
-    ),
-  );
+  const bulkFilteredVariants = $derived.by(() => {
+    const tokens = searchTokens(bulkSearch);
+    if (tokens.length === 0) return availableVariants;
+    return availableVariants.filter((v) =>
+      matchesTokens(tokens, v.productName, v.label)
+    );
+  });
 
   function openBulkDialog() {
     bulkSearch = "";
