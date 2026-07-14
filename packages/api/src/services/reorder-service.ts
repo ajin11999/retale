@@ -8,7 +8,7 @@
 
 import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { ulid } from "ulid";
-import { products, productVariants } from "../db/schema/products.ts";
+import { productCategories, products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
@@ -87,6 +87,35 @@ async function loadSuggestion(id: string): Promise<Suggestion> {
  * The previous `open` set is discarded; `converted` / `dismissed` rows stay.
  */
 export async function runReorderScan(): Promise<Suggestion[]> {
+  // Substitute groups (Categories with minQty and preferredVariantId)
+  const substituteGroupsRows = await db
+    .select({
+      categoryId: productCategories.id,
+      minQty: productCategories.minQty,
+      preferredVariantId: productCategories.preferredVariantId,
+    })
+    .from(productCategories)
+    .where(
+      and(
+        isNotNull(productCategories.minQty),
+        isNotNull(productCategories.preferredVariantId)
+      )
+    );
+  const substituteGroupMap = new Map(substituteGroupsRows.map((sg) => [sg.categoryId, sg]));
+
+  let categoryVariantRows: { categoryId: string | null; variantId: string; totalQty: number }[] = [];
+  if (substituteGroupsRows.length > 0) {
+    categoryVariantRows = await db
+      .select({
+        categoryId: products.categoryId,
+        variantId: productVariants.id,
+        totalQty: productVariants.totalQty,
+      })
+      .from(productVariants)
+      .innerJoin(products, eq(productVariants.productId, products.id))
+      .where(inArray(products.categoryId, substituteGroupsRows.map((sg) => sg.categoryId)));
+  }
+
   // Tracked variants and their product's primary vendor.
   const candidates = await db
     .select({
@@ -96,6 +125,7 @@ export async function runReorderScan(): Promise<Suggestion[]> {
       reorderQty: productVariants.reorderQty,
       minQty: products.minQty,
       primaryVendorId: products.primaryVendorId,
+      categoryId: products.categoryId,
     })
     .from(productVariants)
     .innerJoin(products, eq(productVariants.productId, products.id))
@@ -110,13 +140,19 @@ export async function runReorderScan(): Promise<Suggestion[]> {
     );
 
   const generatedAt = new Date();
-  if (candidates.length === 0) {
+  
+  const candidateVariantIds = new Set<string>(candidates.map((c) => c.variantId));
+  for (const row of categoryVariantRows) candidateVariantIds.add(row.variantId);
+  for (const sg of substituteGroupsRows) candidateVariantIds.add(sg.preferredVariantId as string);
+
+  const candidateIds = Array.from(candidateVariantIds);
+
+  if (candidateIds.length === 0) {
     await db
       .delete(reorderSuggestions)
       .where(eq(reorderSuggestions.status, "open"));
     return [];
   }
-  const candidateIds = candidates.map((c) => c.variantId);
 
   // On-order: Σ(ordered − delivered) over non-cancelled purchases, per variant.
   const onOrderRows = await db
@@ -164,10 +200,59 @@ export async function runReorderScan(): Promise<Suggestion[]> {
   // Preferred vendor: an explicit `isPreferred` vendor_variant_codes mapping.
   const preferredByVariant = await preferredVendorByVariant(candidateIds);
 
+  let preferredVariantsInfoMap = new Map<string, { reorderQty: number | null, primaryVendorId: string | null }>();
+  if (substituteGroupsRows.length > 0) {
+    const preferredVariantIds = substituteGroupsRows.map(sg => sg.preferredVariantId as string);
+    const prefInfo = await db
+      .select({
+        variantId: productVariants.id,
+        reorderQty: productVariants.reorderQty,
+        primaryVendorId: products.primaryVendorId,
+      })
+      .from(productVariants)
+      .innerJoin(products, eq(productVariants.productId, products.id))
+      .where(inArray(productVariants.id, preferredVariantIds));
+    preferredVariantsInfoMap = new Map(prefInfo.map(info => [info.variantId, info]));
+  }
+
   const rows: (typeof reorderSuggestions.$inferInsert)[] = [];
+
+  for (const sg of substituteGroupsRows) {
+    let aggregateStock = 0;
+    const variantsInCat = categoryVariantRows.filter((r) => r.categoryId === sg.categoryId);
+    for (const v of variantsInCat) {
+      aggregateStock += v.totalQty + (onOrderByVariant.get(v.variantId) ?? 0);
+    }
+    
+    if (aggregateStock <= (sg.minQty as number)) {
+      const preferredId = sg.preferredVariantId as string;
+      const prefInfo = preferredVariantsInfoMap.get(preferredId);
+      const vendorId =
+        preferredByVariant.get(preferredId) ??
+        lastVendorByVariant.get(preferredId) ??
+        prefInfo?.primaryVendorId ??
+        null;
+      
+      const suggestedQty = prefInfo?.reorderQty != null 
+        ? prefInfo.reorderQty 
+        : Math.max(1, (sg.minQty as number) - aggregateStock);
+
+      rows.push({
+        id: ulid(),
+        variantId: preferredId,
+        vendorId,
+        currentStock: aggregateStock,
+        reorderPoint: sg.minQty as number,
+        suggestedQty,
+        status: "open",
+        generatedAt,
+      });
+    }
+  }
+
   for (const c of candidates) {
-    // Variant's own point wins; otherwise fall back to the product's minQty.
-    // The WHERE guarantees at least one is set, so this is never null.
+    if (c.categoryId && substituteGroupMap.has(c.categoryId)) continue;
+
     const reorderPoint = (c.reorderPoint ?? c.minQty) as number;
     const onOrder = onOrderByVariant.get(c.variantId) ?? 0;
     const available = c.totalQty + onOrder;

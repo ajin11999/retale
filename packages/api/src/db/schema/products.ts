@@ -38,6 +38,9 @@ export const productCategories = mysqlTable(
     parentId: ulidRef().references((): AnyMySqlColumn => productCategories.id, {
       onDelete: "set null",
     }),
+    preferredVariantId: ulidRef().references((): AnyMySqlColumn => productVariants.id, {
+      onDelete: "set null",
+    }),
     minQty: int(),
     minMarginBps: int(),
     archivedAt: timestamp(),

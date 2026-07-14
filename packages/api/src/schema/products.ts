@@ -20,6 +20,7 @@ export const typeDefs = /* GraphQL */ `
     id: ID!
     name: String!
     parentId: ID
+    preferredVariantId: ID
     minQty: Int
     minMarginBps: Int
     archivedAt: String
@@ -117,8 +118,8 @@ export const typeDefs = /* GraphQL */ `
   }
 
   extend type Mutation {
-    createCategory(name: String!, parentId: ID, minQty: Int, minMarginBps: Int): Category!
-    updateCategory(id: ID!, name: String, parentId: ID, minQty: Int, minMarginBps: Int): Category!
+    createCategory(name: String!, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
+    updateCategory(id: ID!, name: String, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
     setCategoryArchived(id: ID!, archived: Boolean!): Category!
     deleteCategory(id: ID!): Boolean!
 

@@ -91,6 +91,7 @@ async function assertNoCategoryCycle(id: string, parentId: string): Promise<void
 export async function createCategory(input: {
   name: string;
   parentId?: string | null;
+  preferredVariantId?: string | null;
   minQty?: number | null;
   minMarginBps?: number | null;
 }): Promise<Category> {
@@ -100,6 +101,7 @@ export async function createCategory(input: {
     id,
     name: input.name,
     parentId: input.parentId ?? null,
+    preferredVariantId: input.preferredVariantId ?? null,
     minQty: input.minQty ?? null,
     minMarginBps: input.minMarginBps ?? null,
   });
@@ -111,6 +113,7 @@ export async function updateCategory(
   patch: {
     name?: string;
     parentId?: string | null;
+    preferredVariantId?: string | null;
     minQty?: number | null;
     minMarginBps?: number | null;
   },
@@ -123,6 +126,7 @@ export async function updateCategory(
     .set({
       ...(patch.name !== undefined && { name: patch.name }),
       ...(patch.parentId !== undefined && { parentId: patch.parentId }),
+      ...(patch.preferredVariantId !== undefined && { preferredVariantId: patch.preferredVariantId }),
       ...(patch.minQty !== undefined && { minQty: patch.minQty }),
       ...(patch.minMarginBps !== undefined && { minMarginBps: patch.minMarginBps }),
     })

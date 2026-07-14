@@ -295,6 +295,13 @@
       "when": 1781873227739,
       "tag": "0041_sudden_kitty_pryde",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1784002960509,
+      "tag": "0042_white_dazzler",
+      "breakpoints": true
     }
   ]
 }

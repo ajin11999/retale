@@ -1,0 +1,2 @@
+ALTER TABLE `product_categories` ADD `preferred_variant_id` varchar(26);--> statement-breakpoint
+ALTER TABLE `product_categories` ADD CONSTRAINT `product_categories_preferred_variant_id_product_variants_id_fk` FOREIGN KEY (`preferred_variant_id`) REFERENCES `product_variants`(`id`) ON DELETE set null ON UPDATE no action;
