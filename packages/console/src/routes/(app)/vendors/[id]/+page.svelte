@@ -575,6 +575,64 @@
     if (ok) await VendorCodes.fetch({ policy: CachePolicy.NetworkOnly, variables: { vendorId: vendor.id } });
   }
 
+  // ---- Bulk variant code form ---------------------------------------------
+  let bulkDialog = $state<HTMLDialogElement>();
+  let bulkSearch = $state("");
+  let bulkCodes = $state<Record<string, string>>({});
+  let bulkBusy = $state(false);
+
+  const bulkFilteredVariants = $derived(
+    availableVariants.filter(
+      (v) =>
+        !bulkSearch ||
+        v.label.toLowerCase().includes(bulkSearch.toLowerCase()) ||
+        v.productName.toLowerCase().includes(bulkSearch.toLowerCase()),
+    ),
+  );
+
+  function openBulkDialog() {
+    bulkSearch = "";
+    bulkCodes = {};
+    bulkDialog?.showModal();
+  }
+
+  function closeBulkDialog() {
+    bulkDialog?.close();
+  }
+
+  async function saveBulkCodes() {
+    if (!vendor) return;
+    const entries = Object.entries(bulkCodes).filter(
+      ([_, code]) => code.trim() !== "",
+    );
+    if (entries.length === 0) {
+      closeBulkDialog();
+      return;
+    }
+    bulkBusy = true;
+    try {
+      await Promise.all(
+        entries.map(([variantId, code]) =>
+          SetVendorVariantCode.mutate({
+            vendorId: vendor.id,
+            variantId,
+            code: code.trim(),
+            isPreferred: false,
+          }),
+        ),
+      );
+      await VendorCodes.fetch({
+        policy: CachePolicy.NetworkOnly,
+        variables: { vendorId: vendor.id },
+      });
+      closeBulkDialog();
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
   async function adjustBalance() {
     if (!vendor || !adjAmount || !adjNote.trim()) return;
     const ok = await run("Adjustment", () =>
@@ -921,6 +979,9 @@
           <h2 class="text-sm font-semibold">
             Vendor variant codes ({codes.length})
           </h2>
+          <Button variant="outline" size="sm" onclick={openBulkDialog}>
+            Bulk map…
+          </Button>
         </div>
         <p class="text-xs text-muted-foreground">
           The vendor's own part numbers for our variants — fed into the
@@ -1023,6 +1084,67 @@
             {/if}
           </div>
         {/if}
+
+        <dialog
+          bind:this={bulkDialog}
+          class="w-full max-w-2xl rounded-lg border bg-background p-0 shadow-lg backdrop:bg-black/50"
+          onclose={() => {
+            bulkSearch = "";
+            bulkCodes = {};
+          }}
+        >
+          <div class="flex h-[80vh] max-h-[600px] flex-col">
+            <div class="border-b p-4">
+              <h3 class="text-lg font-semibold">Bulk map variant codes</h3>
+              <p class="mt-1 text-sm text-muted-foreground">
+                Search for variants and enter vendor codes. Empty fields will be
+                ignored.
+              </p>
+              <div class="mt-4">
+                <Input
+                  bind:value={bulkSearch}
+                  placeholder="Search variants…"
+                  type="search"
+                />
+              </div>
+            </div>
+
+            <div class="flex-1 space-y-2 overflow-y-auto p-4">
+              {#each bulkFilteredVariants as v (v.id)}
+                <div
+                  class="flex items-center gap-4 border-b pb-2 last:border-0 last:pb-0"
+                >
+                  <div class="flex-1">
+                    <p class="text-sm font-medium">{v.productName}</p>
+                    <p class="text-xs text-muted-foreground">{v.label}</p>
+                  </div>
+                  <div class="w-48">
+                    <Input
+                      bind:value={bulkCodes[v.id]}
+                      placeholder="Vendor code"
+                      disabled={bulkBusy}
+                    />
+                  </div>
+                </div>
+              {:else}
+                <p class="py-4 text-center text-sm text-muted-foreground">
+                  No variants match your search.
+                </p>
+              {/each}
+            </div>
+
+            <div class="flex justify-end gap-2 border-t bg-muted/40 p-4">
+              <Button
+                variant="ghost"
+                disabled={bulkBusy}
+                onclick={closeBulkDialog}>Cancel</Button
+              >
+              <Button disabled={bulkBusy} onclick={saveBulkCodes}>
+                {bulkBusy ? "Saving…" : "Save mappings"}
+              </Button>
+            </div>
+          </div>
+        </dialog>
       </section>
     {/if}
 
