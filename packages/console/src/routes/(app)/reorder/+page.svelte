@@ -145,7 +145,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return;
       }
-      await ReorderSuggestions.fetch();
+      await ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly });
       statusFilter = "open";
       feedback = {
         ok: true,
@@ -175,7 +175,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return;
       }
-      await ReorderSuggestions.fetch();
+      await ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly });
       const n = res.data?.convertReorderSuggestions.length ?? 0;
       feedback = {
         ok: true,
@@ -197,7 +197,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return;
       }
-      await ReorderSuggestions.fetch();
+      await ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
     } finally {
