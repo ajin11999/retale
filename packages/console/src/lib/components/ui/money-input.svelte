@@ -110,6 +110,7 @@
       if (evaled != null) {
         value = evaled;
       }
+      (rest as any).oninput?.(e);
       return;
     }
 
@@ -128,6 +129,7 @@
       const pos = caretAfter(el.value, keptLeft, neg);
       el.setSelectionRange(pos, pos);
     }
+    (rest as any).oninput?.(e);
   }
 
   function commitMath() {
@@ -142,14 +144,16 @@
     }
   }
 
-  function handleBlur() {
+  function handleBlur(e: FocusEvent) {
     commitMath();
+    (rest as any).onblur?.(e);
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       commitMath();
     }
+    (rest as any).onkeydown?.(e);
   }
 
   $effect(() => {

@@ -51,6 +51,7 @@
       if (evaled != null) {
         value = evaled;
       }
+      (rest as any).oninput?.(e);
       return;
     }
 
@@ -61,6 +62,19 @@
     
     const parsed = Number(safe);
     value = isNaN(parsed) || safe === "" || safe === "-" ? null : parsed;
+    (rest as any).oninput?.(e);
+  }
+
+  function handleBlur(e: FocusEvent) {
+    commitMath();
+    (rest as any).onblur?.(e);
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      commitMath();
+    }
+    (rest as any).onkeydown?.(e);
   }
 
   function commitMath() {
@@ -94,6 +108,6 @@
   )}
   {...rest}
   oninput={handleInput}
-  onblur={commitMath}
-  onkeydown={(e) => e.key === "Enter" && commitMath()}
+  onblur={handleBlur}
+  onkeydown={handleKeydown}
 />
