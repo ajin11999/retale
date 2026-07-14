@@ -43,12 +43,14 @@
     mutation ConsoleCreateCategory(
       $name: String!
       $parentId: ID
+      $preferredVariantId: ID
       $minQty: Int
       $minMarginBps: Int
     ) {
       createCategory(
         name: $name
         parentId: $parentId
+        preferredVariantId: $preferredVariantId
         minQty: $minQty
         minMarginBps: $minMarginBps
       ) {
@@ -62,6 +64,7 @@
       $id: ID!
       $name: String
       $parentId: ID
+      $preferredVariantId: ID
       $minQty: Int
       $minMarginBps: Int
     ) {
@@ -69,12 +72,14 @@
         id: $id
         name: $name
         parentId: $parentId
+        preferredVariantId: $preferredVariantId
         minQty: $minQty
         minMarginBps: $minMarginBps
       ) {
         id
         name
         parentId
+        preferredVariantId
         minQty
         minMarginBps
       }
@@ -127,6 +132,7 @@
     id: string;
     name: string;
     parentId: string | null;
+    preferredVariantId: string | null;
     minQty: number | null;
     minMarginBps: number | null;
     archived: boolean;
@@ -151,6 +157,7 @@
           id: c.id,
           name: c.name,
           parentId: c.parentId ?? null,
+          preferredVariantId: c.preferredVariantId ?? null,
           minQty: c.minQty ?? null,
           minMarginBps: c.minMarginBps ?? null,
           archived: c.archivedAt != null,
@@ -187,6 +194,7 @@
     id: string | null; // null → a new category
     name: string;
     parentId: string;
+    preferredVariantId: string;
     minQty: number | null;
     minMarginBps: number | null;
   }
@@ -247,11 +255,31 @@
     })),
   ]);
 
+  // Variant options for the preferred variant dropdown based on current category draft
+  const variantComboOptions = $derived.by(() => {
+    const d = draft;
+    if (!d || !d.id) return [{ value: "", label: "— Save category first to select a variant —" }];
+    const catId = d.id;
+    const catProducts = products.filter((p) => p.categoryId === catId);
+    const options = [{ value: "", label: "— None —" }];
+    for (const p of catProducts) {
+      for (const v of (p.variants || [])) {
+        const labelStr = v.label ? ` - ${v.label}` : '';
+        options.push({
+          value: v.id,
+          label: `${p.publicDisplayName}${labelStr} (${v.sku})`
+        });
+      }
+    }
+    return options;
+  });
+
   function newCategory() {
     draft = {
       id: null,
       name: "",
       parentId: "",
+      preferredVariantId: "",
       minQty: null,
       minMarginBps: null,
     };
@@ -262,6 +290,7 @@
       id: n.id,
       name: n.name,
       parentId: n.parentId ?? "",
+      preferredVariantId: n.preferredVariantId ?? "",
       minQty: n.minQty,
       minMarginBps: n.minMarginBps,
     };
@@ -370,12 +399,14 @@
             id: d.id,
             name: d.name.trim(),
             parentId: d.parentId || null,
+            preferredVariantId: d.preferredVariantId || null,
             minQty: d.minQty,
             minMarginBps: d.minMarginBps,
           })
         : CreateCategory.mutate({
             name: d.name.trim(),
             parentId: d.parentId || null,
+            preferredVariantId: d.preferredVariantId || null,
             minQty: d.minQty,
             minMarginBps: d.minMarginBps,
           }),
