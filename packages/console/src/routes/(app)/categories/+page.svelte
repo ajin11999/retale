@@ -477,6 +477,15 @@
           />
         </label>
         <label class="space-y-1">
+          <span class="text-sm font-medium">Preferred variant</span>
+          <Combobox
+            options={variantComboOptions}
+            bind:value={draft.preferredVariantId}
+            placeholder="Search variant…"
+            disabled={!canEdit || !draft.id}
+          />
+        </label>
+        <label class="space-y-1">
           <span class="text-sm font-medium">Min margin (%)</span>
           <NumericInput
             step="0.1"
