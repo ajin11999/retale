@@ -205,8 +205,8 @@ type Mutation {
   createUser(username: String!, password: String!, name: String!, isRoot: Boolean, roleIds: [ID!]): User!
   assignRole(userId: ID!, roleId: ID!): User!
   unassignRole(userId: ID!, roleId: ID!): User!
-  createCategory(name: String!, parentId: ID, minQty: Int, minMarginBps: Int): Category!
-  updateCategory(id: ID!, name: String, parentId: ID, minQty: Int, minMarginBps: Int): Category!
+  createCategory(name: String!, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
+  updateCategory(id: ID!, name: String, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
   setCategoryArchived(id: ID!, archived: Boolean!): Category!
   deleteCategory(id: ID!): Boolean!
   createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
@@ -644,6 +644,7 @@ type Category {
   id: ID!
   name: String!
   parentId: ID
+  preferredVariantId: ID
   minQty: Int
   minMarginBps: Int
   archivedAt: String
