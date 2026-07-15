@@ -21,6 +21,7 @@
         productName
         sku
         label
+        barcode
         unit
         onHand
       }
@@ -99,6 +100,7 @@
     productName: string;
     sku: string;
     label: string | null;
+    barcode: string | null;
     unit: string;
   }
   let added = $state<AddedRow[]>([]);
@@ -133,13 +135,21 @@
     productName: string;
     sku: string;
     label: string | null;
+    barcode: string | null;
     unit: string;
     onHand: number;
   }
-  const displayRows = $derived<DisplayRow[]>([
-    ...levels.map((l) => ({ ...l, onHand: l.onHand })),
-    ...added.map((a) => ({ ...a, onHand: 0 })),
-  ]);
+  const displayRows = $derived.by<DisplayRow[]>(() => {
+    const out: DisplayRow[] = levels.map((l) => ({ ...l, onHand: l.onHand }));
+    const seen = new Set(out.map((r) => r.variantId));
+    for (const a of added) {
+      if (!seen.has(a.variantId)) {
+        out.push({ ...a, onHand: 0 });
+        seen.add(a.variantId);
+      }
+    }
+    return out;
+  });
 
   // A row is changed when its counted value parses to a valid, non-negative
   // integer that differs from the on-hand.
@@ -173,6 +183,7 @@
     productName: string;
     sku: string;
     label: string | null;
+    barcode: string | null;
     unit: string;
   }
   const shownIds = $derived(new Set(displayRows.map((r) => r.variantId)));
@@ -193,6 +204,7 @@
           productName: p.name,
           sku: v.sku,
           label: v.label ?? null,
+          barcode: v.barcode ?? null,
           // The ref query does not carry unit; counts are in the variant's
           // smallest unit regardless, so a neutral placeholder is fine.
           unit: "",
@@ -204,19 +216,24 @@
   });
 
   function addRow(h: VariantHit) {
-    added.push({
-      variantId: h.variantId,
-      productName: h.productName,
-      sku: h.sku,
-      label: h.label,
-      unit: h.unit,
-    });
-    counted[h.variantId] = "0";
-    search = "";
+    added = [
+      ...added,
+      {
+        variantId: h.variantId,
+        productName: h.productName,
+        sku: h.sku,
+        label: h.label,
+        barcode: h.barcode,
+        unit: h.unit,
+      },
+    ];
+    counted = { ...counted, [h.variantId]: "0" };
   }
   function removeAdded(variantId: string) {
     added = added.filter((a) => a.variantId !== variantId);
-    delete counted[variantId];
+    const nextCounted = { ...counted };
+    delete nextCounted[variantId];
+    counted = nextCounted;
   }
 
   // ---- Row filter ----------------------------------------------------------
@@ -228,7 +245,7 @@
     const tokens = searchTokens(search);
     if (tokens.length === 0) return displayRows;
     return displayRows.filter((r) =>
-      matchesTokens(tokens, r.productName, r.sku, r.label),
+      matchesTokens(tokens, r.productName, r.sku, r.label, r.barcode),
     );
   });
 
@@ -265,6 +282,7 @@
         policy: CachePolicy.NetworkOnly,
       });
       reason = "";
+      search = "";
       feedback = { ok: true, text: `Adjusted ${n} item${n === 1 ? "" : "s"}.` };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -319,24 +337,6 @@
       placeholder="Search or add items by name, SKU, or barcode…"
       disabled={!canAdjust}
     />
-    {#if hits.length > 0}
-      <div
-        class="absolute z-10 mt-1 w-full overflow-hidden rounded-md border bg-card shadow-md"
-      >
-        {#each hits as h (h.variantId)}
-          <button
-            type="button"
-            class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent/60"
-            onclick={() => addRow(h)}
-          >
-            <span class="font-medium">{h.productName}</span>
-            <span class="ml-2 font-mono text-xs text-muted-foreground">
-              {h.sku}{h.label ? ` · ${h.label}` : ""}
-            </span>
-          </button>
-        {/each}
-      </div>
-    {/if}
   </div>
 
   {#if $Levels.fetching && levels.length === 0}
@@ -399,11 +399,41 @@
               </td>
             </tr>
           {/each}
-          {#if visibleRows.length === 0}
+
+          {#if search.trim() && hits.length > 0}
+            <tr>
+              <td colspan="6" class="bg-muted/30 border-y px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Add from Catalog
+              </td>
+            </tr>
+            {#each hits as h (h.variantId)}
+              <tr class="border-b last:border-0 hover:bg-muted/40">
+                <td class="px-4 py-2">
+                  <span class="font-medium">{h.productName}</span>
+                  {#if h.label}
+                    <span class="ml-1 text-xs text-muted-foreground">{h.label}</span>
+                  {/if}
+                </td>
+                <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
+                  {h.sku}
+                </td>
+                <td class="px-4 py-2 text-right tabular-nums text-muted-foreground">—</td>
+                <td class="px-4 py-2">
+                  <Button variant="outline" size="sm" onclick={() => addRow(h)}>
+                    Add to location
+                  </Button>
+                </td>
+                <td class="px-4 py-2"></td>
+                <td class="px-4 py-2"></td>
+              </tr>
+            {/each}
+          {/if}
+
+          {#if visibleRows.length === 0 && hits.length === 0}
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                {#if search.trim() && displayRows.length > 0}
-                  No items here match your search. Pick a result above to add it.
+                {#if search.trim()}
+                  No items match your search.
                 {:else}
                   No stock recorded at this location. Use the search above to add
                   items and set their counts.
