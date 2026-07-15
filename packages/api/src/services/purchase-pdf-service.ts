@@ -222,7 +222,7 @@ async function buildPoData(purchaseId: string): Promise<{
     const name = info?.name ?? item.description?.trim() ?? "Item";
     return {
       primary: code ?? name,
-      secondary: code ? name : null,
+      secondary: null,
       qtyOrdered: item.qtyOrdered,
       // "piece" is the default unit and adds nothing; show only real units.
       unit: info && info.unit !== "piece" ? info.unit : null,
@@ -395,20 +395,26 @@ export async function renderPurchaseOrderPdf(
   let lineNo = 0;
   for (const block of blocks) {
     // Section subheader row — a full-width "merged" cell. The column rules run
-    // the table's whole height; paint white over the segments crossing this
-    // band so the section reads as one cell, not split into columns. Inset
-    // vertically so the horizontal rules above/below stay crisp.
+    // the table's whole height; paint a light grey rectangle over the whole row
+    // (inset slightly to preserve the outer table borders) to cover the rules and
+    // give the section a distinct header band.
     if (rowTop + ROW_H > tableBottom) {
       ({ page, rowTop } = newTablePage(doc, cols, { font, bold }));
     }
-    for (const xMm of columnDividers(cols)) {
-      page.drawLine({
-        start: at(xMm, rowTop + 0.4),
-        end: at(xMm, rowTop + ROW_H - 0.4),
-        thickness: 1,
-        color: WHITE,
-      });
-    }
+
+    const sectionBgInset = 0.35; // mm (same as zebra stripe inset)
+    const tl = at(TABLE_BOX.x + sectionBgInset, rowTop);
+    page.drawRectangle({
+      x: tl.x,
+      y: tl.y - ROW_H * MM,
+      width: (TABLE_BOX.w - sectionBgInset * 2) * MM,
+      height: ROW_H * MM,
+      color: WHITE, // White background for section header to keep it clean
+    });
+
+    // Draw top line for section row for a crisp frame
+    hline(TABLE_BOX.x, RIGHT_EDGE, rowTop, 0.4);
+
     text(cols.no + PAD, rowTop + ROW_H / 2 + 1.4, block.name, SIZE_SECTION, bold);
     hline(TABLE_BOX.x, RIGHT_EDGE, rowTop + ROW_H, 0.4);
     rowTop += ROW_H;
