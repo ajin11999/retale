@@ -103,6 +103,16 @@
     }
   `);
 
+  const BulkUpdateProductSettings = graphql(`
+    mutation ConsoleBulkUpdateProductSettings($id: ID!, $minQty: Int, $minMarginBps: Int) {
+      updateProduct(id: $id, minQty: $minQty, minMarginBps: $minMarginBps) {
+        id
+        minQty
+        minMarginBps
+      }
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const ProductList = $derived(data.ProductList);
 
@@ -454,6 +464,60 @@
     await finishBulk(ids.length, failed, firstError, "Moved");
   }
 
+  let showBulkEditModal = $state(false);
+  let bulkMinMarginInput = $state<number | null>(null);
+  let bulkMinQtyInput = $state<number | null>(null);
+  let clearMinMargin = $state(false);
+  let clearMinQty = $state(false);
+
+  async function applyBulkEdit() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+
+    let minMarginBps: number | null | undefined = undefined;
+    if (clearMinMargin) {
+      minMarginBps = null;
+    } else if (bulkMinMarginInput != null) {
+      minMarginBps = Math.round(bulkMinMarginInput * 100);
+    }
+
+    let minQty: number | null | undefined = undefined;
+    if (clearMinQty) {
+      minQty = null;
+    } else if (bulkMinQtyInput != null) {
+      minQty = bulkMinQtyInput;
+    }
+
+    if (minMarginBps === undefined && minQty === undefined) {
+      showBulkEditModal = false;
+      return;
+    }
+
+    bulkBusy = true;
+    feedback = null;
+    let failed = 0;
+    let firstError = "";
+
+    for (const id of ids) {
+      const res = await BulkUpdateProductSettings.mutate({
+        id,
+        minQty,
+        minMarginBps,
+      });
+      if (res.errors?.length) {
+        failed++;
+        firstError ||= res.errors[0].message;
+      }
+    }
+
+    showBulkEditModal = false;
+    bulkMinMarginInput = null;
+    bulkMinQtyInput = null;
+    clearMinMargin = false;
+    clearMinQty = false;
+    await finishBulk(ids.length, failed, firstError, "Updated settings for");
+  }
+
   async function bulkDelete() {
     const ids = [...selectedIds];
     if (!ids.length) return;
@@ -751,6 +815,14 @@
           >
             Move
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulkBusy}
+            onclick={() => (showBulkEditModal = true)}
+          >
+            Bulk edit
+          </Button>
         </div>
       {/if}
       {#if canDelete}
@@ -950,3 +1022,64 @@
     </div>
   {/if}
 </div>
+
+{#if showBulkEditModal}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    role="presentation"
+    onclick={(e) => e.target === e.currentTarget && (showBulkEditModal = false)}
+  >
+    <div
+      class="flex w-full max-w-sm flex-col rounded-lg border bg-card shadow-xl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Bulk edit product settings"
+    >
+      <div class="flex items-center justify-between border-b px-5 py-3">
+        <h2 class="text-sm font-semibold">Bulk edit settings</h2>
+        <button
+          class="rounded-sm opacity-70 hover:opacity-100"
+          onclick={() => (showBulkEditModal = false)}
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+      <div class="space-y-4 p-5">
+        <label class="block space-y-1">
+          <span class="text-xs font-medium">Minimum margin (%)</span>
+          <NumericInput
+            placeholder="Leave blank for no change"
+            bind:value={bulkMinMarginInput}
+            disabled={clearMinMargin || bulkBusy}
+          />
+          <label class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" bind:checked={clearMinMargin} disabled={bulkBusy} class="size-3" />
+            Clear existing value
+          </label>
+        </label>
+        <label class="block space-y-1">
+          <span class="text-xs font-medium">Minimum quantity</span>
+          <NumericInput
+            placeholder="Leave blank for no change"
+            bind:value={bulkMinQtyInput}
+            disabled={clearMinQty || bulkBusy}
+          />
+          <label class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" bind:checked={clearMinQty} disabled={bulkBusy} class="size-3" />
+            Clear existing value
+          </label>
+        </label>
+      </div>
+      <div class="flex items-center justify-end gap-2 border-t bg-muted/20 px-5 py-3 rounded-b-lg">
+        <Button variant="ghost" size="sm" onclick={() => (showBulkEditModal = false)}>
+          Cancel
+        </Button>
+        <Button size="sm" onclick={applyBulkEdit} disabled={bulkBusy}>
+          Apply changes
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
