@@ -1687,6 +1687,7 @@ input AddReorderLineInput {
 }
 
 type BudgetReorderPlanLine {
+  suggestionId: ID!
   variantId: ID!
   productName: String!
   sku: String!

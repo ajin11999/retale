@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Combobox from "$lib/components/ui/combobox.svelte";
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { graphql } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
@@ -109,6 +111,22 @@
     }
     return "Unknown variant";
   };
+
+  // Flat variant options for the item picker.
+  interface VariantOption {
+    value: string;
+    label: string;
+  }
+  const variantOptions = $derived.by<VariantOption[]>(() => {
+    const out: VariantOption[] = [];
+    for (const p of products) {
+      for (const v of p.variants) {
+        const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
+        out.push({ value: v.id, label: `${p.name} · ${suffix}` });
+      }
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  });
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -313,19 +331,14 @@
       
       {#if transfer.status === "draft" && canEdit}
         <div class="flex gap-2 items-center mb-3">
-          <select class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors" bind:value={addVariantId}>
-            <option value="" disabled>Select variant to add...</option>
-            {#each products as p}
-              {#if p.variants.length > 0}
-                <optgroup label={p.name}>
-                  {#each p.variants as v}
-                    <option value={v.id}>{v.sku}{v.label ? ` · ${v.label}` : ''}</option>
-                  {/each}
-                </optgroup>
-              {/if}
-            {/each}
-          </select>
-          <input type="number" min="1" class="flex h-9 w-24 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors" bind:value={addQty} />
+          <div class="flex-1">
+            <Combobox
+              options={variantOptions}
+              bind:value={addVariantId}
+              placeholder="Search variant…"
+            />
+          </div>
+          <NumericInput bind:value={addQty} class="w-24" />
           <Button size="sm" disabled={busy || !addVariantId || addQty <= 0} onclick={addLine}>Add</Button>
         </div>
       {/if}

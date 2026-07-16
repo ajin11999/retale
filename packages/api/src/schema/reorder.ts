@@ -51,6 +51,7 @@ export const typeDefs = /* GraphQL */ `
   }
 
   type BudgetReorderPlanLine {
+    suggestionId: ID!
     variantId: ID!
     productName: String!
     sku: String!

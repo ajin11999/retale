@@ -574,6 +574,7 @@ export async function purgeResolvedSuggestions(
 // --- Budget Sandbox ---
 
 export interface BudgetReorderPlanLine {
+  suggestionId: string;
   variantId: string;
   vendorId: string | null;
   suggestedQty: number;
@@ -631,7 +632,7 @@ export async function simulateBudgetReorder(budgetAmount: number): Promise<Budge
     else if (s.currentStock <= s.reorderPoint) score += 25000;
     
     const unitCostMinor = (s.vendorId ? lastCostByVendor.get(s.vendorId)?.get(s.variantId) : undefined) ?? costByVariant.get(s.variantId) ?? 0;
-    const unitCost = unitCostMinor / 100;
+    const unitCost = unitCostMinor;
     
     return { suggestion: s, status, velocity, score, unitCost };
   });
@@ -650,6 +651,7 @@ export async function simulateBudgetReorder(budgetAmount: number): Promise<Budge
     
     if (remaining >= lineCost) {
       lines.push({
+        suggestionId: item.suggestion.id,
         variantId: item.suggestion.variantId,
         vendorId: item.suggestion.vendorId,
         suggestedQty,
