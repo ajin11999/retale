@@ -50,6 +50,10 @@ export const typeDefs = /* GraphQL */ `
     ): StockTransfer!
     "Dispatch a draft — debits stock from the source location."
     dispatchStockTransfer(id: ID!): StockTransfer!
+    "Add lines to an existing draft stock transfer."
+    addStockTransferItems(id: ID!, items: [StockTransferItemInput!]!): StockTransfer!
+    "Remove a line from an existing draft stock transfer."
+    removeStockTransferItem(id: ID!, itemId: ID!): StockTransfer!
     "Receive an in-transit transfer — credits stock to the target location."
     receiveStockTransfer(id: ID!): StockTransfer!
     "Cancel a transfer; an in-transit one has its stock returned to source."
@@ -141,6 +145,30 @@ export const resolvers = {
       const viewer = await requirePermission(ctx, "stock.transfer.dispatch");
       try {
         return await transfers.dispatchTransfer(args.id, viewer.userId);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    addStockTransferItems: async (
+      _: unknown,
+      args: { id: string; items: { variantId: string; qty: number }[] },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "stock.transfer.create");
+      try {
+        return await transfers.addTransferItems(args.id, args.items);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    removeStockTransferItem: async (
+      _: unknown,
+      args: { id: string; itemId: string },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "stock.transfer.create");
+      try {
+        return await transfers.removeTransferItem(args.id, args.itemId);
       } catch (e) {
         asGraphQLError(e);
       }

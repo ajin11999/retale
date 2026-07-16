@@ -2,6 +2,7 @@
   import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { goto } from "$app/navigation";
   import { X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
@@ -225,6 +226,9 @@
           {#each STATUSES as s (s)}<option value={s}>{statusLabel(s)}</option>{/each}
         </Select>
       </div>
+      <Button variant="outline" size="sm" onclick={() => goto('/reorder/budget')}>
+        Budget Sandbox
+      </Button>
       <Button size="sm" disabled={busy || !canAct} onclick={runScan}>
         Run scan
       </Button>

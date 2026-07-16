@@ -4,7 +4,7 @@
 // source on dispatch, `transfer_in` credits the target on receive. Cancelling
 // an in-transit transfer returns the dispatched stock to the source.
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { ulid } from "ulid";
 import { locations } from "../db/schema/locations.ts";
 import { productVariants } from "../db/schema/products.ts";
@@ -282,5 +282,83 @@ export async function cancelTransfer(
       where: eq(stockTransfers.id, id),
     });
     return row as Transfer;
+  });
+}
+
+/** Add lines to a draft transfer. Combines quantities if variant already exists. */
+export async function addTransferItems(
+  id: string,
+  items: { variantId: string; qty: number }[],
+): Promise<Transfer> {
+  if (!items.length) throw new TransferError("EMPTY_TRANSFER");
+  
+  return db.transaction(async (tx) => {
+    const transfer = await tx.query.stockTransfers.findFirst({
+      where: eq(stockTransfers.id, id),
+    });
+    if (!transfer) throw new TransferError("TRANSFER_NOT_FOUND");
+    if (transferStatus(transfer) !== "draft") {
+      throw new TransferError("NOT_DRAFT", "can only add items to a draft transfer");
+    }
+
+    for (const item of items) {
+      if (!Number.isInteger(item.qty) || item.qty <= 0) {
+        throw new TransferError("INVALID_INPUT", "item qty must be a positive integer");
+      }
+      const variant = await tx.query.productVariants.findFirst({
+        where: eq(productVariants.id, item.variantId),
+      });
+      if (!variant) throw new TransferError("VARIANT_NOT_FOUND", item.variantId);
+    }
+
+    for (const item of items) {
+      const existing = await tx.query.stockTransferItems.findFirst({
+        where: and(
+          eq(stockTransferItems.transferId, id),
+          eq(stockTransferItems.variantId, item.variantId)
+        )
+      });
+      if (existing) {
+        await tx.update(stockTransferItems)
+          .set({ qty: existing.qty + item.qty })
+          .where(eq(stockTransferItems.id, existing.id));
+      } else {
+        await tx.insert(stockTransferItems).values({
+          id: ulid(),
+          transferId: id,
+          variantId: item.variantId,
+          qty: item.qty,
+        });
+      }
+    }
+
+    return transfer;
+  });
+}
+
+/** Remove a line from a draft transfer. */
+export async function removeTransferItem(
+  id: string,
+  itemId: string,
+): Promise<Transfer> {
+  return db.transaction(async (tx) => {
+    const transfer = await tx.query.stockTransfers.findFirst({
+      where: eq(stockTransfers.id, id),
+    });
+    if (!transfer) throw new TransferError("TRANSFER_NOT_FOUND");
+    if (transferStatus(transfer) !== "draft") {
+      throw new TransferError("NOT_DRAFT", "can only remove items from a draft transfer");
+    }
+
+    const item = await tx.query.stockTransferItems.findFirst({
+      where: eq(stockTransferItems.id, itemId),
+    });
+    if (!item || item.transferId !== id) {
+      throw new TransferError("INVALID_INPUT", "item not found in this transfer");
+    }
+
+    await tx.delete(stockTransferItems).where(eq(stockTransferItems.id, itemId));
+
+    return transfer;
   });
 }

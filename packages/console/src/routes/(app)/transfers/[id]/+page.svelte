@@ -72,6 +72,22 @@
     }
   `);
 
+  const AddItems = graphql(`
+    mutation ConsoleAddTransferItems($id: ID!, $items: [StockTransferItemInput!]!) {
+      addStockTransferItems(id: $id, items: $items) {
+        id
+      }
+    }
+  `);
+
+  const RemoveItem = graphql(`
+    mutation ConsoleRemoveTransferItem($id: ID!, $itemId: ID!) {
+      removeStockTransferItem(id: $id, itemId: $itemId) {
+        id
+      }
+    }
+  `);
+
   let { data }: { data: PageData } = $props();
   const TransferDetail = $derived(data.TransferDetail);
   const transfer = $derived($TransferDetail.data?.stockTransfer);
@@ -100,6 +116,7 @@
   const canDispatch = $derived(has("stock.transfer.dispatch"));
   const canReceive = $derived(has("stock.transfer.receive"));
   const canCancel = $derived(has("stock.transfer.cancel"));
+  const canEdit = $derived(has("stock.transfer.create"));
 
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
@@ -166,6 +183,25 @@
       )
     ) {
       feedback = { ok: true, text: "Transfer cancelled." };
+      await refetch();
+    }
+  }
+
+  let addVariantId = $state("");
+  let addQty = $state<number>(1);
+
+  async function addLine() {
+    if (!transfer || !addVariantId || addQty <= 0) return;
+    if (await run(() => AddItems.mutate({ id: transfer.id, items: [{ variantId: addVariantId, qty: addQty }] }))) {
+      addVariantId = "";
+      addQty = 1;
+      await refetch();
+    }
+  }
+
+  async function removeLine(itemId: string) {
+    if (!transfer) return;
+    if (await run(() => RemoveItem.mutate({ id: transfer.id, itemId }))) {
       await refetch();
     }
   }
@@ -274,11 +310,34 @@
     <!-- Lines -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">Lines ({transfer.items.length})</h2>
+      
+      {#if transfer.status === "draft" && canEdit}
+        <div class="flex gap-2 items-center mb-3">
+          <select class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors" bind:value={addVariantId}>
+            <option value="" disabled>Select variant to add...</option>
+            {#each products as p}
+              {#if p.variants.length > 0}
+                <optgroup label={p.name}>
+                  {#each p.variants as v}
+                    <option value={v.id}>{v.sku}{v.label ? ` · ${v.label}` : ''}</option>
+                  {/each}
+                </optgroup>
+              {/if}
+            {/each}
+          </select>
+          <input type="number" min="1" class="flex h-9 w-24 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors" bind:value={addQty} />
+          <Button size="sm" disabled={busy || !addVariantId || addQty <= 0} onclick={addLine}>Add</Button>
+        </div>
+      {/if}
+
       <table class="w-full text-sm">
         <thead class="border-b text-left text-muted-foreground">
           <tr>
             <th class="py-1.5 font-medium">Variant</th>
             <th class="py-1.5 text-right font-medium">Quantity</th>
+            {#if transfer.status === "draft" && canEdit}
+              <th class="py-1.5 w-10"></th>
+            {/if}
           </tr>
         </thead>
         <tbody>
@@ -286,6 +345,11 @@
             <tr class="border-b last:border-0">
               <td class="py-1.5">{variantLabel(i.variantId)}</td>
               <td class="py-1.5 text-right">{i.qty}</td>
+              {#if transfer.status === "draft" && canEdit}
+                <td class="py-1.5 text-right">
+                  <button class="text-destructive hover:underline text-xs" onclick={() => removeLine(i.id)} disabled={busy}>Remove</button>
+                </td>
+              {/if}
             </tr>
           {/each}
         </tbody>

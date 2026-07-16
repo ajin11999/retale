@@ -15,6 +15,7 @@ import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import { lastVendorCosts } from "./purchase-service.ts";
 import { preferredVendorByVariant } from "./vendor-variant-code-service.ts";
+import { reorderForecast } from "./forecast-service.ts";
 
 export type ReorderErrorCode =
   | "SUGGESTION_NOT_FOUND"
@@ -568,4 +569,121 @@ export async function purgeResolvedSuggestions(
     ),
   );
   return res[0].affectedRows;
+}
+
+// --- Budget Sandbox ---
+
+export interface BudgetReorderPlanLine {
+  variantId: string;
+  vendorId: string | null;
+  suggestedQty: number;
+  estimatedUnitCost: number;
+  estimatedTotalCost: number;
+  priorityScore: number;
+  status: string;
+}
+
+export interface BudgetReorderPlan {
+  totalEstimatedCost: number;
+  remainingBudget: number;
+  lines: BudgetReorderPlanLine[];
+}
+
+export async function simulateBudgetReorder(budgetAmount: number): Promise<BudgetReorderPlan> {
+  const suggestions = await runReorderScan();
+  if (suggestions.length === 0) {
+    return { totalEstimatedCost: 0, remainingBudget: budgetAmount, lines: [] };
+  }
+  
+  const forecast = await reorderForecast();
+  const forecastByVariant = new Map(forecast.map(f => [f.variantId, f]));
+  
+  const variantIds = [...new Set(suggestions.map((s) => s.variantId))];
+  const variantRows = await db
+    .select({ id: productVariants.id, costMinor: productVariants.costMinor })
+    .from(productVariants)
+    .where(inArray(productVariants.id, variantIds));
+  const costByVariant = new Map(variantRows.map((v) => [v.id, v.costMinor]));
+
+  const vendorIds = [...new Set(suggestions.map((s) => s.vendorId).filter((id): id is string => !!id))];
+  const lastCostByVendor = new Map<string, Map<string, number>>();
+  for (const vendorId of vendorIds) {
+    const last = await lastVendorCosts(vendorId);
+    lastCostByVendor.set(vendorId, new Map(last.map((c) => [c.variantId, c.unitCostMinor])));
+  }
+  
+  type ScoredSuggestion = {
+    suggestion: typeof suggestions[0];
+    status: string;
+    velocity: number;
+    score: number;
+    unitCost: number;
+  };
+  
+  const scored: ScoredSuggestion[] = suggestions.map(s => {
+    const f = forecastByVariant.get(s.variantId);
+    const status = f?.status ?? "unknown";
+    const velocity = f?.velocityPerDay ?? 0;
+    
+    let score = velocity * 100;
+    if (status === "order_now") score += 100000;
+    else if (status === "order_soon") score += 50000;
+    else if (s.currentStock <= s.reorderPoint) score += 25000;
+    
+    const unitCostMinor = (s.vendorId ? lastCostByVendor.get(s.vendorId)?.get(s.variantId) : undefined) ?? costByVariant.get(s.variantId) ?? 0;
+    const unitCost = unitCostMinor / 100;
+    
+    return { suggestion: s, status, velocity, score, unitCost };
+  });
+  
+  scored.sort((a, b) => b.score - a.score);
+  
+  let remaining = budgetAmount;
+  let totalCost = 0;
+  const lines: BudgetReorderPlanLine[] = [];
+  
+  for (const item of scored) {
+    if (remaining <= 0) break;
+    
+    const suggestedQty = item.suggestion.suggestedQty;
+    const lineCost = suggestedQty * item.unitCost;
+    
+    if (remaining >= lineCost) {
+      lines.push({
+        variantId: item.suggestion.variantId,
+        vendorId: item.suggestion.vendorId,
+        suggestedQty,
+        estimatedUnitCost: item.unitCost,
+        estimatedTotalCost: lineCost,
+        priorityScore: item.score,
+        status: item.status,
+      });
+      remaining -= lineCost;
+      totalCost += lineCost;
+    } else {
+      if (item.unitCost > 0) {
+        const affordableQty = Math.floor(remaining / item.unitCost);
+        if (affordableQty > 0) {
+          const partialCost = affordableQty * item.unitCost;
+          lines.push({
+            variantId: item.suggestion.variantId,
+            vendorId: item.suggestion.vendorId,
+            suggestedQty: affordableQty,
+            estimatedUnitCost: item.unitCost,
+            estimatedTotalCost: partialCost,
+            priorityScore: item.score,
+            status: item.status,
+          });
+          remaining -= partialCost;
+          totalCost += partialCost;
+        }
+      }
+    }
+  }
+  
+  return {
+    totalEstimatedCost: totalCost,
+    remainingBudget: remaining,
+    lines,
+  };
 }

@@ -24,6 +24,7 @@ class ReconcileScreen extends StatefulWidget {
 
 class _ReconcileScreenState extends State<ReconcileScreen> {
   List<StockLevel>? _rows;
+  List<StockLevel> _globalVariants = [];
   Object? _loadError;
 
   /// variantId -> counted qty. Presence means the line was touched.
@@ -64,13 +65,40 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
       _loadError = null;
     });
     try {
-      final data = await GraphQLService.instance.query(Ops.locationStockLevels,
-          variables: {'locationId': widget.location.id});
+      final results = await Future.wait([
+        GraphQLService.instance.query(Ops.locationStockLevels,
+            variables: {'locationId': widget.location.id}),
+        GraphQLService.instance.query(Ops.productLabels),
+      ]);
       if (!mounted) return;
+      
+      final localRows = (results[0]['locationStockLevels'] as List<dynamic>)
+          .map((r) => StockLevel.fromJson(r as Map<String, dynamic>))
+          .toList();
+          
+      final products = results[1]['products'] as List<dynamic>;
+      final globalVariants = <StockLevel>[];
+      for (final p in products) {
+        final product = p as Map<String, dynamic>;
+        for (final v in product['variants'] as List<dynamic>) {
+          final variant = v as Map<String, dynamic>;
+          globalVariants.add(StockLevel(
+            variantId: variant['id'] as String,
+            productId: product['id'] as String,
+            productName: product['name'] as String,
+            sku: variant['sku'] as String? ?? '',
+            label: variant['label'] as String?,
+            barcode: variant['barcode'] as String?,
+            unit: variant['unit'] as String? ?? 'piece',
+            qtyDecimals: variant['qtyDecimals'] as int? ?? 0,
+            onHand: 0,
+          ));
+        }
+      }
+      
       setState(() {
-        _rows = (data['locationStockLevels'] as List<dynamic>)
-            .map((r) => StockLevel.fromJson(r as Map<String, dynamic>))
-            .toList();
+        _rows = localRows;
+        _globalVariants = globalVariants;
       });
     } catch (e) {
       if (mounted) setState(() => _loadError = e);
@@ -82,6 +110,9 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
   void _setCount(StockLevel row, num qty) {
     setState(() {
       _counted[row.variantId] = qty;
+      if (_rows != null && !_rows!.any((r) => r.variantId == row.variantId)) {
+        _rows!.add(row);
+      }
       _syncController(row);
     });
   }
@@ -116,7 +147,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           }
           final qty = num.tryParse(text);
           if (qty != null && _counted[row.variantId] != qty) {
-            setState(() => _counted[row.variantId] = qty);
+            _setCount(row, qty);
           }
         });
         return c;
@@ -143,11 +174,28 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
             (r.barcode != null && r.barcode!.toLowerCase() == lower) ||
             r.sku.toLowerCase() == lower)
         .toList();
+        
     if (matches.isEmpty) {
+      final globalMatches = _globalVariants
+          .where((r) =>
+              (r.barcode != null && r.barcode!.toLowerCase() == lower) ||
+              r.sku.toLowerCase() == lower)
+          .toList();
+          
+      if (globalMatches.isNotEmpty) {
+        final row = globalMatches.length == 1 ? globalMatches.first : await _pickRow(globalMatches);
+        if (row == null || !mounted) return;
+        _setCount(row, (_counted[row.variantId] ?? 0) + 1);
+        setState(() => _lastScanHitId = row.variantId);
+        _revealRow(row.variantId);
+        return;
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Nothing at this location matches "$trimmed"')));
+          SnackBar(content: Text('No product matches "$trimmed" anywhere')));
       return;
     }
+    
     final row = matches.length == 1 ? matches.first : await _pickRow(matches);
     if (row == null || !mounted) return;
     _setCount(row, (_counted[row.variantId] ?? 0) + 1);
@@ -377,11 +425,20 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     final rows = _rows ?? [];
     final query = _search.trim().toLowerCase();
     if (query.isEmpty) return rows;
-    return rows
+    final matchedRows = rows
         .where((r) =>
             r.displayName.toLowerCase().contains(query) ||
             (r.barcode ?? '').toLowerCase().contains(query))
         .toList();
+        
+    final existingIds = rows.map((r) => r.variantId).toSet();
+    final extraMatches = _globalVariants
+        .where((r) => !existingIds.contains(r.variantId) && 
+            (r.displayName.toLowerCase().contains(query) || 
+             (r.barcode ?? '').toLowerCase().contains(query)))
+        .toList();
+        
+    return [...matchedRows, ...extraMatches];
   }
 
   Widget _buildBody() {
@@ -515,7 +572,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           initial: _counted[row.variantId] ?? 0,
           allowOverage: true,
           qtyDecimals: row.qtyDecimals,
-          onSet: (qty) async => _counted[row.variantId] = qty,
+          onSet: (qty) async => _setCount(row, qty),
         ),
       ),
     ));

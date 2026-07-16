@@ -75,7 +75,7 @@ class _ScanSheetState extends State<_ScanSheet> {
               child: MobileScanner(
                 controller: _controller,
                 onDetect: _onDetect,
-                errorBuilder: (context, error, child) => Center(
+                errorBuilder: (context, error) => Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(

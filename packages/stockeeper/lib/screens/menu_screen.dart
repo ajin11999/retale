@@ -6,6 +6,7 @@ import 'location_picker_screen.dart';
 import 'receiving/po_list_screen.dart';
 import 'reconcile/reconcile_screen.dart';
 import 'router_screen.dart';
+import 'transfers/transfer_list_screen.dart';
 
 /// Home: two big buttons mirroring the warehouse workflow — Receiving
 /// (count goods against an open PO) and Reconcile (count a location).
@@ -75,10 +76,21 @@ class MenuScreen extends StatelessWidget {
             Expanded(
               child: _MenuButton(
                 icon: Icons.move_to_inbox,
-                title: 'Receiving',
+                title: 'Receive POs',
                 subtitle: 'Count incoming goods against a purchase order',
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const PoListScreen(),
+                )),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _MenuButton(
+                icon: Icons.local_shipping,
+                title: 'Receive Transfers',
+                subtitle: 'Scan and receive an incoming stock transfer',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const TransferListScreen(),
                 )),
               ),
             ),

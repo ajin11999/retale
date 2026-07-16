@@ -195,3 +195,53 @@ Map<String, VariantInfo> buildVariantLabelMap(List<dynamic> products) {
   }
   return map;
 }
+
+class TransferSummary {
+  TransferSummary({
+    required this.id,
+    required this.sourceLocationId,
+    required this.targetLocationId,
+    required this.createdAt,
+    this.notes,
+    required this.status,
+    required this.items,
+  });
+
+  final String id;
+  final String sourceLocationId;
+  final String targetLocationId;
+  final String createdAt;
+  final String? notes;
+  final String status;
+  final List<TransferItem> items;
+
+  factory TransferSummary.fromJson(Map<String, dynamic> j) => TransferSummary(
+        id: j['id'] as String,
+        sourceLocationId: j['sourceLocationId'] as String,
+        targetLocationId: j['targetLocationId'] as String,
+        createdAt: j['createdAt'] as String,
+        notes: j['notes'] as String?,
+        status: j['status'] as String,
+        items: (j['items'] as List<dynamic>)
+            .map((i) => TransferItem.fromJson(i as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class TransferItem {
+  TransferItem({
+    required this.id,
+    required this.variantId,
+    required this.qty,
+  });
+
+  final String id;
+  final String variantId;
+  final num qty;
+
+  factory TransferItem.fromJson(Map<String, dynamic> j) => TransferItem(
+        id: j['id'] as String,
+        variantId: j['variantId'] as String,
+        qty: j['qty'] as num,
+      );
+}

@@ -114,7 +114,26 @@ class Ops {
     query ProductLabels {
       products(includeArchived: true) {
         id name
-        variants { id sku label }
+        variants { id sku label barcode unit qtyDecimals }
+      }
+    }
+  ''';
+
+  // ── Transfers ────────────────────────────────────────────────────────────
+
+  static const openTransfers = '''
+    query OpenTransfers {
+      stockTransfers {
+        id sourceLocationId targetLocationId createdAt notes status
+        items { id variantId qty }
+      }
+    }
+  ''';
+
+  static const receiveStockTransfer = '''
+    mutation ReceiveStockTransfer(\$id: ID!) {
+      receiveStockTransfer(id: \$id) {
+        id status
       }
     }
   ''';

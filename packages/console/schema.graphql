@@ -86,6 +86,9 @@ type Query {
   """Reorder suggestions, newest scan first; optionally filtered by status."""
   reorderSuggestions(status: ReorderSuggestionStatus): [ReorderSuggestion!]!
 
+  """Simulate a reorder plan constrained by a specific budget."""
+  reorderBudgetSandbox(budgetAmount: Float!): BudgetReorderPlan!
+
   """
   The open (draft) receiving check for a purchase, or null if none is in progress.
   """
@@ -471,6 +474,12 @@ type Mutation {
 
   """Dispatch a draft — debits stock from the source location."""
   dispatchStockTransfer(id: ID!): StockTransfer!
+
+  """Add lines to an existing draft stock transfer."""
+  addStockTransferItems(id: ID!, items: [StockTransferItemInput!]!): StockTransfer!
+
+  """Remove a line from an existing draft stock transfer."""
+  removeStockTransferItem(id: ID!, itemId: ID!): StockTransfer!
 
   """Receive an in-transit transfer — credits stock to the target location."""
   receiveStockTransfer(id: ID!): StockTransfer!
@@ -1675,6 +1684,25 @@ input AddReorderLineInput {
 
   """Override the suggested quantity."""
   qty: Int
+}
+
+type BudgetReorderPlanLine {
+  variantId: ID!
+  productName: String!
+  sku: String!
+  suggestedQty: Float!
+  estimatedUnitCost: Float!
+  estimatedTotalCost: Float!
+  vendorId: ID
+  vendorName: String
+  priorityScore: Float!
+  status: String!
+}
+
+type BudgetReorderPlan {
+  totalEstimatedCost: Float!
+  remainingBudget: Float!
+  lines: [BudgetReorderPlanLine!]!
 }
 
 """

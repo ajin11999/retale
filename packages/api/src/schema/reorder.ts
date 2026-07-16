@@ -50,9 +50,30 @@ export const typeDefs = /* GraphQL */ `
     qty: Int
   }
 
+  type BudgetReorderPlanLine {
+    variantId: ID!
+    productName: String!
+    sku: String!
+    suggestedQty: Float!
+    estimatedUnitCost: Float!
+    estimatedTotalCost: Float!
+    vendorId: ID
+    vendorName: String
+    priorityScore: Float!
+    status: String!
+  }
+
+  type BudgetReorderPlan {
+    totalEstimatedCost: Float!
+    remainingBudget: Float!
+    lines: [BudgetReorderPlanLine!]!
+  }
+
   extend type Query {
     "Reorder suggestions, newest scan first; optionally filtered by status."
     reorderSuggestions(status: ReorderSuggestionStatus): [ReorderSuggestion!]!
+    "Simulate a reorder plan constrained by a specific budget."
+    reorderBudgetSandbox(budgetAmount: Float!): BudgetReorderPlan!
   }
 
   extend type Mutation {
@@ -111,6 +132,22 @@ export const resolvers = {
     },
   },
 
+  BudgetReorderPlanLine: {
+    productName: async (s: SuggestionRow) => {
+      const row = await db.select({ name: products.name }).from(productVariants).innerJoin(products, eq(productVariants.productId, products.id)).where(eq(productVariants.id, s.variantId)).limit(1);
+      return row[0]?.name ?? "";
+    },
+    sku: async (s: SuggestionRow) => {
+      const row = await db.select({ sku: productVariants.sku }).from(productVariants).where(eq(productVariants.id, s.variantId)).limit(1);
+      return row[0]?.sku ?? "";
+    },
+    vendorName: async (s: SuggestionRow) => {
+      if (!s.vendorId) return null;
+      const row = await db.select({ name: vendors.name }).from(vendors).where(eq(vendors.id, s.vendorId)).limit(1);
+      return row[0]?.name ?? null;
+    },
+  },
+
   Query: {
     reorderSuggestions: async (
       _: unknown,
@@ -119,6 +156,14 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "report.sales.view");
       return reorder.listSuggestions(args.status);
+    },
+    reorderBudgetSandbox: async (
+      _: unknown,
+      args: { budgetAmount: number },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.create");
+      return reorder.simulateBudgetReorder(args.budgetAmount);
     },
   },
 
