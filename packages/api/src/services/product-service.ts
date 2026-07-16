@@ -212,6 +212,18 @@ export async function deleteInterchangeGroup(id: string): Promise<void> {
   await db.delete(interchangeGroups).where(eq(interchangeGroups.id, id));
 }
 
+export async function setVariantsInterchangeGroup(
+  groupId: string | null,
+  variantIds: string[],
+): Promise<void> {
+  if (groupId) await loadInterchangeGroup(groupId);
+  if (!variantIds.length) return;
+  await db
+    .update(productVariants)
+    .set({ interchangeGroupId: groupId })
+    .where(inArray(productVariants.id, variantIds));
+}
+
 // --- Products & variants ---
 
 export interface VariantInput {

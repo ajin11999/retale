@@ -217,6 +217,7 @@ type Mutation {
   updateInterchangeGroup(id: ID!, name: String, minQty: Int, preferredVariantId: ID): InterchangeGroup!
   setInterchangeGroupArchived(id: ID!, archived: Boolean!): InterchangeGroup!
   deleteInterchangeGroup(id: ID!): Boolean!
+  setVariantsInterchangeGroup(groupId: ID, variantIds: [ID!]!): Boolean!
   createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
   updateProduct(id: ID!, name: String, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean): Product!
   setProductArchived(id: ID!, archived: Boolean!): Product!

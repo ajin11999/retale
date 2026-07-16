@@ -134,9 +134,15 @@ export const typeDefs = /* GraphQL */ `
     deleteCategory(id: ID!): Boolean!
 
     createInterchangeGroup(name: String!, minQty: Int, preferredVariantId: ID): InterchangeGroup!
-    updateInterchangeGroup(id: ID!, name: String, minQty: Int, preferredVariantId: ID): InterchangeGroup!
+    updateInterchangeGroup(
+      id: ID!
+      name: String
+      minQty: Int
+      preferredVariantId: ID
+    ): InterchangeGroup!
     setInterchangeGroupArchived(id: ID!, archived: Boolean!): InterchangeGroup!
     deleteInterchangeGroup(id: ID!): Boolean!
+    setVariantsInterchangeGroup(groupId: ID, variantIds: [ID!]!): Boolean!
 
     createProduct(
       name: String!
@@ -354,6 +360,19 @@ export const resolvers = {
       await requirePermission(ctx, "product.edit");
       try {
         await products.deleteInterchangeGroup(args.id);
+        return true;
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    setVariantsInterchangeGroup: async (
+      _: unknown,
+      args: { groupId: string | null; variantIds: string[] },
+      ctx: GraphQLContext,
+    ): Promise<boolean> => {
+      await requirePermission(ctx, "product.edit");
+      try {
+        await products.setVariantsInterchangeGroup(args.groupId, args.variantIds);
         return true;
       } catch (e) {
         asGraphQLError(e);
