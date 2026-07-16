@@ -17,6 +17,7 @@
           variantId
           productName
           sku
+          variantLabel
           suggestedQty
           estimatedUnitCost
           estimatedTotalCost
@@ -253,8 +254,13 @@
                     <input type="checkbox" class="h-4 w-4 rounded border-gray-300" bind:checked={selected[line.suggestionId]} />
                   </td>
                   <td class="p-3">
-                    <p class="font-medium">{line.productName}</p>
-                    <p class="text-xs text-muted-foreground">{line.sku}</p>
+                    <p class="font-medium">
+                      {line.productName}
+                      {#if line.variantLabel}
+                        <span class="font-normal text-muted-foreground">· {line.variantLabel}</span>
+                      {/if}
+                    </p>
+                    <p class="text-xs font-mono text-muted-foreground">{line.sku}</p>
                   </td>
                   <td class="p-3">{line.vendorName ?? "—"}</td>
                   <td class="p-3">

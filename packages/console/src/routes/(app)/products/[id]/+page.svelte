@@ -47,6 +47,7 @@
           costMinor
           totalQty
           sortOrder
+          interchangeGroupId
           stock {
             locationId
             qty
@@ -81,6 +82,10 @@
         id
         name
         parentId
+      }
+      interchangeGroups {
+        id
+        name
       }
       locations {
         id
@@ -188,6 +193,7 @@
       $priceMinor: Float
       $costMinor: Float
       $sortOrder: Int
+      $interchangeGroupId: ID
     ) {
       updateVariant(
         id: $id
@@ -199,6 +205,7 @@
         priceMinor: $priceMinor
         costMinor: $costMinor
         sortOrder: $sortOrder
+        interchangeGroupId: $interchangeGroupId
       ) {
         id
         sku
@@ -210,6 +217,7 @@
         costMinor
         totalQty
         sortOrder
+        interchangeGroupId
       }
     }
   `);
@@ -281,6 +289,11 @@
   const categoryOptions = $derived([
     { value: "", label: "Uncategorized" },
     ...categories.map((c) => ({ value: c.id, label: categoryPaths.get(c.id) ?? c.name })),
+  ]);
+  const interchangeGroups = $derived($ProductDetail.data?.interchangeGroups ?? []);
+  const interchangeGroupOptions = $derived([
+    { value: "", label: "— None —" },
+    ...interchangeGroups.map((g) => ({ value: g.id, label: g.name })),
   ]);
   const locations = $derived($ProductDetail.data?.locations ?? []);
   // Breadcrumb path per location ("Shelf 2 › Level 1") so same-named children
@@ -426,6 +439,7 @@
     priceMinor: number | null;
     costMinor: number | null;
     sortOrder: number;
+    interchangeGroupId: string;
   }
 
   let variantDraft = $state<VariantDraft | null>(null);
@@ -441,6 +455,7 @@
       priceMinor: v.priceMinor,
       costMinor: v.costMinor,
       sortOrder: v.sortOrder,
+      interchangeGroupId: v.interchangeGroupId ?? "",
     };
   }
 
@@ -455,6 +470,7 @@
       priceMinor: 0,
       costMinor: 0,
       sortOrder: (product?.variants.length ?? 0) + 1,
+      interchangeGroupId: "",
     };
   }
 
@@ -477,6 +493,7 @@
           priceMinor: canEditPrice ? (d.priceMinor ?? 0) : undefined,
           costMinor: canEditCost ? (d.costMinor ?? 0) : undefined,
           sortOrder: d.sortOrder,
+          interchangeGroupId: d.interchangeGroupId || null,
         });
       }
       return AddVariant.mutate({
@@ -490,6 +507,7 @@
           priceMinor: d.priceMinor ?? 0,
           costMinor: d.costMinor ?? 0,
           sortOrder: d.sortOrder,
+          interchangeGroupId: d.interchangeGroupId || null,
         },
       });
     });
@@ -1501,6 +1519,15 @@
               <span class="text-xs font-medium">Sort order</span>
               <NumericInput
                 bind:value={variantDraft.sortOrder}
+                disabled={!canEdit}
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium">Interchange group</span>
+              <Combobox
+                options={interchangeGroupOptions}
+                bind:value={variantDraft.interchangeGroupId}
+                placeholder="Search group…"
                 disabled={!canEdit}
               />
             </label>

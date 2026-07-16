@@ -24,6 +24,7 @@
         variantId
         productName
         sku
+        variantLabel
         vendorId
         vendorName
         currentStock
@@ -285,10 +286,15 @@
                 </td>
               {/if}
               <td class="px-4 py-2">
-                <span class="font-medium">{s.productName}</span>
-                <span class="ml-1 font-mono text-xs text-muted-foreground"
-                  >{s.sku}</span
-                >
+                <span class="block font-medium">
+                  {s.productName}
+                  {#if s.variantLabel}
+                    <span class="font-normal text-muted-foreground">· {s.variantLabel}</span>
+                  {/if}
+                </span>
+                <span class="block font-mono text-xs text-muted-foreground">
+                  {s.sku}
+                </span>
               </td>
               <td class="px-4 py-2 text-right">{s.currentStock}</td>
               <td class="px-4 py-2 text-right">{s.reorderPoint}</td>

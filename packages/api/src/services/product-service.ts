@@ -7,6 +7,7 @@ import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   bundleComponents,
+  interchangeGroups,
   productCategories,
   productPriceTiers,
   productVariants,
@@ -19,6 +20,7 @@ import { db } from "../lib/db.ts";
 export type ProductErrorCode =
   | "CATEGORY_NOT_FOUND"
   | "CATEGORY_CYCLE"
+  | "INTERCHANGE_GROUP_NOT_FOUND"
   | "PRODUCT_NOT_FOUND"
   | "VARIANT_NOT_FOUND"
   | "NO_VARIANTS"
@@ -37,6 +39,7 @@ export class ProductError extends Error {
 }
 
 type Category = typeof productCategories.$inferSelect;
+type InterchangeGroup = typeof interchangeGroups.$inferSelect;
 type Product = typeof products.$inferSelect;
 type Variant = typeof productVariants.$inferSelect;
 
@@ -91,8 +94,6 @@ async function assertNoCategoryCycle(id: string, parentId: string): Promise<void
 export async function createCategory(input: {
   name: string;
   parentId?: string | null;
-  preferredVariantId?: string | null;
-  minQty?: number | null;
   minMarginBps?: number | null;
 }): Promise<Category> {
   if (input.parentId) await loadCategory(input.parentId);
@@ -101,8 +102,6 @@ export async function createCategory(input: {
     id,
     name: input.name,
     parentId: input.parentId ?? null,
-    preferredVariantId: input.preferredVariantId ?? null,
-    minQty: input.minQty ?? null,
     minMarginBps: input.minMarginBps ?? null,
   });
   return loadCategory(id);
@@ -113,8 +112,6 @@ export async function updateCategory(
   patch: {
     name?: string;
     parentId?: string | null;
-    preferredVariantId?: string | null;
-    minQty?: number | null;
     minMarginBps?: number | null;
   },
 ): Promise<Category> {
@@ -126,8 +123,6 @@ export async function updateCategory(
     .set({
       ...(patch.name !== undefined && { name: patch.name }),
       ...(patch.parentId !== undefined && { parentId: patch.parentId }),
-      ...(patch.preferredVariantId !== undefined && { preferredVariantId: patch.preferredVariantId }),
-      ...(patch.minQty !== undefined && { minQty: patch.minQty }),
       ...(patch.minMarginBps !== undefined && { minMarginBps: patch.minMarginBps }),
     })
     .where(eq(productCategories.id, id));
@@ -149,6 +144,74 @@ export async function deleteCategory(id: string): Promise<void> {
   await db.delete(productCategories).where(eq(productCategories.id, id));
 }
 
+// --- Interchange Groups ---
+
+export function listInterchangeGroups(): Promise<InterchangeGroup[]> {
+  return db.select().from(interchangeGroups);
+}
+
+async function loadInterchangeGroup(id: string): Promise<InterchangeGroup> {
+  const rows = await db
+    .select()
+    .from(interchangeGroups)
+    .where(eq(interchangeGroups.id, id))
+    .limit(1);
+  if (!rows[0]) throw new ProductError("INTERCHANGE_GROUP_NOT_FOUND");
+  return rows[0];
+}
+
+export async function createInterchangeGroup(input: {
+  name: string;
+  minQty?: number | null;
+  preferredVariantId?: string | null;
+}): Promise<InterchangeGroup> {
+  if (input.preferredVariantId) await loadVariant(input.preferredVariantId);
+  const id = ulid();
+  await db.insert(interchangeGroups).values({
+    id,
+    name: input.name,
+    minQty: input.minQty ?? null,
+    preferredVariantId: input.preferredVariantId ?? null,
+  });
+  return loadInterchangeGroup(id);
+}
+
+export async function updateInterchangeGroup(
+  id: string,
+  patch: {
+    name?: string;
+    minQty?: number | null;
+    preferredVariantId?: string | null;
+  },
+): Promise<InterchangeGroup> {
+  await loadInterchangeGroup(id);
+  if (patch.preferredVariantId) await loadVariant(patch.preferredVariantId);
+
+  await db
+    .update(interchangeGroups)
+    .set({
+      ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.minQty !== undefined && { minQty: patch.minQty }),
+      ...(patch.preferredVariantId !== undefined && { preferredVariantId: patch.preferredVariantId }),
+    })
+    .where(eq(interchangeGroups.id, id));
+  return loadInterchangeGroup(id);
+}
+
+export async function setInterchangeGroupArchived(id: string, archived: boolean): Promise<InterchangeGroup> {
+  await loadInterchangeGroup(id);
+  await db
+    .update(interchangeGroups)
+    .set({ archivedAt: archived ? new Date() : null })
+    .where(eq(interchangeGroups.id, id));
+  return loadInterchangeGroup(id);
+}
+
+export async function deleteInterchangeGroup(id: string): Promise<void> {
+  await loadInterchangeGroup(id);
+  await db.delete(interchangeGroups).where(eq(interchangeGroups.id, id));
+}
+
 // --- Products & variants ---
 
 export interface VariantInput {
@@ -160,6 +223,7 @@ export interface VariantInput {
   priceMinor: number;
   costMinor?: number;
   sortOrder?: number;
+  interchangeGroupId?: string | null;
 }
 
 async function loadProductRow(id: string): Promise<Product> {
@@ -214,6 +278,7 @@ function buildVariantRow(productId: string, v: VariantInput) {
     priceMinor: v.priceMinor,
     costMinor: v.costMinor ?? 0,
     sortOrder: v.sortOrder ?? 0,
+    interchangeGroupId: v.interchangeGroupId ?? null,
   };
 }
 
@@ -424,6 +489,7 @@ export async function updateVariant(
     priceMinor?: number;
     costMinor?: number;
     sortOrder?: number;
+    interchangeGroupId?: string | null;
   },
 ): Promise<Variant> {
   await loadVariant(id);
@@ -442,6 +508,7 @@ export async function updateVariant(
         ...(patch.priceMinor !== undefined && { priceMinor: patch.priceMinor }),
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
+        ...(patch.interchangeGroupId !== undefined && { interchangeGroupId: patch.interchangeGroupId }),
       })
       .where(eq(productVariants.id, id));
   } catch (e) {

@@ -38,15 +38,29 @@ export const productCategories = mysqlTable(
     parentId: ulidRef().references((): AnyMySqlColumn => productCategories.id, {
       onDelete: "set null",
     }),
-    preferredVariantId: ulidRef().references((): AnyMySqlColumn => productVariants.id, {
-      onDelete: "set null",
-    }),
-    minQty: int(),
     minMarginBps: int(),
     archivedAt: timestamp(),
     ...timestamps,
   },
   (t) => [index("product_categories_parent_id_idx").on(t.parentId)],
+);
+
+/**
+ * Interchange groups link variants of the exact same size/spec across different
+ * brands. Used for substitute stock pooling and reorder suggestions.
+ */
+export const interchangeGroups = mysqlTable(
+  "interchange_groups",
+  {
+    id: ulidPk(),
+    name: varchar({ length: 200 }).notNull(),
+    minQty: int(),
+    preferredVariantId: ulidRef().references((): AnyMySqlColumn => productVariants.id, {
+      onDelete: "set null",
+    }),
+    archivedAt: timestamp(),
+    ...timestamps,
+  }
 );
 
 /**
@@ -135,6 +149,7 @@ export const productVariants = mysqlTable(
     productId: ulidRef()
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
+    interchangeGroupId: ulidRef().references(() => interchangeGroups.id, { onDelete: "set null" }),
     sku: varchar({ length: 64 }).notNull().unique(),
     barcode: varchar({ length: 64 }),
     label: varchar({ length: 200 }),
@@ -257,6 +272,15 @@ export const productCategoriesRelations = relations(productCategories, ({ one, m
   products: many(products),
 }));
 
+export const interchangeGroupsRelations = relations(interchangeGroups, ({ one, many }) => ({
+  preferredVariant: one(productVariants, {
+    fields: [interchangeGroups.preferredVariantId],
+    references: [productVariants.id],
+    relationName: "interchange_group_preferred_variant",
+  }),
+  variants: many(productVariants, { relationName: "variant_interchange_group" }),
+}));
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(productCategories, {
     fields: [products.categoryId],
@@ -275,6 +299,11 @@ export const productImagesRelations = relations(productImages, ({ one }) => ({
 
 export const productVariantsRelations = relations(productVariants, ({ one, many }) => ({
   product: one(products, { fields: [productVariants.productId], references: [products.id] }),
+  interchangeGroup: one(interchangeGroups, {
+    fields: [productVariants.interchangeGroupId],
+    references: [interchangeGroups.id],
+    relationName: "variant_interchange_group",
+  }),
   options: many(productVariantOptions),
   priceTiers: many(productPriceTiers),
 }));

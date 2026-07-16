@@ -8,7 +8,7 @@
 
 import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { ulid } from "ulid";
-import { productCategories, products, productVariants } from "../db/schema/products.ts";
+import { interchangeGroups, products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
@@ -88,33 +88,32 @@ async function loadSuggestion(id: string): Promise<Suggestion> {
  * The previous `open` set is discarded; `converted` / `dismissed` rows stay.
  */
 export async function runReorderScan(): Promise<Suggestion[]> {
-  // Substitute groups (Categories with minQty and preferredVariantId)
+  // Substitute groups (InterchangeGroups)
   const substituteGroupsRows = await db
     .select({
-      categoryId: productCategories.id,
-      minQty: productCategories.minQty,
-      preferredVariantId: productCategories.preferredVariantId,
+      interchangeGroupId: interchangeGroups.id,
+      minQty: interchangeGroups.minQty,
+      preferredVariantId: interchangeGroups.preferredVariantId,
     })
-    .from(productCategories)
+    .from(interchangeGroups)
     .where(
       and(
-        isNotNull(productCategories.minQty),
-        isNotNull(productCategories.preferredVariantId)
+        isNotNull(interchangeGroups.minQty),
+        isNotNull(interchangeGroups.preferredVariantId)
       )
     );
-  const substituteGroupMap = new Map(substituteGroupsRows.map((sg) => [sg.categoryId, sg]));
+  const substituteGroupMap = new Map(substituteGroupsRows.map((sg) => [sg.interchangeGroupId, sg]));
 
-  let categoryVariantRows: { categoryId: string | null; variantId: string; totalQty: number }[] = [];
+  let groupVariantRows: { interchangeGroupId: string | null; variantId: string; totalQty: number }[] = [];
   if (substituteGroupsRows.length > 0) {
-    categoryVariantRows = await db
+    groupVariantRows = await db
       .select({
-        categoryId: products.categoryId,
+        interchangeGroupId: productVariants.interchangeGroupId,
         variantId: productVariants.id,
         totalQty: productVariants.totalQty,
       })
       .from(productVariants)
-      .innerJoin(products, eq(productVariants.productId, products.id))
-      .where(inArray(products.categoryId, substituteGroupsRows.map((sg) => sg.categoryId)));
+      .where(isNotNull(productVariants.interchangeGroupId));
   }
 
   // Tracked variants and their product's primary vendor.
@@ -126,7 +125,7 @@ export async function runReorderScan(): Promise<Suggestion[]> {
       reorderQty: productVariants.reorderQty,
       minQty: products.minQty,
       primaryVendorId: products.primaryVendorId,
-      categoryId: products.categoryId,
+      interchangeGroupId: productVariants.interchangeGroupId,
     })
     .from(productVariants)
     .innerJoin(products, eq(productVariants.productId, products.id))
@@ -143,7 +142,7 @@ export async function runReorderScan(): Promise<Suggestion[]> {
   const generatedAt = new Date();
   
   const candidateVariantIds = new Set<string>(candidates.map((c) => c.variantId));
-  for (const row of categoryVariantRows) candidateVariantIds.add(row.variantId);
+  for (const row of groupVariantRows) candidateVariantIds.add(row.variantId);
   for (const sg of substituteGroupsRows) candidateVariantIds.add(sg.preferredVariantId as string);
 
   const candidateIds = Array.from(candidateVariantIds);
@@ -220,8 +219,8 @@ export async function runReorderScan(): Promise<Suggestion[]> {
 
   for (const sg of substituteGroupsRows) {
     let aggregateStock = 0;
-    const variantsInCat = categoryVariantRows.filter((r) => r.categoryId === sg.categoryId);
-    for (const v of variantsInCat) {
+    const variantsInGroup = groupVariantRows.filter((r) => r.interchangeGroupId === sg.interchangeGroupId);
+    for (const v of variantsInGroup) {
       aggregateStock += v.totalQty + (onOrderByVariant.get(v.variantId) ?? 0);
     }
     
@@ -252,7 +251,7 @@ export async function runReorderScan(): Promise<Suggestion[]> {
   }
 
   for (const c of candidates) {
-    if (c.categoryId && substituteGroupMap.has(c.categoryId)) continue;
+    if (c.interchangeGroupId && substituteGroupMap.has(c.interchangeGroupId)) continue;
 
     const reorderPoint = (c.reorderPoint ?? c.minQty) as number;
     const onOrder = onOrderByVariant.get(c.variantId) ?? 0;

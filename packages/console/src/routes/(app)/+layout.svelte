@@ -25,6 +25,7 @@
       items: [
         { href: "/products", label: "Products" },
         { href: "/categories", label: "Categories" },
+        { href: "/interchange-groups", label: "Interchange groups" },
         { href: "/catalog", label: "Catalog", perm: "catalog.manage" },
       ],
     },

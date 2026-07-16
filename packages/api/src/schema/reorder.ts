@@ -22,6 +22,8 @@ export const typeDefs = /* GraphQL */ `
     productName: String!
     "SKU of the suggested variant."
     sku: String!
+    "Label of the suggested variant."
+    variantLabel: String
     "Chosen vendor; null means the suggestion is unassigned."
     vendorId: ID
     "Chosen vendor's name; null when unassigned."
@@ -55,6 +57,7 @@ export const typeDefs = /* GraphQL */ `
     variantId: ID!
     productName: String!
     sku: String!
+    variantLabel: String
     suggestedQty: Float!
     estimatedUnitCost: Float!
     estimatedTotalCost: Float!
@@ -122,6 +125,14 @@ export const resolvers = {
         .limit(1);
       return row[0]?.sku ?? "";
     },
+    variantLabel: async (s: SuggestionRow) => {
+      const row = await db
+        .select({ label: productVariants.label })
+        .from(productVariants)
+        .where(eq(productVariants.id, s.variantId))
+        .limit(1);
+      return row[0]?.label ?? null;
+    },
     vendorName: async (s: SuggestionRow) => {
       if (!s.vendorId) return null;
       const row = await db
@@ -141,6 +152,10 @@ export const resolvers = {
     sku: async (s: SuggestionRow) => {
       const row = await db.select({ sku: productVariants.sku }).from(productVariants).where(eq(productVariants.id, s.variantId)).limit(1);
       return row[0]?.sku ?? "";
+    },
+    variantLabel: async (s: SuggestionRow) => {
+      const row = await db.select({ label: productVariants.label }).from(productVariants).where(eq(productVariants.id, s.variantId)).limit(1);
+      return row[0]?.label ?? null;
     },
     vendorName: async (s: SuggestionRow) => {
       if (!s.vendorId) return null;

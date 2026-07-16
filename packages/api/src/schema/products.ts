@@ -20,9 +20,16 @@ export const typeDefs = /* GraphQL */ `
     id: ID!
     name: String!
     parentId: ID
-    preferredVariantId: ID
-    minQty: Int
     minMarginBps: Int
+    archivedAt: String
+    createdAt: String!
+  }
+
+  type InterchangeGroup {
+    id: ID!
+    name: String!
+    minQty: Int
+    preferredVariantId: ID
     archivedAt: String
     createdAt: String!
   }
@@ -51,6 +58,7 @@ export const typeDefs = /* GraphQL */ `
     bundleComponents: [BundleComponent!]!
     "The parent product."
     product: Product!
+    interchangeGroupId: ID
   }
 
   "One component of a bundle: a variant and how many units the bundle holds."
@@ -104,6 +112,7 @@ export const typeDefs = /* GraphQL */ `
     priceMinor: Float!
     costMinor: Float
     sortOrder: Int
+    interchangeGroupId: ID
   }
 
   input PriceTierInput {
@@ -113,15 +122,21 @@ export const typeDefs = /* GraphQL */ `
 
   extend type Query {
     categories: [Category!]!
+    interchangeGroups: [InterchangeGroup!]!
     products(search: String, includeArchived: Boolean): [Product!]!
     product(id: ID!): Product
   }
 
   extend type Mutation {
-    createCategory(name: String!, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
-    updateCategory(id: ID!, name: String, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
+    createCategory(name: String!, parentId: ID, minMarginBps: Int): Category!
+    updateCategory(id: ID!, name: String, parentId: ID, minMarginBps: Int): Category!
     setCategoryArchived(id: ID!, archived: Boolean!): Category!
     deleteCategory(id: ID!): Boolean!
+
+    createInterchangeGroup(name: String!, minQty: Int, preferredVariantId: ID): InterchangeGroup!
+    updateInterchangeGroup(id: ID!, name: String, minQty: Int, preferredVariantId: ID): InterchangeGroup!
+    setInterchangeGroupArchived(id: ID!, archived: Boolean!): InterchangeGroup!
+    deleteInterchangeGroup(id: ID!): Boolean!
 
     createProduct(
       name: String!
@@ -168,6 +183,7 @@ export const typeDefs = /* GraphQL */ `
       priceMinor: Float
       costMinor: Float
       sortOrder: Int
+      interchangeGroupId: ID
     ): ProductVariant!
     deleteVariant(id: ID!): Boolean!
     setPriceTiers(variantId: ID!, tiers: [PriceTierInput!]!): [PriceTier!]!
@@ -197,6 +213,10 @@ export const resolvers = {
     createdAt: (c: WithDates) => iso(c.createdAt),
     archivedAt: (c: WithDates) => iso(c.archivedAt),
   },
+  InterchangeGroup: {
+    createdAt: (ig: WithDates) => iso(ig.createdAt),
+    archivedAt: (ig: WithDates) => iso(ig.archivedAt),
+  },
   Product: {
     createdAt: (p: WithDates) => iso(p.createdAt),
     archivedAt: (p: WithDates) => iso(p.archivedAt),
@@ -221,6 +241,10 @@ export const resolvers = {
     categories: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
       await requirePermission(ctx, "product.edit");
       return products.listCategories();
+    },
+    interchangeGroups: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "product.edit");
+      return products.listInterchangeGroups();
     },
     products: async (
       _: unknown,
@@ -283,6 +307,53 @@ export const resolvers = {
       await requirePermission(ctx, "product.edit");
       try {
         await products.deleteCategory(args.id);
+        return true;
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+
+    createInterchangeGroup: async (_: unknown, args: Record<string, unknown>, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "product.create");
+      try {
+        return await products.createInterchangeGroup(args as never);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    updateInterchangeGroup: async (
+      _: unknown,
+      args: { id: string } & Record<string, unknown>,
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "product.edit");
+      const { id, ...patch } = args;
+      try {
+        return await products.updateInterchangeGroup(id, patch as never);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    setInterchangeGroupArchived: async (
+      _: unknown,
+      args: { id: string; archived: boolean },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "product.archive");
+      try {
+        return await products.setInterchangeGroupArchived(args.id, args.archived);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    deleteInterchangeGroup: async (
+      _: unknown,
+      args: { id: string },
+      ctx: GraphQLContext,
+    ): Promise<boolean> => {
+      await requirePermission(ctx, "product.edit");
+      try {
+        await products.deleteInterchangeGroup(args.id);
         return true;
       } catch (e) {
         asGraphQLError(e);

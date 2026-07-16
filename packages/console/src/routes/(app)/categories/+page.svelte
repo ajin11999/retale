@@ -21,8 +21,6 @@
         id
         name
         parentId
-        preferredVariantId
-        minQty
         minMarginBps
         archivedAt
       }
@@ -43,15 +41,11 @@
     mutation ConsoleCreateCategory(
       $name: String!
       $parentId: ID
-      $preferredVariantId: ID
-      $minQty: Int
       $minMarginBps: Int
     ) {
       createCategory(
         name: $name
         parentId: $parentId
-        preferredVariantId: $preferredVariantId
-        minQty: $minQty
         minMarginBps: $minMarginBps
       ) {
         id
@@ -64,23 +58,17 @@
       $id: ID!
       $name: String
       $parentId: ID
-      $preferredVariantId: ID
-      $minQty: Int
       $minMarginBps: Int
     ) {
       updateCategory(
         id: $id
         name: $name
         parentId: $parentId
-        preferredVariantId: $preferredVariantId
-        minQty: $minQty
         minMarginBps: $minMarginBps
       ) {
         id
         name
         parentId
-        preferredVariantId
-        minQty
         minMarginBps
       }
     }
@@ -132,8 +120,6 @@
     id: string;
     name: string;
     parentId: string | null;
-    preferredVariantId: string | null;
-    minQty: number | null;
     minMarginBps: number | null;
     archived: boolean;
     depth: number;
@@ -157,8 +143,6 @@
           id: c.id,
           name: c.name,
           parentId: c.parentId ?? null,
-          preferredVariantId: c.preferredVariantId ?? null,
-          minQty: c.minQty ?? null,
           minMarginBps: c.minMarginBps ?? null,
           archived: c.archivedAt != null,
           depth,
@@ -194,8 +178,6 @@
     id: string | null; // null → a new category
     name: string;
     parentId: string;
-    preferredVariantId: string;
-    minQty: number | null;
     minMarginBps: number | null;
   }
 
@@ -255,32 +237,13 @@
     })),
   ]);
 
-  // Variant options for the preferred variant dropdown based on current category draft
-  const variantComboOptions = $derived.by(() => {
-    const d = draft;
-    if (!d || !d.id) return [{ value: "", label: "— Save category first to select a variant —" }];
-    const catId = d.id;
-    const catProducts = products.filter((p) => p.categoryId === catId);
-    const options = [{ value: "", label: "— None —" }];
-    for (const p of catProducts) {
-      for (const v of (p.variants || [])) {
-        const labelStr = v.label ? ` - ${v.label}` : '';
-        options.push({
-          value: v.id,
-          label: `${p.publicDisplayName}${labelStr} (${v.sku})`
-        });
-      }
-    }
-    return options;
-  });
+
 
   function newCategory() {
     draft = {
       id: null,
       name: "",
       parentId: "",
-      preferredVariantId: "",
-      minQty: null,
       minMarginBps: null,
     };
   }
@@ -290,25 +253,22 @@
       id: n.id,
       name: n.name,
       parentId: n.parentId ?? "",
-      preferredVariantId: n.preferredVariantId ?? "",
-      minQty: n.minQty,
       minMarginBps: n.minMarginBps,
     };
   }
 
   // ---- Inline quick edit ---------------------------------------------------
-  // Edit just name + min qty in place, without opening the full editor panel.
+  // Edit just name in place, without opening the full editor panel.
   // `focus` records which cell was clicked so that field grabs focus on mount.
   let quick = $state<{
     id: string;
     name: string;
-    minQty: number | null;
-    focus: "name" | "minQty";
+    focus: "name";
   } | null>(null);
 
-  function startQuick(n: Node, focus: "name" | "minQty") {
+  function startQuick(n: Node, focus: "name") {
     if (!canEdit || busy) return;
-    quick = { id: n.id, name: n.name, minQty: n.minQty, focus };
+    quick = { id: n.id, name: n.name, focus };
   }
 
   async function saveQuick() {
@@ -318,7 +278,6 @@
       UpdateCategory.mutate({
         id: q.id,
         name: q.name.trim(),
-        minQty: q.minQty === null || q.minQty === undefined ? null : Number(q.minQty),
       }),
     );
     if (ok) {
@@ -338,7 +297,7 @@
   }
 
   // Focus + select an input on mount when `enabled` — used so the clicked cell
-  // (name or min qty) is ready to type into immediately. Applied via `use:` so
+  // (name) is ready to type into immediately. Applied via `use:` so
   // the quick-edit fields are raw <input>s (actions aren't valid on components).
   function autofocus(el: HTMLInputElement, enabled: boolean) {
     if (enabled) {
@@ -399,15 +358,11 @@
             id: d.id,
             name: d.name.trim(),
             parentId: d.parentId || null,
-            preferredVariantId: d.preferredVariantId || null,
-            minQty: d.minQty,
             minMarginBps: d.minMarginBps,
           })
         : CreateCategory.mutate({
             name: d.name.trim(),
             parentId: d.parentId || null,
-            preferredVariantId: d.preferredVariantId || null,
-            minQty: d.minQty,
             minMarginBps: d.minMarginBps,
           }),
     );
@@ -500,23 +455,6 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min qty</span>
-          <NumericInput
-            bind:value={draft.minQty}
-            placeholder="Inherited / none"
-            disabled={!canEdit}
-          />
-        </label>
-        <label class="space-y-1">
-          <span class="text-sm font-medium">Preferred variant</span>
-          <Combobox
-            options={variantComboOptions}
-            bind:value={draft.preferredVariantId}
-            placeholder="Search variant…"
-            disabled={!canEdit || !draft.id}
-          />
-        </label>
-        <label class="space-y-1">
           <span class="text-sm font-medium">Min margin (%)</span>
           <NumericInput
             step="0.1"
@@ -557,7 +495,6 @@
           <tr>
             <th class="px-4 py-2 font-medium">Category</th>
             <th class="px-4 py-2 text-right font-medium">Products</th>
-            <th class="px-4 py-2 text-right font-medium">Min qty</th>
             <th class="px-4 py-2 text-right font-medium">Min margin</th>
             <th class="px-4 py-2 font-medium">Status</th>
             <th class="px-4 py-2"></th>
@@ -602,28 +539,6 @@
                   >
                 {:else}
                   0
-                {/if}
-              </td>
-              <td class="px-4 py-2 text-right">
-                {#if quick?.id === n.id}
-                  <NumericInput
-                    
-                    class="{quickInputClass} ml-auto w-20 text-right"
-                    bind:value={quick.minQty}
-                    placeholder="—"
-                    onkeydown={quickKeydown}
-                    autofocus={quick.focus === "minQty"}
-                  />
-                {:else if canEdit}
-                  <button
-                    type="button"
-                    class="rounded px-1 hover:bg-muted disabled:cursor-not-allowed"
-                    title="Click to edit min qty"
-                    disabled={busy}
-                    onclick={() => startQuick(n, "minQty")}>{n.minQty ?? "—"}</button
-                  >
-                {:else}
-                  {n.minQty ?? "—"}
                 {/if}
               </td>
               <td class="px-4 py-2 text-right">{formatPct(n.minMarginBps)}</td>
@@ -680,7 +595,7 @@
           {/each}
           {#if visibleTree.length === 0}
             <tr>
-              <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
+              <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
                 {search.trim() ? "No categories match." : "No categories yet."}
               </td>
             </tr>

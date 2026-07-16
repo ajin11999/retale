@@ -302,6 +302,13 @@
       "when": 1784002960509,
       "tag": "0042_white_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1784182843277,
+      "tag": "0043_thin_jubilee",
+      "breakpoints": true
     }
   ]
 }

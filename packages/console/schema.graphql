@@ -14,6 +14,7 @@ type Query {
   """All users, with their assigned role ids."""
   users: [User!]!
   categories: [Category!]!
+  interchangeGroups: [InterchangeGroup!]!
   products(search: String, includeArchived: Boolean): [Product!]!
   product(id: ID!): Product
   locations(includeArchived: Boolean): [Location!]!
@@ -208,10 +209,14 @@ type Mutation {
   createUser(username: String!, password: String!, name: String!, isRoot: Boolean, roleIds: [ID!]): User!
   assignRole(userId: ID!, roleId: ID!): User!
   unassignRole(userId: ID!, roleId: ID!): User!
-  createCategory(name: String!, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
-  updateCategory(id: ID!, name: String, parentId: ID, preferredVariantId: ID, minQty: Int, minMarginBps: Int): Category!
+  createCategory(name: String!, parentId: ID, minMarginBps: Int): Category!
+  updateCategory(id: ID!, name: String, parentId: ID, minMarginBps: Int): Category!
   setCategoryArchived(id: ID!, archived: Boolean!): Category!
   deleteCategory(id: ID!): Boolean!
+  createInterchangeGroup(name: String!, minQty: Int, preferredVariantId: ID): InterchangeGroup!
+  updateInterchangeGroup(id: ID!, name: String, minQty: Int, preferredVariantId: ID): InterchangeGroup!
+  setInterchangeGroupArchived(id: ID!, archived: Boolean!): InterchangeGroup!
+  deleteInterchangeGroup(id: ID!): Boolean!
   createProduct(name: String!, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode!, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean, variants: [VariantInput!]!): Product!
   updateProduct(id: ID!, name: String, publicName: String, description: String, kind: ProductKind, categoryId: ID, taxRateBps: Int, priceMode: PriceMode, minQty: Int, minMarginBps: Int, costRatioBps: Int, primaryVendorId: ID, replenishMonitored: Boolean): Product!
   setProductArchived(id: ID!, archived: Boolean!): Product!
@@ -219,7 +224,7 @@ type Mutation {
   """Hard delete — root-only. Prefer archiving."""
   hardDeleteProduct(id: ID!): Boolean!
   addVariant(productId: ID!, variant: VariantInput!): ProductVariant!
-  updateVariant(id: ID!, sku: String, barcode: String, label: String, unit: VariantUnit, qtyDecimals: Int, priceMinor: Float, costMinor: Float, sortOrder: Int): ProductVariant!
+  updateVariant(id: ID!, sku: String, barcode: String, label: String, unit: VariantUnit, qtyDecimals: Int, priceMinor: Float, costMinor: Float, sortOrder: Int, interchangeGroupId: ID): ProductVariant!
   deleteVariant(id: ID!): Boolean!
   setPriceTiers(variantId: ID!, tiers: [PriceTierInput!]!): [PriceTier!]!
 
@@ -653,9 +658,16 @@ type Category {
   id: ID!
   name: String!
   parentId: ID
-  preferredVariantId: ID
-  minQty: Int
   minMarginBps: Int
+  archivedAt: String
+  createdAt: String!
+}
+
+type InterchangeGroup {
+  id: ID!
+  name: String!
+  minQty: Int
+  preferredVariantId: ID
   archivedAt: String
   createdAt: String!
 }
@@ -689,6 +701,7 @@ type ProductVariant {
 
   """The parent product."""
   product: Product!
+  interchangeGroupId: ID
 
   """
   Per-location stock rows for this variant (locationId null = unlocated root).
@@ -772,6 +785,7 @@ input VariantInput {
   priceMinor: Float!
   costMinor: Float
   sortOrder: Int
+  interchangeGroupId: ID
 }
 
 input PriceTierInput {
@@ -1651,6 +1665,9 @@ type ReorderSuggestion {
   """SKU of the suggested variant."""
   sku: String!
 
+  """Label of the suggested variant."""
+  variantLabel: String
+
   """Chosen vendor; null means the suggestion is unassigned."""
   vendorId: ID
 
@@ -1691,6 +1708,7 @@ type BudgetReorderPlanLine {
   variantId: ID!
   productName: String!
   sku: String!
+  variantLabel: String
   suggestedQty: Float!
   estimatedUnitCost: Float!
   estimatedTotalCost: Float!

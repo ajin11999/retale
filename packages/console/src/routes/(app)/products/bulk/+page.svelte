@@ -19,6 +19,10 @@
         name
         parentId
       }
+      products {
+        id
+        name
+      }
     }
   `);
 
@@ -86,6 +90,17 @@
   let rows = $state<BulkRow[]>([blankRow()]);
   let busy = $state(false);
   let summary = $state<{ created: number; failed: number } | null>(null);
+
+  const existingProducts = $derived($BulkAdd.data?.products ?? []);
+  const customNames = $derived(
+    Array.from(new Set(rows.map((r) => r.name.trim()).filter(Boolean))),
+  );
+  const productOptions = $derived([
+    ...existingProducts.map((p) => ({ value: p.name, label: p.name })),
+    ...customNames
+      .filter((n) => !existingProducts.some((p) => p.name === n))
+      .map((n) => ({ value: n, label: n })),
+  ]);
 
   // Keep exactly one trailing blank row, so the grid grows as you type — the
   // spreadsheet "keep going" feel without a manual "add row" click.
@@ -223,10 +238,15 @@
                     {row.name}
                   </a>
                 {:else}
-                  <Input
+                  <Combobox
+                    options={productOptions}
                     bind:value={row.name}
                     placeholder="Product name"
                     disabled={busy}
+                    createLabel={(q) => `Use "${q}"`}
+                    onCreate={(q) => {
+                      row.name = q;
+                    }}
                   />
                 {/if}
               </td>
