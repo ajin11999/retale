@@ -190,7 +190,6 @@
         <DuplicateHint
           query={newName ?? ""}
           items={vendorCandidates}
-          hrefFor={(id) => `/vendors/${id}`}
           noun="vendor"
         />
       </label>

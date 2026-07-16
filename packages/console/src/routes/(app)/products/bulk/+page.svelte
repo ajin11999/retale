@@ -9,6 +9,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import type { PageData } from "./$types";
 
   // Only the category list is needed — for the batch Category picker.
@@ -92,15 +93,6 @@
   let summary = $state<{ created: number; failed: number } | null>(null);
 
   const existingProducts = $derived($BulkAdd.data?.products ?? []);
-  const customNames = $derived(
-    Array.from(new Set(rows.map((r) => r.name.trim()).filter(Boolean))),
-  );
-  const productOptions = $derived([
-    ...existingProducts.map((p) => ({ value: p.name, label: p.name })),
-    ...customNames
-      .filter((n) => !existingProducts.some((p) => p.name === n))
-      .map((n) => ({ value: n, label: n })),
-  ]);
 
   // Keep exactly one trailing blank row, so the grid grows as you type — the
   // spreadsheet "keep going" feel without a manual "add row" click.
@@ -213,7 +205,7 @@
       </p>
     {/if}
 
-    <div class="overflow-hidden rounded-lg border bg-card">
+    <div class="rounded-lg border bg-card [&_th:first-child]:rounded-tl-lg [&_th:last-child]:rounded-tr-lg">
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
@@ -238,16 +230,14 @@
                     {row.name}
                   </a>
                 {:else}
-                  <Combobox
-                    options={productOptions}
-                    bind:value={row.name}
-                    placeholder="Product name"
-                    disabled={busy}
-                    createLabel={(q) => `Use "${q}"`}
-                    onCreate={(q) => {
-                      row.name = q;
-                    }}
-                  />
+                  <div class="relative">
+                    <Input bind:value={row.name} placeholder="Product name" disabled={busy} />
+                    <DuplicateHint
+                      query={row.name}
+                      items={existingProducts}
+                      noun="product"
+                    />
+                  </div>
                 {/if}
               </td>
               <td class="px-3 py-1.5">

@@ -441,7 +441,6 @@
             query={draft.name}
             items={categoryCandidates}
             excludeId={draft.id}
-            onSelect={editCategoryById}
             noun="category"
           />
         </label>

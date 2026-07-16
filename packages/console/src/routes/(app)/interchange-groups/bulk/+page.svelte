@@ -7,7 +7,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import NumericInput from "$lib/components/ui/numeric-input.svelte";
-  import Combobox from "$lib/components/ui/combobox.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import type { PageData } from "./$types";
 
   // Reuses the ordinary createInterchangeGroup mutation, one call per row. Own document
@@ -66,15 +66,6 @@
   let summary = $state<{ created: number; failed: number } | null>(null);
 
   const existingGroups = $derived($BulkAdd.data?.interchangeGroups ?? []);
-  const customNames = $derived(
-    Array.from(new Set(rows.map((r) => r.name.trim()).filter(Boolean))),
-  );
-  const groupOptions = $derived([
-    ...existingGroups.map((g) => ({ value: g.name, label: g.name })),
-    ...customNames
-      .filter((n) => !existingGroups.some((g) => g.name === n))
-      .map((n) => ({ value: n, label: n })),
-  ]);
 
   // Keep exactly one trailing blank row, so the grid grows as you type — the
   // spreadsheet "keep going" feel without a manual "add row" click.
@@ -170,7 +161,7 @@
       </p>
     {/if}
 
-    <div class="overflow-hidden rounded-lg border bg-card">
+    <div class="rounded-lg border bg-card [&_th:first-child]:rounded-tl-lg [&_th:last-child]:rounded-tr-lg">
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
@@ -191,16 +182,14 @@
                     {row.name}
                   </span>
                 {:else}
-                  <Combobox
-                    options={groupOptions}
-                    bind:value={row.name}
-                    placeholder="Group name"
-                    disabled={busy}
-                    createLabel={(q) => `Use "${q}"`}
-                    onCreate={(q) => {
-                      row.name = q;
-                    }}
-                  />
+                  <div class="relative">
+                    <Input bind:value={row.name} placeholder="Group name" disabled={busy} />
+                    <DuplicateHint
+                      query={row.name}
+                      items={existingGroups}
+                      noun="group"
+                    />
+                  </div>
                 {/if}
               </td>
               <td class="px-3 py-1.5">

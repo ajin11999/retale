@@ -16,8 +16,6 @@
   let {
     query,
     items,
-    hrefFor,
-    onSelect,
     excludeId = null,
     minChars = 3,
     limit = 6,
@@ -25,10 +23,6 @@
   }: {
     query: string;
     items: Candidate[];
-    /** Link target for a match. Provide this or `onSelect`. */
-    hrefFor?: (id: string) => string;
-    /** Click handler for a match — for inline-edited entities with no route. */
-    onSelect?: (id: string) => void;
     /** Skip this row (the entity currently being edited). */
     excludeId?: string | null;
     minChars?: number;
@@ -55,11 +49,35 @@
   const exact = $derived(
     matches.some((m) => normalizeName(m.name) === normalizeName(query ?? "")),
   );
+
+  let show = $state(false);
+
+  function trackFocus(node: HTMLElement) {
+    const parent = node.parentElement;
+    if (!parent) return;
+    const input = parent.querySelector("input");
+    if (!input) return;
+
+    const onFocus = () => (show = true);
+    const onBlur = () => (show = false);
+
+    input.addEventListener("focus", onFocus);
+    input.addEventListener("blur", onBlur);
+    if (document.activeElement === input) show = true;
+
+    return {
+      destroy() {
+        input.removeEventListener("focus", onFocus);
+        input.removeEventListener("blur", onBlur);
+      },
+    };
+  }
 </script>
 
 {#if matches.length > 0}
   <div
-    class="absolute left-0 top-full z-20 mt-1 w-full overflow-hidden rounded-md border bg-popover shadow-md"
+    use:trackFocus
+    class="absolute left-0 top-full z-20 mt-1 w-full overflow-hidden rounded-md border bg-popover shadow-md {show ? '' : 'hidden'}"
   >
     <p
       class="border-b px-3 py-1.5 text-xs font-medium {exact
@@ -73,28 +91,12 @@
     <ul class="max-h-56 divide-y overflow-y-auto text-sm">
       {#each matches as m (m.id)}
         <li>
-          {#if onSelect}
-            <button
-              type="button"
-              onclick={() => onSelect(m.id)}
-              class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-muted/60"
-            >
-              <span class="truncate">{m.name}</span>
-              {#if m.note}
-                <span class="shrink-0 text-xs text-muted-foreground">{m.note}</span>
-              {/if}
-            </button>
-          {:else}
-            <a
-              href={hrefFor?.(m.id) ?? "#"}
-              class="flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-muted/60"
-            >
-              <span class="truncate">{m.name}</span>
-              {#if m.note}
-                <span class="shrink-0 text-xs text-muted-foreground">{m.note}</span>
-              {/if}
-            </a>
-          {/if}
+          <div class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-muted-foreground">
+            <span class="truncate">{m.name}</span>
+            {#if m.note}
+              <span class="shrink-0 text-xs">{m.note}</span>
+            {/if}
+          </div>
         </li>
       {/each}
     </ul>

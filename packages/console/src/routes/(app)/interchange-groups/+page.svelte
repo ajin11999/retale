@@ -334,7 +334,10 @@
         />
       </div>
       <Button variant="outline" size="sm" disabled={busy || !canCreate} onclick={() => goto("/interchange-groups/bulk")}>
-        Bulk add
+        Bulk add groups
+      </Button>
+      <Button variant="outline" size="sm" disabled={busy || !canEdit} onclick={() => goto("/interchange-groups/variants")}>
+        Manage variants
       </Button>
       <Button size="sm" disabled={busy || !canCreate} onclick={newGroup}>
         New group
@@ -369,7 +372,6 @@
             query={draft.name}
             items={groupCandidates}
             excludeId={draft.id}
-            onSelect={editGroupById}
             noun="group"
           />
         </label>

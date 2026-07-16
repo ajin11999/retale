@@ -707,7 +707,6 @@
           <DuplicateHint
             query={draft.name}
             items={allRows}
-            hrefFor={(id) => `/products/${id}`}
             noun="product"
           />
         </label>
