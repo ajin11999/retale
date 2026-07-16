@@ -11,6 +11,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { SvelteSet } from "svelte/reactivity";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -246,7 +247,7 @@
   // --- Variant Management ---
   let managingGroup = $state<typeof interchangeGroups[0] | null>(null);
   let variantSearch = $state("");
-  let selectedVariantIds = $state<Set<string>>(new Set());
+  let selectedVariantIds = $state(new SvelteSet<string>());
 
   // Houdini requires manual fetch for dynamic search
   import { ConsoleSearchVariantsStore } from "$houdini";
@@ -287,7 +288,7 @@
   function manageVariants(n: typeof interchangeGroups[0]) {
     managingGroup = n;
     variantSearch = "";
-    selectedVariantIds = new Set();
+    selectedVariantIds = new SvelteSet();
   }
 
   async function addSelectedVariants() {
@@ -299,7 +300,7 @@
       })
     );
     if (ok) {
-      selectedVariantIds = new Set();
+      selectedVariantIds = new SvelteSet();
       await InterchangeGroupList.fetch({ policy: CachePolicy.NetworkOnly });
     }
   }
