@@ -2,6 +2,7 @@
   import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
+  import { goto } from "$app/navigation";
   import { Archive, ArchiveRestore, Check, Pencil, Trash2, X, List } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -332,6 +333,9 @@
           bind:value={search}
         />
       </div>
+      <Button variant="outline" size="sm" disabled={busy || !canCreate} onclick={() => goto("/interchange-groups/bulk")}>
+        Bulk add
+      </Button>
       <Button size="sm" disabled={busy || !canCreate} onclick={newGroup}>
         New group
       </Button>
