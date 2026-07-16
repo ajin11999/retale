@@ -6,6 +6,8 @@
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import IconButton from "$lib/components/ui/icon-button.svelte";
+  import { Trash2 } from "@lucide/svelte";
   import { statusLabel, treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
@@ -161,7 +163,7 @@
   }
 
   const refetch = () =>
-    transfer && TransferDetail.fetch({ variables: { id: transfer.id } });
+    transfer && TransferDetail.fetch({ variables: { id: transfer.id }, policy: "NetworkOnly" });
 
   async function dispatch() {
     if (!transfer) return;
@@ -360,7 +362,13 @@
               <td class="py-1.5 text-right">{i.qty}</td>
               {#if transfer.status === "draft" && canEdit}
                 <td class="py-1.5 text-right">
-                  <button class="text-destructive hover:underline text-xs" onclick={() => removeLine(i.id)} disabled={busy}>Remove</button>
+                  <IconButton
+                    icon={Trash2}
+                    label="Remove line"
+                    variant="destructive"
+                    disabled={busy}
+                    onclick={() => removeLine(i.id)}
+                  />
                 </td>
               {/if}
             </tr>
