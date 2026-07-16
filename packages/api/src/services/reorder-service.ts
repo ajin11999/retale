@@ -668,6 +668,7 @@ export async function simulateBudgetReorder(budgetAmount: number): Promise<Budge
         if (affordableQty > 0) {
           const partialCost = affordableQty * item.unitCost;
           lines.push({
+            suggestionId: item.suggestion.id,
             variantId: item.suggestion.variantId,
             vendorId: item.suggestion.vendorId,
             suggestedQty: affordableQty,
