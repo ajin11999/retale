@@ -17,6 +17,7 @@ type Query {
   interchangeGroups: [InterchangeGroup!]!
   products(search: String, includeArchived: Boolean): [Product!]!
   product(id: ID!): Product
+  searchVariants(search: String!, limit: Int): [ProductVariant!]!
   locations(includeArchived: Boolean): [Location!]!
   location(id: ID!): Location
   variantStock(variantId: ID!): [StockLocation!]!
@@ -671,6 +672,7 @@ type InterchangeGroup {
   preferredVariantId: ID
   archivedAt: String
   createdAt: String!
+  variants: [ProductVariant!]!
 }
 
 type PriceTier {

@@ -21,15 +21,29 @@
         minQty
         preferredVariantId
         archivedAt
-      }
-      products(includeArchived: true) {
-        id
-        publicDisplayName
         variants {
           id
           sku
           label
-          interchangeGroupId
+          product {
+            id
+            publicDisplayName
+          }
+        }
+      }
+    }
+  `);
+
+  const SearchVariantsQuery = graphql(`
+    query ConsoleSearchVariants($search: String!) {
+      searchVariants(search: $search, limit: 50) {
+        id
+        sku
+        label
+        interchangeGroupId
+        product {
+          id
+          publicDisplayName
         }
       }
     }
@@ -97,7 +111,6 @@
   const InterchangeGroupList = $derived(data.InterchangeGroupList);
 
   const interchangeGroups = $derived($InterchangeGroupList.data?.interchangeGroups ?? []);
-  const products = $derived($InterchangeGroupList.data?.products ?? []);
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -124,22 +137,20 @@
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
   const variantComboOptions = $derived.by(() => {
-    // Only show variants that belong to this group, plus the currently selected one (in case it was set incorrectly before)
     const options = [{ value: "", label: "— None —" }];
-    for (const p of products) {
-      for (const v of (p.variants || [])) {
-        if (draft && (v.interchangeGroupId === draft.id || v.id === draft.preferredVariantId)) {
-          const labelStr = v.label ? ` - ${v.label}` : '';
-          options.push({
-            value: v.id,
-            label: `${p.publicDisplayName}${labelStr} (${v.sku})`
-          });
-        }
-      }
+    const d = draft;
+    if (!d?.id) return options;
+    const group = interchangeGroups.find((g) => g.id === d.id);
+    if (!group) return options;
+    for (const v of group.variants) {
+      const name = `${v.product.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
+      options.push({
+        value: v.id,
+        label: `${name} (${v.sku})`
+      });
     }
     return options;
   });
-
   function newGroup() {
     draft = {
       id: null,
@@ -237,36 +248,40 @@
   let variantSearch = $state("");
   let selectedVariantIds = $state<Set<string>>(new Set());
 
-  const filteredAvailableVariants = $derived.by(() => {
-    if (!managingGroup) return [];
-    const tokens = searchTokens(variantSearch.trim());
-    const available = [];
-    for (const p of products) {
-      for (const v of (p.variants || [])) {
-        if (v.interchangeGroupId !== managingGroup.id) {
-          const name = `${p.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
-          const searchStr = `${name} ${v.sku}`;
-          if (!tokens.length || matchesTokens(tokens, searchStr)) {
-            available.push({ id: v.id, name, sku: v.sku, p });
-          }
-        }
-      }
+  // Houdini requires manual fetch for dynamic search
+  import { ConsoleSearchVariantsStore } from "$houdini";
+  const searchVariantsStore = new ConsoleSearchVariantsStore();
+
+  $effect(() => {
+    if (managingGroup) {
+      searchVariantsStore.fetch({
+        variables: { search: variantSearch.trim() },
+        policy: CachePolicy.NetworkOnly
+      });
     }
-    return available;
+  });
+
+  const availableVariants = $derived($searchVariantsStore.data?.searchVariants ?? []);
+  const filteredAvailableVariants = $derived.by(() => {
+    const mg = managingGroup;
+    if (!mg) return [];
+    return availableVariants
+      .filter((v) => v.interchangeGroupId !== mg.id)
+      .map((v) => {
+        const name = `${v.product.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
+        return { id: v.id, name, sku: v.sku };
+      });
   });
 
   const groupVariants = $derived.by(() => {
-    if (!managingGroup) return [];
-    const assigned = [];
-    for (const p of products) {
-      for (const v of (p.variants || [])) {
-        if (v.interchangeGroupId === managingGroup.id) {
-          const name = `${p.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
-          assigned.push({ id: v.id, name, sku: v.sku, p, isPreferred: v.id === managingGroup.preferredVariantId });
-        }
-      }
-    }
-    return assigned;
+    const mg = managingGroup;
+    if (!mg) return [];
+    const group = interchangeGroups.find((g) => g.id === mg.id);
+    if (!group) return [];
+    return group.variants.map((v) => {
+      const name = `${v.product.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
+      return { id: v.id, name, sku: v.sku, isPreferred: v.id === mg.preferredVariantId };
+    });
   });
 
   function manageVariants(n: typeof interchangeGroups[0]) {

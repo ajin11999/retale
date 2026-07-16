@@ -32,6 +32,7 @@ export const typeDefs = /* GraphQL */ `
     preferredVariantId: ID
     archivedAt: String
     createdAt: String!
+    variants: [ProductVariant!]!
   }
 
   type PriceTier {
@@ -125,6 +126,7 @@ export const typeDefs = /* GraphQL */ `
     interchangeGroups: [InterchangeGroup!]!
     products(search: String, includeArchived: Boolean): [Product!]!
     product(id: ID!): Product
+    searchVariants(search: String!, limit: Int): [ProductVariant!]!
   }
 
   extend type Mutation {
@@ -222,6 +224,7 @@ export const resolvers = {
   InterchangeGroup: {
     createdAt: (ig: WithDates) => iso(ig.createdAt),
     archivedAt: (ig: WithDates) => iso(ig.archivedAt),
+    variants: (ig: { id: string }) => db.select().from(productVariants).where(eq(productVariants.interchangeGroupId, ig.id)),
   },
   Product: {
     createdAt: (p: WithDates) => iso(p.createdAt),
@@ -268,6 +271,10 @@ export const resolvers = {
         if (e instanceof products.ProductError && e.code === "PRODUCT_NOT_FOUND") return null;
         asGraphQLError(e);
       }
+    },
+    searchVariants: async (_: unknown, args: { search: string; limit?: number | null }, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "product.edit");
+      return products.searchVariants(args.search, args.limit ?? 50);
     },
   },
 

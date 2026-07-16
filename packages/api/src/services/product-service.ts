@@ -3,7 +3,7 @@
 // stock movements belong to the stock/purchase domains — this service only
 // sets initial cost/qty values. See docs/design-decisions.md.
 
-import { and, eq, inArray, isNull, like, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne, or } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   bundleComponents,
@@ -274,6 +274,41 @@ export async function listProducts(opts: {
     .select()
     .from(products)
     .where(filters.length ? and(...filters) : undefined);
+}
+
+export async function searchVariants(search: string, limitCount: number = 50): Promise<Variant[]> {
+  const filters = [];
+  for (const token of search.trim().toLowerCase().split(/\s+/)) {
+    if (token) {
+      filters.push(
+        or(
+          like(productVariants.sku, `%${token}%`),
+          like(productVariants.label, `%${token}%`),
+          like(products.searchText, `%${token}%`)
+        )
+      );
+    }
+  }
+
+  return db
+    .select({
+      id: productVariants.id,
+      productId: productVariants.productId,
+      interchangeGroupId: productVariants.interchangeGroupId,
+      sku: productVariants.sku,
+      barcode: productVariants.barcode,
+      label: productVariants.label,
+      unit: productVariants.unit,
+      qtyDecimals: productVariants.qtyDecimals,
+      priceMinor: productVariants.priceMinor,
+      costMinor: productVariants.costMinor,
+      totalQty: productVariants.totalQty,
+      sortOrder: productVariants.sortOrder,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .where(filters.length ? and(isNull(products.archivedAt), ...filters) : isNull(products.archivedAt))
+    .limit(limitCount);
 }
 
 function buildVariantRow(productId: string, v: VariantInput) {
