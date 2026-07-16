@@ -3,7 +3,7 @@
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { Archive, ArchiveRestore, Check, Pencil, Trash2, X, List } from "@lucide/svelte";
+  import { Archive, ArchiveRestore, Check, Pencil, Trash2, X, List, Star } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -282,7 +282,7 @@
     if (!group) return [];
     return group.variants.map((v) => {
       const name = `${v.product.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
-      return { id: v.id, name, sku: v.sku, isPreferred: v.id === mg.preferredVariantId };
+      return { id: v.id, name, sku: v.sku, isPreferred: v.id === group.preferredVariantId };
     });
   });
 
@@ -312,6 +312,19 @@
       SetVariantsInterchangeGroup.mutate({
         groupId: null,
         variantIds: [variantId],
+      })
+    );
+    if (ok) {
+      await InterchangeGroupList.fetch({ policy: CachePolicy.NetworkOnly });
+    }
+  }
+
+  async function setPreferredVariant(variantId: string) {
+    if (!managingGroup) return;
+    const ok = await run("Preferred variant updated", () =>
+      UpdateInterchangeGroup.mutate({
+        id: managingGroup!.id,
+        preferredVariantId: variantId,
       })
     );
     if (ok) {
@@ -436,13 +449,24 @@
                       <span class="text-[10px] text-emerald-600 font-semibold uppercase mt-0.5">Preferred</span>
                     {/if}
                   </div>
-                  <IconButton
-                    icon={X}
-                    label="Remove from group"
-                    variant="muted"
-                    disabled={busy || !canEdit}
-                    onclick={() => removeVariant(v.id)}
-                  />
+                  <div class="flex items-center gap-1">
+                    {#if !v.isPreferred}
+                      <IconButton
+                        icon={Star}
+                        label="Set as preferred"
+                        variant="muted"
+                        disabled={busy || !canEdit}
+                        onclick={() => setPreferredVariant(v.id)}
+                      />
+                    {/if}
+                    <IconButton
+                      icon={X}
+                      label="Remove from group"
+                      variant="muted"
+                      disabled={busy || !canEdit}
+                      onclick={() => removeVariant(v.id)}
+                    />
+                  </div>
                 </div>
               {/each}
             </div>
