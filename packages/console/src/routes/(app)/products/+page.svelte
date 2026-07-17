@@ -24,8 +24,12 @@
       products(includeArchived: true) {
         id
         name
+        publicName
+        description
         kind
         categoryId
+        minQty
+        minMarginBps
         archivedAt
         variants {
           id
@@ -68,6 +72,36 @@
 
   // Quick-edit mutations. List-scoped document names so they don't collide with
   // the detail page's ConsoleUpdateProduct / ConsoleUpdateVariant.
+  const TableEditUpdateProduct = graphql(`
+    mutation ConsoleTableEditUpdateProduct(
+      $id: ID!
+      $name: String
+      $publicName: String
+      $description: String
+      $categoryId: ID
+      $minQty: Int
+      $minMarginBps: Int
+    ) {
+      updateProduct(
+        id: $id
+        name: $name
+        publicName: $publicName
+        description: $description
+        categoryId: $categoryId
+        minQty: $minQty
+        minMarginBps: $minMarginBps
+      ) {
+        id
+        name
+        publicName
+        description
+        categoryId
+        minQty
+        minMarginBps
+      }
+    }
+  `);
+
   const UpdateProductName = graphql(`
     mutation ConsoleListUpdateProductName($id: ID!, $name: String!) {
       updateProduct(id: $id, name: $name) {
@@ -195,9 +229,11 @@
     }
   }
 
-  interface Row {
+    interface Row {
     id: string;
     name: string;
+    publicName: string | null;
+    description: string | null;
     kind: string;
     categoryId: string | null;
     category: string;
@@ -207,9 +243,13 @@
     variantId: string | null;
     minPrice: number;
     maxPrice: number;
+    costMinor: number | null;
     stock: number;
     archived: boolean;
     minMarginBps: number | null;
+    minQty: number | null;
+    productMinMarginBps: number | null;
+    haystack: string;
   }
 
   // Filtering/sorting/pagination run in plain runes here rather than through a
@@ -282,6 +322,8 @@
       return {
         id: p.id,
         name: p.name,
+        publicName: p.publicName ?? null,
+        description: p.description ?? null,
         kind: p.kind,
         categoryId: p.categoryId ?? null,
         category,
@@ -289,9 +331,12 @@
         variantId: p.variants.length === 1 ? p.variants[0].id : null,
         minPrice: prices.length ? Math.min(...prices) : 0,
         maxPrice: prices.length ? Math.max(...prices) : 0,
+        costMinor: p.variants.length === 1 ? p.variants[0].costMinor : null,
         stock: p.variants.reduce((sum, v) => sum + v.totalQty, 0),
         archived: p.archivedAt != null,
         minMarginBps,
+        minQty: p.minQty ?? null,
+        productMinMarginBps: p.minMarginBps ?? null,
         haystack: `${p.name} ${category} ${p.kind} ${variantHaystack}`.toLowerCase(),
       };
     });
@@ -348,7 +393,8 @@
     { key: "archived", id: "status", header: "Status" },
   ];
 
-  const PAGE_SIZE = 15;
+  let tableEditMode = $state(false);
+  const PAGE_SIZE = $derived(tableEditMode ? 50 : 15);
   let sortKey = $state<SortKey>("name");
   let sortDir = $state<"asc" | "desc">("asc");
   let pageIndex = $state(0);
@@ -551,6 +597,85 @@
   const sortGlyph = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
+
+  // ---- Table Edit State ----
+  interface EditDraft {
+    name: string;
+    publicName: string;
+    description: string;
+    categoryId: string;
+    priceMinor: number | null;
+    minQty: number | null;
+    minMarginBps: number | null;
+  }
+
+  let editingRows = $state<Map<string, EditDraft>>(new Map());
+  let editBusy = $state(false);
+
+  function ensureEditing(row: Row) {
+    if (editingRows.has(row.id)) return;
+    editingRows.set(row.id, {
+      name: row.name,
+      publicName: row.publicName ?? '',
+      description: row.description ?? '',
+      categoryId: row.categoryId ?? '',
+      priceMinor: row.variants === 1 ? row.minPrice : null,
+      minQty: row.minQty,
+      minMarginBps: row.productMinMarginBps,
+    });
+    editingRows = new Map(editingRows);
+  }
+
+  function patchEdit(id: string, field: string, value: any) {
+    const draft = editingRows.get(id);
+    if (draft) {
+      (draft as any)[field] = value;
+      editingRows = new Map(editingRows);
+    }
+  }
+
+  function cancelRow(id: string) {
+    editingRows.delete(id);
+    editingRows = new Map(editingRows);
+  }
+
+  async function saveRow(productId: string) {
+    const draft = editingRows.get(productId);
+    const original = allRows.find(r => r.id === productId);
+    if (!draft || !original) return;
+
+    editBusy = true;
+    feedback = null;
+    try {
+      const productChanges: any = { id: productId };
+      let hasProductChanges = false;
+      if (draft.name !== original.name) { productChanges.name = draft.name; hasProductChanges = true; }
+      if ((draft.publicName || null) !== (original.publicName || null)) { productChanges.publicName = draft.publicName || null; hasProductChanges = true; }
+      if ((draft.description || null) !== (original.description || null)) { productChanges.description = draft.description || null; hasProductChanges = true; }
+      if ((draft.categoryId || null) !== (original.categoryId || null)) { productChanges.categoryId = draft.categoryId || null; hasProductChanges = true; }
+      if (draft.minQty !== original.minQty) { productChanges.minQty = draft.minQty; hasProductChanges = true; }
+      if (draft.minMarginBps !== original.productMinMarginBps) { productChanges.minMarginBps = draft.minMarginBps; hasProductChanges = true; }
+
+      if (hasProductChanges) {
+        const res = await TableEditUpdateProduct.mutate(productChanges);
+        if (res.errors?.length) { feedback = { ok: false, text: res.errors[0].message }; return; }
+      }
+
+      if (canEditPrice && original.variants === 1 && original.variantId && draft.priceMinor !== original.minPrice) {
+        const res = await UpdateVariantPrice.mutate({ id: original.variantId, priceMinor: draft.priceMinor ?? 0 });
+        if (res.errors?.length) { feedback = { ok: false, text: res.errors[0].message }; return; }
+      }
+
+      editingRows.delete(productId);
+      editingRows = new Map(editingRows);
+      await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      editBusy = false;
+    }
+  }
+
   // ---- Inline quick edit (single-variant products only) --------------------
   // Rename the product and retune its lone variant's price in place, without
   // opening the detail page. Products with zero or multiple variants are
@@ -639,6 +764,20 @@
 
 <svelte:head><title>Products · Retale Console</title></svelte:head>
 
+
+{#snippet marginBadge(price: number, cost: number | null, minMarginBps: number | null)}
+  {#if cost != null && price > 0}
+    {@const marginPct = ((price - cost) / price) * 100}
+    {@const belowMin = minMarginBps != null && marginPct * 100 < minMarginBps}
+    <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium
+      {marginPct <= 0 ? 'bg-red-100 text-red-700' :
+       belowMin ? 'bg-amber-100 text-amber-700' :
+       'bg-emerald-100 text-emerald-700'}">
+      {marginPct.toFixed(1)}%
+    </span>
+  {/if}
+{/snippet}
+
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
     <h1 class="text-xl font-semibold">Products</h1>
@@ -662,6 +801,15 @@
           oninput={(e) => onMarginInput(e.currentTarget.value)}
         />
       </div>
+      {#if canEdit}
+        <Button
+          size="sm"
+          variant={tableEditMode ? "default" : "outline"}
+          onclick={() => (tableEditMode = !tableEditMode)}
+        >
+          {tableEditMode ? "Exit table edit" : "Table edit"}
+        </Button>
+      {/if}
       {#if canCreate}
         <Button
           size="sm"
@@ -852,6 +1000,108 @@
     </p>
   {:else}
     <div class="overflow-hidden rounded-lg border bg-card">
+
+      {#if tableEditMode}
+        <table class="w-full text-sm">
+          <thead class="border-b bg-muted/50 text-muted-foreground">
+            <tr>
+              <th class="px-3 py-2 text-left font-medium">Name</th>
+              <th class="px-3 py-2 text-left font-medium">Public Name</th>
+              <th class="px-3 py-2 text-left font-medium">Category</th>
+              <th class="px-3 py-2 text-left font-medium">Price</th>
+              <th class="px-3 py-2 text-left font-medium">Description</th>
+              <th class="px-3 py-2 text-left font-medium">Min Qty</th>
+              <th class="px-3 py-2 text-left font-medium">Min Margin</th>
+              <th class="w-16 px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each pageRows as row (row.id)}
+              {@const edit = editingRows.get(row.id)}
+              {@const isDirty = edit != null}
+              {@const mmBps = edit?.minMarginBps ?? row.productMinMarginBps}
+              <tr class="border-b last:border-0 hover:bg-muted/40 {isDirty ? 'bg-amber-50/50 hover:bg-amber-50/70' : ''}">
+                <td class="px-2 py-1">
+                  <input class={quickInputClass} value={edit?.name ?? row.name}
+                    onfocus={() => ensureEditing(row)}
+                    oninput={(e) => patchEdit(row.id, 'name', e.currentTarget.value)} />
+                </td>
+                <td class="px-2 py-1">
+                  <input class={quickInputClass} value={edit?.publicName ?? row.publicName ?? ''}
+                    placeholder="(same as name)"
+                    onfocus={() => ensureEditing(row)}
+                    oninput={(e) => patchEdit(row.id, 'publicName', e.currentTarget.value)} />
+                </td>
+                <td class="px-2 py-1">
+                  <div class="w-40">
+                    <Combobox options={categoryOptions} value={edit?.categoryId ?? row.categoryId ?? ''}
+                      onChange={(v) => { ensureEditing(row); patchEdit(row.id, 'categoryId', v); }} />
+                  </div>
+                </td>
+                <td class="px-2 py-1">
+                  {#if row.variants === 1}
+                    <div class="flex items-center gap-2">
+                      {#if canEditPrice}
+                        <MoneyInput value={edit?.priceMinor ?? row.minPrice}
+                          onfocus={() => ensureEditing(row)}
+                          oninput={(v) => patchEdit(row.id, 'priceMinor', v)}
+                          class="h-7 w-28 px-2" />
+                      {:else}
+                        <span class="w-28 text-muted-foreground">{priceLabel(row)}</span>
+                      {/if}
+                      {@render marginBadge(edit?.priceMinor ?? row.minPrice, row.costMinor, row.productMinMarginBps)}
+                    </div>
+                  {:else}
+                    <div class="flex items-center gap-2">
+                      <span class="text-muted-foreground">{priceLabel(row)}</span>
+                      {@render marginBadge(row.minPrice, row.costMinor, row.productMinMarginBps)}
+                    </div>
+                  {/if}
+                </td>
+                <td class="px-2 py-1">
+                  <input class={quickInputClass} value={edit?.description ?? row.description ?? ''}
+                    onfocus={() => ensureEditing(row)}
+                    oninput={(e) => patchEdit(row.id, 'description', e.currentTarget.value)} />
+                </td>
+                <td class="px-2 py-1">
+                  <NumericInput value={edit?.minQty ?? row.minQty}
+                    onfocus={() => ensureEditing(row)}
+                    oninput={(e) => {
+                      const v = e.currentTarget.value;
+                      patchEdit(row.id, 'minQty', v ? Number(v) : null);
+                    }} class="h-7 w-20" />
+                </td>
+                <td class="px-2 py-1">
+                  <NumericInput value={mmBps != null ? mmBps / 100 : null}
+                    onfocus={() => ensureEditing(row)}
+                    oninput={(e) => {
+                      const v = e.currentTarget.value;
+                      patchEdit(row.id, 'minMarginBps', v ? Math.round(Number(v) * 100) : null);
+                    }}
+                    class="h-7 w-20" step="0.1" />
+                </td>
+                <td class="px-2 py-1 text-right whitespace-nowrap">
+                  {#if isDirty}
+                    <span class="inline-flex items-center gap-0.5">
+                      <IconButton icon={Check} label="Save" variant="primary"
+                        disabled={editBusy} onclick={() => saveRow(row.id)} />
+                      <IconButton icon={X} label="Cancel"
+                        disabled={editBusy} onclick={() => cancelRow(row.id)} />
+                    </span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+            {#if pageRows.length === 0}
+              <tr>
+                <td colspan="8" class="px-4 py-10 text-center text-muted-foreground">
+                  No products match.
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+      {:else}
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-muted-foreground">
           <tr>
@@ -991,6 +1241,7 @@
           {/if}
         </tbody>
       </table>
+      {/if}
     </div>
 
     <div class="flex items-center justify-between text-sm text-muted-foreground">

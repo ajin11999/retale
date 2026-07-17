@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CachePolicy, graphql } from "$houdini";
   import { page } from "$app/state";
-  import type { Viewer } from "../../../+layout.server";
+  import type { Viewer } from "../../+layout.server";
   import Input from "$lib/components/ui/input.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
