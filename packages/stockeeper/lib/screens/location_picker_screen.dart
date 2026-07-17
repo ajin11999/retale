@@ -81,10 +81,14 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           final sorted = [...nodes]
             ..sort((a, b) => paths[a.id]!.compareTo(paths[b.id]!));
           final query = _search.trim().toLowerCase();
+          final terms = query.split(RegExp(r'\s+'));
           final visible = query.isEmpty
               ? sorted
               : sorted
-                  .where((n) => paths[n.id]!.toLowerCase().contains(query))
+                  .where((n) {
+                    final path = paths[n.id]!.toLowerCase();
+                    return terms.every((term) => path.contains(term));
+                  })
                   .toList();
           return Column(
             children: [

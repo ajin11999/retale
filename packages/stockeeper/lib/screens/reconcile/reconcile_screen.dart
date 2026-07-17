@@ -425,17 +425,18 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     final rows = _rows ?? [];
     final query = _search.trim().toLowerCase();
     if (query.isEmpty) return rows;
-    final matchedRows = rows
-        .where((r) =>
-            r.displayName.toLowerCase().contains(query) ||
-            (r.barcode ?? '').toLowerCase().contains(query))
-        .toList();
+    final terms = query.split(RegExp(r'\s+'));
+    bool matches(StockLevel r) {
+      final name = r.displayName.toLowerCase();
+      final barcode = (r.barcode ?? '').toLowerCase();
+      return terms.every((term) => name.contains(term) || barcode.contains(term));
+    }
+
+    final matchedRows = rows.where(matches).toList();
         
     final existingIds = rows.map((r) => r.variantId).toSet();
     final extraMatches = _globalVariants
-        .where((r) => !existingIds.contains(r.variantId) && 
-            (r.displayName.toLowerCase().contains(query) || 
-             (r.barcode ?? '').toLowerCase().contains(query)))
+        .where((r) => !existingIds.contains(r.variantId) && matches(r))
         .toList();
         
     return [...matchedRows, ...extraMatches];
