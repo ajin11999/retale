@@ -48,14 +48,14 @@ jobs:
             echo "First tag ever — building everything"
             echo "stockeeper=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Diffing $PREV_TAG..HEAD for packages/stockeeper/"
-            CHANGED=$(git diff --name-only "$PREV_TAG"..HEAD -- packages/stockeeper/)
+            echo "Diffing $PREV_TAG..HEAD for packages/stockeeper/ and .github/workflows/"
+            CHANGED=$(git diff --name-only "$PREV_TAG"..HEAD -- packages/stockeeper/ .github/workflows/publish-images.yml)
             if [ -n "$CHANGED" ]; then
               echo "Changes detected:"
               echo "$CHANGED"
               echo "stockeeper=true" >> "$GITHUB_OUTPUT"
             else
-              echo "No changes in packages/stockeeper/ — skipping build"
+              echo "No changes in packages/stockeeper/ or CI — skipping build"
               echo "stockeeper=false" >> "$GITHUB_OUTPUT"
             fi
           fi
