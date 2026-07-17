@@ -639,13 +639,15 @@
     editingRows = new Map(editingRows);
   }
 
-  async function saveRow(productId: string) {
+    async function saveRow(productId: string, refetchAndBusy: boolean = true) {
     const draft = editingRows.get(productId);
     const original = allRows.find(r => r.id === productId);
     if (!draft || !original) return;
 
-    editBusy = true;
-    feedback = null;
+    if (refetchAndBusy) {
+      editBusy = true;
+      feedback = null;
+    }
     try {
       const productChanges: any = { id: productId };
       let hasProductChanges = false;
@@ -667,10 +669,40 @@
       }
 
       editingRows.delete(productId);
+      if (refetchAndBusy) {
+        editingRows = new Map(editingRows);
+        await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
+      }
+    } catch (e) {
+      if (refetchAndBusy) feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      else throw e;
+    } finally {
+      if (refetchAndBusy) editBusy = false;
+    }
+  }
+
+  async function saveAllRows() {
+    if (editingRows.size === 0) return;
+    const ids = Array.from(editingRows.keys());
+    editBusy = true;
+    feedback = null;
+    let anyError = false;
+    try {
+      for (const id of ids) {
+        try {
+          await saveRow(id, false);
+        } catch (e) {
+          anyError = true;
+          feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+          break; // Stop on first network error
+        }
+        if (feedback) {
+          anyError = true;
+          break; // Stop on first mutation error
+        }
+      }
       editingRows = new Map(editingRows);
       await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
-    } catch (e) {
-      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
     } finally {
       editBusy = false;
     }
@@ -809,6 +841,16 @@
         >
           {tableEditMode ? "Exit table edit" : "Table edit"}
         </Button>
+        {#if tableEditMode && editingRows.size > 0}
+          <Button
+            size="sm"
+            variant="default"
+            disabled={editBusy}
+            onclick={saveAllRows}
+          >
+            Save all ({editingRows.size})
+          </Button>
+        {/if}
       {/if}
       {#if canCreate}
         <Button
@@ -1005,14 +1047,14 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-muted-foreground">
             <tr>
-              <th class="px-3 py-2 text-left font-medium">Name</th>
-              <th class="px-3 py-2 text-left font-medium">Public Name</th>
-              <th class="px-3 py-2 text-left font-medium">Category</th>
-              <th class="px-3 py-2 text-left font-medium">Price</th>
-              <th class="px-3 py-2 text-left font-medium">Description</th>
-              <th class="px-3 py-2 text-left font-medium">Min Qty</th>
-              <th class="px-3 py-2 text-left font-medium">Min Margin</th>
-              <th class="w-16 px-3 py-2"></th>
+              <th class="px-1 py-2 pl-3 text-left font-medium w-full">Name</th>
+              <th class="px-1 py-2 text-left font-medium w-48">Public Name</th>
+              <th class="px-1 py-2 text-left font-medium w-40">Category</th>
+              <th class="px-1 py-2 text-left font-medium w-28">Price</th>
+              <th class="px-1 py-2 text-left font-medium w-48">Description</th>
+              <th class="px-1 py-2 text-left font-medium w-20">Min Qty</th>
+              <th class="px-1 py-2 text-left font-medium w-20">Min Margin</th>
+              <th class="px-1 py-2 pr-3 w-16"></th>
             </tr>
           </thead>
           <tbody>
@@ -1021,24 +1063,24 @@
               {@const isDirty = edit != null}
               {@const mmBps = edit?.minMarginBps ?? row.productMinMarginBps}
               <tr class="border-b last:border-0 hover:bg-muted/40 {isDirty ? 'bg-amber-50/50 hover:bg-amber-50/70' : ''}">
-                <td class="px-2 py-1">
+                <td class="px-1 py-1 pl-3">
                   <input class={quickInputClass} value={edit?.name ?? row.name}
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'name', e.currentTarget.value)} />
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   <input class={quickInputClass} value={edit?.publicName ?? row.publicName ?? ''}
                     placeholder="(same as name)"
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'publicName', e.currentTarget.value)} />
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   <div class="w-40">
                     <Combobox options={categoryOptions} value={edit?.categoryId ?? row.categoryId ?? ''}
                       onChange={(v) => { ensureEditing(row); patchEdit(row.id, 'categoryId', v); }} />
                   </div>
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   {#if row.variants === 1}
                     <div class="flex items-center gap-2">
                       {#if canEditPrice}
@@ -1058,12 +1100,12 @@
                     </div>
                   {/if}
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   <input class={quickInputClass} value={edit?.description ?? row.description ?? ''}
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'description', e.currentTarget.value)} />
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   <NumericInput value={edit?.minQty ?? row.minQty}
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => {
@@ -1071,7 +1113,7 @@
                       patchEdit(row.id, 'minQty', v ? Number(v) : null);
                     }} class="h-7 w-20" />
                 </td>
-                <td class="px-2 py-1">
+                <td class="px-1 py-1">
                   <NumericInput value={mmBps != null ? mmBps / 100 : null}
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => {
@@ -1080,7 +1122,7 @@
                     }}
                     class="h-7 w-20" step="0.1" />
                 </td>
-                <td class="px-2 py-1 text-right whitespace-nowrap">
+                <td class="px-1 py-1 pr-3 text-right whitespace-nowrap">
                   {#if isDirty}
                     <span class="inline-flex items-center gap-0.5">
                       <IconButton icon={Check} label="Save" variant="primary"
