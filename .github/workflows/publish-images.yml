@@ -99,7 +99,7 @@ jobs:
           storePassword=${{ secrets.STOCKEEPER_STORE_PASSWORD }}
           keyPassword=${{ secrets.STOCKEEPER_KEY_PASSWORD }}
           keyAlias=${{ secrets.STOCKEEPER_KEY_ALIAS }}
-          storeFile=app/upload-keystore.jks
+          storeFile=upload-keystore.jks
           EOF
 
       - name: Build release APKs (split per ABI)
