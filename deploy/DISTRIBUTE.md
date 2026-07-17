@@ -11,7 +11,7 @@ There are two roles below: **maintainer** (you, publishing releases) and
 
 ## Maintainer — publish a release
 
-Images are built and pushed by the `Publish images` GitHub Action
+Images and apps are built by the `Publish images & apps` GitHub Action
 (`.github/workflows/publish-images.yml`) when you push a version tag:
 
 ```
@@ -19,14 +19,66 @@ git tag v2026.06.15
 git push origin v2026.06.15
 ```
 
-This builds three images for the tag and `latest`, and pushes them to GHCR:
+This builds three container images (tagged with the version and `latest`) and
+pushes them to GHCR:
 
 - `ghcr.io/fransiscowijaya1999/retale-api`
 - `ghcr.io/fransiscowijaya1999/retale-console`
 - `ghcr.io/fransiscowijaya1999/retale-caddy` (Caddyfile + POS and workshop web bundles baked in)
 
-You can also trigger it manually from the repo's **Actions** tab
-(workflow_dispatch), optionally overriding the tag.
+### Stockeeper APK
+
+When files under `packages/stockeeper/` have changed since the previous tag, the
+workflow also builds the **stockeeper** Android APKs (`--release --split-per-abi`)
+and uploads them to the **GitHub Release** for that tag:
+
+- `app-armeabi-v7a-release.apk` — older 32-bit ARM devices
+- `app-arm64-v8a-release.apk` — most modern phones
+- `app-x86_64-release.apk` — emulators and x86 tablets
+
+If nothing in `packages/stockeeper/` changed, the APK build is **skipped
+entirely**, saving ~15–30 min of runner time.
+
+### Keystore setup (one-time)
+
+The APKs are signed with a release keystore stored as GitHub secrets. You need
+to configure four repository secrets:
+
+| Secret | Value |
+|---|---|
+| `STOCKEEPER_KEYSTORE` | Base64-encoded `.jks` keystore file |
+| `STOCKEEPER_STORE_PASSWORD` | Password for the keystore |
+| `STOCKEEPER_KEY_PASSWORD` | Password for the key entry |
+| `STOCKEEPER_KEY_ALIAS` | Alias of the key inside the keystore |
+
+**Generating a new keystore** (if you don't have one yet):
+
+```bash
+keytool -genkeypair \
+  -alias upload \
+  -keyalg RSA -keysize 2048 \
+  -validity 10000 \
+  -keystore upload-keystore.jks \
+  -storepass YOUR_STORE_PASSWORD \
+  -keypass YOUR_KEY_PASSWORD \
+  -dname "CN=Retale, O=Retale, L=Jakarta, C=ID"
+```
+
+**Encoding it for the secret:**
+
+```bash
+base64 -w 0 upload-keystore.jks    # Linux / Git Bash
+# or
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("upload-keystore.jks"))   # PowerShell
+```
+
+Copy the output and paste it as the `STOCKEEPER_KEYSTORE` secret value in
+**GitHub → repo → Settings → Secrets and variables → Actions → New repository
+secret**.
+
+> ⚠️ **Keep your keystore file safe.** If you lose it, you cannot push updates
+> to any device that already has the app installed (Android verifies the signing
+> key on updates). Store a backup somewhere secure outside of Git.
 
 **One-time GHCR setup:** the packages are created private by default. To let an
 operator pull without a token, open each package on GitHub → *Package settings*
@@ -72,6 +124,18 @@ anywhere: `docker-compose.dist.yml` and a filled-in `.env.prod`.
 
 Addresses once up: console at `https://<HOST_IP>`, API at `https://<HOST_IP>:8443`,
 POS web at `https://<HOST_IP>:8081`, workshop web at `https://<HOST_IP>:8082`.
+
+### Stockeeper app (Android)
+
+The stockeeper APK is not part of the Docker stack — it runs on warehouse staff
+phones. Download the right APK from the
+[GitHub Releases](https://github.com/fransiscowijaya1999/retale/releases) page:
+
+- Most phones → `app-arm64-v8a-release.apk`
+- Older phones → `app-armeabi-v7a-release.apk`
+
+Enable **"Install from unknown sources"** on the phone, then open the APK to
+install. The app connects to the API at the same `HOST_IP` address.
 
 ---
 

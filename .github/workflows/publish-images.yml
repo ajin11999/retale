@@ -1,10 +1,14 @@
-# Build the api, console and caddy images and push them to GHCR.
+# Build container images (api, console, caddy) and push to GHCR.
+# Optionally build the stockeeper Android APKs and attach them to a GitHub Release.
 #
 # Fires when you push a version tag (e.g. `git tag v2026.06.15 && git push --tags`),
 # or manually via the Actions tab (workflow_dispatch). Images are tagged with the
 # git tag and `latest`. Operators pull these — no repo clone or local build needed
 # (see deploy/DISTRIBUTE.md).
-name: Publish images
+#
+# The stockeeper APK build is SKIPPED when packages/stockeeper/ has no changes
+# since the previous tag, saving ~15-30 min of runner time per release.
+name: Publish images & apps
 
 on:
   push:
@@ -16,13 +20,108 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write # read repo + create/upload GitHub Releases for stockeeper APKs
   packages: write # push to GHCR with the built-in GITHUB_TOKEN
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Change detection — only rebuild stockeeper when its source actually changed
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      stockeeper: ${{ steps.diff.outputs.stockeeper }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so we can diff against the previous tag
+
+      - name: Check for stockeeper changes since previous tag
+        id: diff
+        run: |
+          # Find the tag just before the current one (sorted newest-first)
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            echo "First tag ever — building everything"
+            echo "stockeeper=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Diffing $PREV_TAG..HEAD for packages/stockeeper/"
+            CHANGED=$(git diff --name-only "$PREV_TAG"..HEAD -- packages/stockeeper/)
+            if [ -n "$CHANGED" ]; then
+              echo "Changes detected:"
+              echo "$CHANGED"
+              echo "stockeeper=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "No changes in packages/stockeeper/ — skipping build"
+              echo "stockeeper=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Stockeeper APK — split-per-abi release build, uploaded to GitHub Releases
+  # ---------------------------------------------------------------------------
+  build-stockeeper:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.stockeeper == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # Cache Gradle downloads across runs to shave a few minutes off.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('packages/stockeeper/android/**/*.gradle*', 'packages/stockeeper/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      # Decode the release keystore and write key.properties so Gradle signs
+      # with the real key. See deploy/DISTRIBUTE.md for how to set these secrets.
+      - name: Decode keystore
+        run: echo "${{ secrets.STOCKEEPER_KEYSTORE }}" | base64 -d > packages/stockeeper/android/app/upload-keystore.jks
+
+      - name: Write key.properties
+        run: |
+          cat > packages/stockeeper/android/key.properties <<EOF
+          storePassword=${{ secrets.STOCKEEPER_STORE_PASSWORD }}
+          keyPassword=${{ secrets.STOCKEEPER_KEY_PASSWORD }}
+          keyAlias=${{ secrets.STOCKEEPER_KEY_ALIAS }}
+          storeFile=app/upload-keystore.jks
+          EOF
+
+      - name: Build release APKs (split per ABI)
+        working-directory: packages/stockeeper
+        run: flutter build apk --release --split-per-abi
+
+      - name: Resolve tag
+        id: tag
+        run: echo "name=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APKs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          files: |
+            packages/stockeeper/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            packages/stockeeper/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            packages/stockeeper/build/app/outputs/flutter-apk/app-x86_64-release.apk
+
+  # ---------------------------------------------------------------------------
+  # Container images — always built on every tag
+  # ---------------------------------------------------------------------------
   publish:
     runs-on: ubuntu-latest
     steps:
