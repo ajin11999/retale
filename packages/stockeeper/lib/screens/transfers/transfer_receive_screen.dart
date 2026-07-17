@@ -153,7 +153,6 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
     
     _setCount(item, (_counts[item.variantId] ?? 0) + 1);
     setState(() => _lastScanHitId = item.variantId);
-    _revealRow(item.variantId);
   }
 
   void _revealRow(String variantId) {
@@ -304,12 +303,16 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
         
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          minLeadingWidth: 24,
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           enabled: !done,
           selected: _lastScanHitId == item.variantId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
           leading: Checkbox(
+            visualDensity: VisualDensity.compact,
             tristate: true,
             value: done ? true : (partial ? null : false),
             onChanged: done ? null : (_) => _setCount(item, done ? 0 : item.qty),
@@ -327,18 +330,34 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
           ),
           trailing: done
               ? const Icon(Icons.done_all)
-              : SizedBox(
-                  width: 64,
-                  child: TextField(
-                    controller: _controllerFor(item),
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: OutlineInputBorder(),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _setCount(item, (counted) - 1),
                     ),
-                  ),
+                    SizedBox(
+                      width: 48,
+                      child: TextField(
+                        controller: _controllerFor(item),
+                        textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _setCount(item, (counted) + 1),
+                    ),
+                  ],
                 ),
           onTap: done ? null : () => _setCount(item, done ? 0 : item.qty),
         );
@@ -359,6 +378,8 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
         
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           enabled: !done,
           selected: _lastScanHitId == item.variantId,

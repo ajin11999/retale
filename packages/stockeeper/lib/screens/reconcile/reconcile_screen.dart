@@ -187,7 +187,6 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
         if (row == null || !mounted) return;
         _setCount(row, (_counted[row.variantId] ?? 0) + 1);
         setState(() => _lastScanHitId = row.variantId);
-        _revealRow(row.variantId);
         return;
       }
       
@@ -200,7 +199,6 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     if (row == null || !mounted) return;
     _setCount(row, (_counted[row.variantId] ?? 0) + 1);
     setState(() => _lastScanHitId = row.variantId);
-    _revealRow(row.variantId);
   }
 
   Future<StockLevel?> _pickRow(List<StockLevel> matches) {
@@ -478,11 +476,15 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
         final partial = counted != null && !confirmed;
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          minLeadingWidth: 24,
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           selected: _lastScanHitId == row.variantId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
           leading: Checkbox(
+            visualDensity: VisualDensity.compact,
             tristate: true,
             value: confirmed ? true : (partial ? null : false),
             onChanged: (_) =>
@@ -499,20 +501,36 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
                   : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
             ],
           ),
-          trailing: SizedBox(
-            width: 72,
-            child: TextField(
-              controller: _controllerFor(row),
-              textAlign: TextAlign.center,
-              keyboardType: TextInputType.numberWithOptions(
-                  decimal: row.qtyDecimals > 0),
-              inputFormatters: _qtyFormatters(row),
-              decoration: const InputDecoration(
-                isDense: true,
-                border: OutlineInputBorder(),
-                hintText: '—',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _setCount(row, ((counted ?? 0) - 1).clamp(0, double.infinity)),
               ),
-            ),
+              SizedBox(
+                width: 48,
+                child: TextField(
+                  controller: _controllerFor(row),
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.numberWithOptions(
+                      decimal: row.qtyDecimals > 0),
+                  inputFormatters: _qtyFormatters(row),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    border: OutlineInputBorder(),
+                    hintText: '—',
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _setCount(row, (counted ?? 0) + 1),
+              ),
+            ],
           ),
           onTap: () =>
               confirmed ? _clearCount(row) : _setCount(row, row.onHand),
@@ -533,6 +551,8 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
         final over = counted != null && counted > row.onHand;
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           selected: _lastScanHitId == row.variantId,
           selectedTileColor:

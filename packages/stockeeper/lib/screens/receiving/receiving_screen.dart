@@ -212,7 +212,6 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
       await _save(line, line.qtyInCheck + 1);
       if (!mounted) return;
       setState(() => _lastScanHitId = line.purchaseItemId);
-      _revealLine(line.purchaseItemId);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -358,6 +357,9 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
         final partial = !done && line.qtyInCheck > 0 && !full;
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          minLeadingWidth: 24,
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           enabled: !done,
           selected: _lastScanHitId == line.purchaseItemId,
@@ -369,6 +371,7 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                   height: 24,
                   child: CircularProgressIndicator(strokeWidth: 2.5))
               : Checkbox(
+                  visualDensity: VisualDensity.compact,
                   tristate: true,
                   value: done ? true : (partial ? null : full),
                   onChanged: done
@@ -389,18 +392,34 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
           ),
           trailing: done
               ? const Icon(Icons.done_all)
-              : SizedBox(
-                  width: 64,
-                  child: TextField(
-                    controller: _controllerFor(line),
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: OutlineInputBorder(),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _save(line, line.qtyInCheck - 1),
                     ),
-                  ),
+                    SizedBox(
+                      width: 48,
+                      child: TextField(
+                        controller: _controllerFor(line),
+                        textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _save(line, line.qtyInCheck + 1),
+                    ),
+                  ],
                 ),
           onTap: done ? null : () => _save(line, full ? 0 : line.remaining),
         );
@@ -419,6 +438,8 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
         final done = line.remaining <= 0;
         return ListTile(
           key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          horizontalTitleGap: 8,
           minTileHeight: 72,
           enabled: !done,
           selected: _lastScanHitId == line.purchaseItemId,
