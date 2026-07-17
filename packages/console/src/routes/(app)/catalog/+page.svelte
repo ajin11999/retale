@@ -6,6 +6,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
@@ -103,6 +104,18 @@
       return av - bv || a.name.localeCompare(b.name);
     });
   });
+
+  let productsPage = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search;
+    visibilityFilter;
+    productsPage = 1;
+  });
+  const paginatedRows = $derived(rows.slice((productsPage - 1) * pageSize, productsPage * pageSize));
+
+  let publishesPage = $state(1);
+  const paginatedPublishes = $derived(publishes.slice((publishesPage - 1) * pageSize, publishesPage * pageSize));
 
   const visibleCount = $derived(products.filter((p) => p.onlineVisible).length);
 
@@ -278,7 +291,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as p (p.id)}
+          {#each paginatedRows as p (p.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <input
@@ -322,6 +335,12 @@
         </tbody>
       </table>
     </div>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {rows.length} product{rows.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={productsPage} {pageSize} totalItems={rows.length} />
+    </div>
 
     <!-- Publish history -->
     <section>
@@ -343,7 +362,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each publishes as pub (pub.id)}
+            {#each paginatedPublishes as pub (pub.id)}
               <tr class="border-b last:border-0">
                 <td class="px-4 py-2">{fmtDateTime(pub.createdAt)}</td>
                 <td class="px-4 py-2 capitalize">{pub.trigger}</td>
@@ -374,6 +393,9 @@
             {/if}
           </tbody>
         </table>
+      </div>
+      <div class="mt-2 flex justify-end">
+        <Pagination bind:page={publishesPage} {pageSize} totalItems={publishes.length} />
       </div>
     </section>
   {/if}

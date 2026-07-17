@@ -11,6 +11,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -299,6 +300,13 @@
       return { ...e, balanceAfter };
     });
   });
+
+  let pricesPage = $state(1);
+  const pageSize = 50;
+  const paginatedPrices = $derived(prices.slice((pricesPage - 1) * pageSize, pricesPage * pageSize));
+
+  let ledgerPage = $state(1);
+  const paginatedLedger = $derived(ledgerRows.slice((ledgerPage - 1) * pageSize, ledgerPage * pageSize));
 
   let busy = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
@@ -690,7 +698,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each prices as p (p.id)}
+          {#each paginatedPrices as p (p.id)}
             <tr class="border-b last:border-0">
               <td class="py-1.5">{variantLabel(p.variantId)}</td>
               <td class="py-1.5 text-right">{formatMoney(p.priceMinor)}</td>
@@ -714,6 +722,9 @@
           {/if}
         </tbody>
       </table>
+      <div class="mt-2 flex justify-end">
+        <Pagination bind:page={pricesPage} {pageSize} totalItems={prices.length} />
+      </div>
 
       {#if priceDraft}
         <div class="space-y-3 rounded-md border bg-background p-4">
@@ -768,7 +779,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each ledgerRows as e (e.id)}
+              {#each paginatedLedger as e (e.id)}
                 <tr class="border-b last:border-0">
                   <td class="whitespace-nowrap py-1.5 pr-4">
                     {fmtDateTime(e.createdAt)}
@@ -801,6 +812,9 @@
               {/if}
             </tbody>
           </table>
+          <div class="mt-2 flex justify-end">
+            <Pagination bind:page={ledgerPage} {pageSize} totalItems={ledgerRows.length} />
+          </div>
         {/if}
       </section>
     {/if}

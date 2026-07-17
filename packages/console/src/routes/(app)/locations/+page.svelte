@@ -10,6 +10,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
@@ -170,6 +171,14 @@
     }
     return tree.filter((n) => visible.has(n.id));
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search;
+    pageNumber = 1;
+  });
+  const paginatedTree = $derived(visibleTree.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   // ---- Editor --------------------------------------------------------------
   interface LocationDraft {
@@ -428,7 +437,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each visibleTree as n (n.id)}
+          {#each paginatedTree as n (n.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <span style:padding-left={`${n.depth * 1.25}rem`}>
@@ -494,6 +503,12 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    <div class="mt-2 flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {visibleTree.length} location{visibleTree.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleTree.length} />
     </div>
   {/if}
 </div>

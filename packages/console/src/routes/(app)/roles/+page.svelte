@@ -5,6 +5,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
 
   // Roles + the permission catalog in one round-trip — the editor groups keys
@@ -78,6 +79,11 @@
   let { data }: { data: PageData } = $props();
   const RoleAdmin = $derived(data.RoleAdmin);
   const roles = $derived($RoleAdmin.data?.roles ?? []);
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  const paginatedRoles = $derived(roles.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
+
   const catalog = $derived($RoleAdmin.data?.permissionCatalog ?? []);
 
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -292,9 +298,9 @@
   {:else}
     <div class="grid grid-cols-[18rem_1fr] gap-4">
       <!-- Role list -->
-      <div class="overflow-hidden rounded-lg border bg-card">
+      <div class="overflow-hidden rounded-lg border bg-card flex flex-col justify-between">
         <ul class="divide-y">
-          {#each roles as r (r.id)}
+          {#each paginatedRoles as r (r.id)}
             <li>
               <button
                 class="flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors
@@ -323,6 +329,9 @@
             </li>
           {/if}
         </ul>
+        <div class="p-2 border-t flex justify-center bg-muted/10">
+          <Pagination bind:page={pageNumber} {pageSize} totalItems={roles.length} />
+        </div>
       </div>
 
       <!-- Permission editor -->

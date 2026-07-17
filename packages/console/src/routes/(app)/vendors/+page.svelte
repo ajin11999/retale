@@ -8,6 +8,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -111,6 +112,14 @@
       return cmp || a.name.localeCompare(b.name);
     });
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search; kindFilter; sortKey; sortDir;
+    pageNumber = 1;
+  });
+  const paginatedRows = $derived(rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   // ---- New vendor ----------------------------------------------------------
   let newName = $state<string | null>(null);
@@ -257,7 +266,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as v (v.id)}
+          {#each paginatedRows as v (v.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <a
@@ -310,8 +319,11 @@
         </tbody>
       </table>
     </div>
-    <p class="text-sm text-muted-foreground">
-      {rows.length} vendor{rows.length === 1 ? "" : "s"}
-    </p>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {rows.length} vendor{rows.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
+    </div>
   {/if}
 </div>

@@ -5,6 +5,7 @@
   import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -52,6 +53,14 @@
       return new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime();
     });
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    posFilter;
+    pageNumber = 1;
+  });
+  const paginatedRows = $derived(rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   const fmt = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
@@ -104,7 +113,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as s (s.id)}
+          {#each paginatedRows as s (s.id)}
             {@const p = posById.get(s.posId)}
             {@const st = statusOf(s)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
@@ -159,8 +168,11 @@
         </tbody>
       </table>
     </div>
-    <p class="text-sm text-muted-foreground">
-      {rows.length} session{rows.length === 1 ? "" : "s"}
-    </p>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {rows.length} session{rows.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
+    </div>
   {/if}
 </div>

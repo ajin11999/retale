@@ -5,6 +5,7 @@
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import { statusLabel, treePathMap } from "$lib/utils";
   import type { PageData } from "./$types";
 
@@ -32,6 +33,11 @@
   let { data }: { data: PageData } = $props();
   const TransferList = $derived(data.TransferList);
   const transfers = $derived($TransferList.data?.stockTransfers ?? []);
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  const paginatedTransfers = $derived(transfers.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
+
   const locations = $derived($TransferList.data?.locations ?? []);
 
   const locationPaths = $derived(treePathMap(locations));
@@ -85,7 +91,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each transfers as t (t.id)}
+          {#each paginatedTransfers as t (t.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <a
@@ -112,6 +118,12 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {transfers.length} transfer{transfers.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={transfers.length} />
     </div>
   {/if}
 </div>

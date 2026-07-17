@@ -534,6 +534,66 @@
       });
   }
 
+  // ---- Bulk add variants ---------------------------------------------------
+  let bulkVariantDialog = $state<HTMLDialogElement>();
+  let bulkVariantInput = $state("");
+  let bulkVariantBusy = $state(false);
+
+  function openBulkVariantDialog() {
+    bulkVariantInput = "";
+    bulkVariantDialog?.showModal();
+  }
+
+  function closeBulkVariantDialog() {
+    bulkVariantDialog?.close();
+  }
+
+  async function saveBulkVariants() {
+    if (!product) return;
+    const labels = bulkVariantInput
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (labels.length === 0) {
+      closeBulkVariantDialog();
+      return;
+    }
+
+    bulkVariantBusy = true;
+    try {
+      let currentOrder = product.variants.length;
+      for (const label of labels) {
+        currentOrder++;
+        const res = await AddVariant.mutate({
+          productId: product.id,
+          variant: {
+            label: label,
+            unit: "piece",
+            qtyDecimals: 0,
+            priceMinor: 0,
+            costMinor: 0,
+            sortOrder: currentOrder,
+          },
+        });
+        if (res.errors?.length) {
+          throw new Error(res.errors[0].message);
+        }
+      }
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
+      closeBulkVariantDialog();
+      feedback = { ok: true, text: `Bulk added ${labels.length} variant${labels.length === 1 ? '' : 's'}.` };
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      closeBulkVariantDialog();
+    } finally {
+      bulkVariantBusy = false;
+    }
+  }
+
   // ---- Inline cell edit ----------------------------------------------------
   // Click a variant's SKU / label / price / cost cell to edit just that field
   // in place — the common quick tweak, without opening the full variant form.
@@ -1328,14 +1388,24 @@
         <h2 class="text-sm font-semibold">
           Variants ({product.variants.length})
         </h2>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !canEdit}
-          onclick={newVariant}
-        >
-          Add variant
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !canEdit}
+            onclick={openBulkVariantDialog}
+          >
+            Bulk add
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !canEdit}
+            onclick={newVariant}
+          >
+            Add variant
+          </Button>
+        </div>
       </div>
 
       <table class="w-full text-sm">
@@ -1569,6 +1639,39 @@
           </div>
         </div>
       {/if}
+
+      <dialog
+        bind:this={bulkVariantDialog}
+        class="m-auto w-full max-w-lg rounded-lg border bg-background p-0 shadow-lg backdrop:bg-black/50"
+        onclose={() => (bulkVariantInput = "")}
+      >
+        <div class="flex flex-col">
+          <div class="border-b p-4">
+            <h3 class="text-lg font-semibold">Bulk add variants</h3>
+            <p class="mt-1 text-sm text-muted-foreground">
+              Enter variant labels, one per line. They will be added with zero price/cost.
+            </p>
+          </div>
+          <div class="p-4">
+            <Textarea
+              bind:value={bulkVariantInput}
+              disabled={bulkVariantBusy}
+              placeholder="Small&#10;Medium&#10;Large"
+              class="h-48 resize-none"
+            />
+          </div>
+          <div class="flex justify-end gap-2 border-t bg-muted/40 p-4">
+            <Button
+              variant="ghost"
+              disabled={bulkVariantBusy}
+              onclick={closeBulkVariantDialog}>Cancel</Button
+            >
+            <Button disabled={bulkVariantBusy} onclick={saveBulkVariants}>
+              {bulkVariantBusy ? "Saving…" : "Add variants"}
+            </Button>
+          </div>
+        </div>
+      </dialog>
     </section>
 
     {#if product.kind === "bundle"}

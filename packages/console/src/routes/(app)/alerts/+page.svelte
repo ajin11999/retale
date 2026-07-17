@@ -6,6 +6,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -85,6 +86,19 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
   let info = $state<string | null>(null);
+
+  let productAlertsPage = $state(1);
+  let purchaseAlertsPage = $state(1);
+  const pageSize = 50;
+
+  $effect(() => {
+    showAcked;
+    productAlertsPage = 1;
+    purchaseAlertsPage = 1;
+  });
+
+  const paginatedProductAlerts = $derived(productAlerts.slice((productAlertsPage - 1) * pageSize, productAlertsPage * pageSize));
+  const paginatedPurchaseAlerts = $derived(purchaseAlerts.slice((purchaseAlertsPage - 1) * pageSize, purchaseAlertsPage * pageSize));
 
   async function toggleHistory() {
     showAcked = !showAcked;
@@ -291,7 +305,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each productAlerts as a (a.id)}
+            {#each paginatedProductAlerts as a (a.id)}
               <tr
                 class="border-b last:border-0 align-top
                   {a.acknowledgedAt ? 'text-muted-foreground' : ''}"
@@ -379,6 +393,9 @@
           </tbody>
         </table>
       </div>
+      <div class="mt-2 flex justify-end">
+        <Pagination bind:page={productAlertsPage} {pageSize} totalItems={productAlerts.length} />
+      </div>
     </section>
 
     <!-- Purchase alerts -->
@@ -402,7 +419,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each purchaseAlerts as a (a.id)}
+            {#each paginatedPurchaseAlerts as a (a.id)}
               <tr
                 class="border-b last:border-0 align-top
                   {a.acknowledgedAt ? 'text-muted-foreground' : ''}"
@@ -483,6 +500,9 @@
             {/if}
           </tbody>
         </table>
+      </div>
+      <div class="mt-2 flex justify-end">
+        <Pagination bind:page={purchaseAlertsPage} {pageSize} totalItems={purchaseAlerts.length} />
       </div>
     </section>
   {/if}

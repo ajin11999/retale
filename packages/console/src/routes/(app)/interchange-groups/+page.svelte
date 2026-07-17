@@ -11,6 +11,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
   import { SvelteSet } from "svelte/reactivity";
   import type { PageData } from "./$types";
@@ -126,6 +127,14 @@
     if (!tokens.length) return interchangeGroups;
     return interchangeGroups.filter((n) => matchesTokens(tokens, n.name));
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search;
+    pageNumber = 1;
+  });
+  const paginatedGroups = $derived(visibleGroups.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   interface Draft {
     id: string | null;
@@ -534,7 +543,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each visibleGroups as n (n.id)}
+          {#each paginatedGroups as n (n.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <span class="font-medium">{n.name}</span>
@@ -593,6 +602,12 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    <div class="mt-2 flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {visibleGroups.length} group{visibleGroups.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleGroups.length} />
     </div>
   {/if}
 </div>

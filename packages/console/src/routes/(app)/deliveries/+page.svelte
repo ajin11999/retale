@@ -8,6 +8,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import type { PageData } from "./$types";
 
@@ -85,6 +86,15 @@
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    statusFilter;
+    kindFilter;
+    pageNumber = 1;
+  });
+  const paginatedRows = $derived(rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   // ---- New delivery form ---------------------------------------------------
   let showNew = $state(false);
@@ -232,7 +242,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as d (d.id)}
+          {#each paginatedRows as d (d.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <a
@@ -293,8 +303,11 @@
         </tbody>
       </table>
     </div>
-    <p class="text-sm text-muted-foreground">
-      {rows.length} deliver{rows.length === 1 ? "y" : "ies"}
-    </p>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {rows.length} deliver{rows.length === 1 ? "y" : "ies"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
+    </div>
   {/if}
 </div>

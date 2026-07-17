@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../graphql/graphql_service.dart';
 import '../../graphql/operations.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
 import '../../widgets/scan_sheet.dart';
+import '../count_screen.dart';
 
 class TransferReceiveScreen extends StatefulWidget {
   const TransferReceiveScreen({
@@ -32,6 +34,11 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
   bool _saving = false;
 
   final _scanField = TextEditingController();
+  final _qtyControllers = <String, TextEditingController>{};
+  
+  String? _lastScanHitId;
+  final _checklistKeys = <String, GlobalKey>{};
+  final _byProductKeys = <String, GlobalKey>{};
 
   @override
   void initState() {
@@ -45,8 +52,14 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
   @override
   void dispose() {
     _scanField.dispose();
+    for (final c in _qtyControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
+
+  String _fmt(num v) =>
+      v == v.truncate() ? v.toInt().toString() : v.toString();
 
   Future<void> _load() async {
     setState(() => _loadError = null);
@@ -76,7 +89,48 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
     }
   }
 
-  void _handleCode(String code) {
+  void _setCount(TransferItem item, num qty) {
+    if (qty < 0) qty = 0;
+    if (qty > item.qty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Only ${_fmt(item.qty)} expected '
+              'for ${_labels[item.variantId]?.displayName ?? item.variantId}')));
+    }
+    setState(() {
+      _counts[item.variantId] = qty.clamp(0, item.qty);
+      _syncController(item);
+    });
+  }
+
+  void _syncController(TransferItem item) {
+    final c = _qtyControllers[item.variantId];
+    if (c == null) return;
+    final counted = _counts[item.variantId] ?? 0;
+    final text = counted == 0 ? '' : _fmt(counted);
+    if (c.text != text) c.text = text;
+  }
+
+  TextEditingController _controllerFor(TransferItem item) =>
+      _qtyControllers.putIfAbsent(item.variantId, () {
+        final counted = _counts[item.variantId] ?? 0;
+        final c = TextEditingController(text: counted == 0 ? '' : _fmt(counted));
+        c.addListener(() {
+          final text = c.text.trim();
+          if (text.isEmpty) {
+            if ((_counts[item.variantId] ?? 0) != 0) {
+              setState(() => _counts[item.variantId] = 0);
+            }
+            return;
+          }
+          final qty = num.tryParse(text);
+          if (qty != null && _counts[item.variantId] != qty) {
+            _setCount(item, qty);
+          }
+        });
+        return c;
+      });
+
+  Future<void> _handleCode(String code) async {
     final trimmed = code.trim().toLowerCase();
     if (trimmed.isEmpty) return;
     _scanField.clear();
@@ -97,14 +151,25 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
       return;
     }
     
-    setState(() {
-      _counts[item.variantId] = (_counts[item.variantId] ?? 0) + 1;
-    });
+    _setCount(item, (_counts[item.variantId] ?? 0) + 1);
+    setState(() => _lastScanHitId = item.variantId);
+    _revealRow(item.variantId);
+  }
+
+  void _revealRow(String variantId) {
+    final key = _checklistKeys[variantId]?.currentContext != null
+        ? _checklistKeys[variantId]
+        : _byProductKeys[variantId];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 300), alignment: 0.3);
+    }
   }
 
   Future<void> _openCamera() async {
     final code = await showScanSheet(context);
-    if (code != null && mounted) _handleCode(code);
+    if (code != null && mounted) await _handleCode(code);
   }
 
   Future<void> _receive() async {
@@ -136,91 +201,208 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loadError != null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Receive Transfer')),
-        body: ErrorRetry(message: describeError(_loadError!), onRetry: _load),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Receive Transfer')),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Receive Transfer'),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(132),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  '${widget.sourceLocation} → ${widget.targetLocation}',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _scanField,
-                        autocorrect: false,
-                        textInputAction: TextInputAction.done,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.qr_code_scanner),
-                          hintText: 'Scan or type a code',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        onSubmitted: _handleCode,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filledTonal(
-                      tooltip: 'Scan with camera',
-                      icon: const Icon(Icons.photo_camera),
-                      onPressed: _openCamera,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: (_isComplete && !_saving) ? _receive : null,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Text(
+                    '${widget.sourceLocation} → ${widget.targetLocation}',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  child: _saving 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Receive Transfer', style: TextStyle(fontSize: 16)),
                 ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _scanField,
+                          autocorrect: false,
+                          textInputAction: TextInputAction.done,
+                          decoration: const InputDecoration(
+                            prefixIcon: Icon(Icons.qr_code_scanner),
+                            hintText: 'Scan or type a code',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: _handleCode,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: 'Scan with camera',
+                        icon: const Icon(Icons.photo_camera),
+                        onPressed: _openCamera,
+                      ),
+                    ],
+                  ),
+                ),
+                const TabBar(tabs: [
+                  Tab(text: 'Checklist'),
+                  Tab(text: 'By product'),
+                ]),
               ],
             ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.separated(
-              itemCount: widget.transfer.items.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final item = widget.transfer.items[i];
-                final counted = _counts[item.variantId] ?? 0;
-                final done = counted >= item.qty;
-                return ListTile(
-                  tileColor: done ? Colors.green.shade50 : null,
-                  leading: IconButton(
-                    icon: Icon(Icons.remove_circle_outline, color: counted > 0 ? Colors.red : Colors.grey),
-                    onPressed: counted > 0 ? () => setState(() => _counts[item.variantId] = counted - 1) : null,
-                  ),
-                  title: Text(_labels[item.variantId]?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
-                  subtitle: Text('$counted / ${item.qty} counted'),
-                  trailing: IconButton(
-                    icon: Icon(Icons.add_circle, color: done ? Colors.grey : Colors.green),
-                    onPressed: done ? null : () => setState(() => _counts[item.variantId] = counted + 1),
-                  ),
-                );
-              },
+        ),
+        body: _buildBody(),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: FilledButton(
+              onPressed: (_isComplete && !_saving) ? _receive : null,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+              child: _saving 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Receive Transfer'),
             ),
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  Widget _buildBody() {
+    if (_loadError != null) {
+      return ErrorRetry(message: describeError(_loadError!), onRetry: _load);
+    }
+    if (widget.transfer.items.isEmpty) {
+      return const Center(child: Text('This transfer has no items.'));
+    }
+    return TabBarView(
+      children: [
+        _buildChecklist(),
+        _buildByProduct(),
+      ],
+    );
+  }
+
+  Widget _buildChecklist() {
+    return ListView.separated(
+      itemCount: widget.transfer.items.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final item = widget.transfer.items[i];
+        final key = _checklistKeys.putIfAbsent(item.variantId, () => GlobalKey());
+        final counted = _counts[item.variantId] ?? 0;
+        final done = counted >= item.qty;
+        final partial = !done && counted > 0;
+        final vInfo = _labels[item.variantId];
+        
+        return ListTile(
+          key: key,
+          minTileHeight: 72,
+          enabled: !done,
+          selected: _lastScanHitId == item.variantId,
+          selectedTileColor:
+              Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
+          leading: Checkbox(
+            tristate: true,
+            value: done ? true : (partial ? null : false),
+            onChanged: done ? null : (_) => _setCount(item, done ? 0 : item.qty),
+          ),
+          title: Text(vInfo?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (vInfo?.sku?.isNotEmpty == true)
+                Text(vInfo!.sku!, style: const TextStyle(color: Colors.grey)),
+              Text(done
+                  ? 'Already received (${_fmt(item.qty)})'
+                  : '${_fmt(counted)} of ${_fmt(item.qty)} to receive'),
+            ],
+          ),
+          trailing: done
+              ? const Icon(Icons.done_all)
+              : SizedBox(
+                  width: 64,
+                  child: TextField(
+                    controller: _controllerFor(item),
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+          onTap: done ? null : () => _setCount(item, done ? 0 : item.qty),
+        );
+      },
+    );
+  }
+
+  Widget _buildByProduct() {
+    return ListView.separated(
+      itemCount: widget.transfer.items.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final item = widget.transfer.items[i];
+        final key = _byProductKeys.putIfAbsent(item.variantId, () => GlobalKey());
+        final counted = _counts[item.variantId] ?? 0;
+        final done = counted >= item.qty;
+        final vInfo = _labels[item.variantId];
+        
+        return ListTile(
+          key: key,
+          minTileHeight: 72,
+          enabled: !done,
+          selected: _lastScanHitId == item.variantId,
+          selectedTileColor:
+              Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
+          title: Text(vInfo?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (vInfo?.sku?.isNotEmpty == true)
+                Text(vInfo!.sku!, style: const TextStyle(color: Colors.grey)),
+              Text(done
+                  ? 'Already received (${_fmt(item.qty)})'
+                  : '${_fmt(counted)} of ${_fmt(item.qty)} counted'),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: item.qty <= 0
+                    ? 1
+                    : (counted / item.qty).clamp(0.0, 1.0),
+                minHeight: 6,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ],
+          ),
+          trailing: done ? const Icon(Icons.done_all) : const Icon(Icons.add),
+          onTap: done ? null : () => _openCounter(item, vInfo),
+        );
+      },
+    );
+  }
+
+  Future<void> _openCounter(TransferItem item, VariantInfo? vInfo) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => CountScreen(
+        target: CountTarget(
+          title: vInfo?.displayName ?? item.variantId,
+          expected: item.qty,
+          initial: _counts[item.variantId] ?? 0,
+          allowOverage: false,
+          qtyDecimals: 0,
+          onSet: (qty) async => _setCount(item, qty),
+        ),
+      ),
+    ));
+    if (mounted) setState(() => _syncController(item));
   }
 }

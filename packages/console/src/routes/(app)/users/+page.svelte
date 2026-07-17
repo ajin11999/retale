@@ -7,6 +7,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
   import type { PageData } from "./$types";
 
@@ -91,6 +92,14 @@
       return av - bv || a.name.localeCompare(b.name);
     });
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search;
+    pageNumber = 1;
+  });
+  const paginatedRows = $derived(rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
 
   // ---- Inline role assignment ---------------------------------------------
   let editingRolesFor = $state<string | null>(null);
@@ -273,7 +282,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each rows as u (u.id)}
+          {#each paginatedRows as u (u.id)}
             <tr class="border-b last:border-0 align-top hover:bg-muted/40">
               <td class="px-4 py-2 font-medium">
                 {u.name}
@@ -363,8 +372,11 @@
         </tbody>
       </table>
     </div>
-    <p class="text-sm text-muted-foreground">
-      {rows.length} user{rows.length === 1 ? "" : "s"}
-    </p>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {rows.length} user{rows.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
+    </div>
   {/if}
 </div>

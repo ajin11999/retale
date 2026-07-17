@@ -5,6 +5,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
   import { InterchangeGroupsVariantSearchStore } from "$houdini";
 
@@ -69,6 +70,14 @@
   });
 
   const variants = $derived($searchStore.data?.searchVariants ?? []);
+  
+  let pageNumber = $state(1);
+  const pageSize = 50;
+  $effect(() => {
+    search;
+    pageNumber = 1;
+  });
+  const paginatedVariants = $derived(variants.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
   
   // Track local changes before they are synced, so the UI updates immediately or 
   // we can use a controlled value for Combobox
@@ -158,7 +167,7 @@
               </td>
             </tr>
           {:else}
-            {#each variants as v (v.id)}
+            {#each paginatedVariants as v (v.id)}
               <tr class="border-b last:border-0 hover:bg-muted/20">
                 <td class="px-4 py-2">
                   <span class="font-medium">
@@ -186,6 +195,12 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {variants.length} variant{variants.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={variants.length} />
     </div>
   {/if}
 </div>

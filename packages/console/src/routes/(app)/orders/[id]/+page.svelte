@@ -12,6 +12,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
@@ -698,6 +699,13 @@
   // Voided lines are hidden from the list; only live lines are shown/totalled.
   const visibleItems = $derived((order?.items ?? []).filter((i) => !i.voidedAt));
 
+  let itemsPage = $state(1);
+  const pageSize = 50;
+  const paginatedItems = $derived(visibleItems.slice((itemsPage - 1) * pageSize, itemsPage * pageSize));
+
+  let paymentsPage = $state(1);
+  const paginatedPayments = $derived((order?.payments ?? []).slice((paymentsPage - 1) * pageSize, paymentsPage * pageSize));
+
   // Sum of live (non-voided) lines — sanity check against the cached total.
   const computed = $derived(
     visibleItems.reduce((acc, i) => acc + i.lineTotalMinor, 0),
@@ -897,7 +905,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each visibleItems as i (i.id)}
+          {#each paginatedItems as i (i.id)}
             {@const margin = marginPct(i)}
             <tr class="border-b align-top last:border-0">
               <td class="px-4 py-2">
@@ -1063,6 +1071,9 @@
         </tfoot>
       </table>
       </div>
+      <div class="border-t p-2 flex justify-end bg-muted/10">
+        <Pagination bind:page={itemsPage} {pageSize} totalItems={visibleItems.length} />
+      </div>
 
       {#if isOpen}
         <!-- Add line — compact, attached to the bottom of the list -->
@@ -1219,7 +1230,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each order.payments as p (p.id)}
+            {#each paginatedPayments as p (p.id)}
               <tr class="border-b last:border-0">
                 <td class="px-4 py-2 capitalize">{p.method}</td>
                 <td class="px-4 py-2">{fmt(p.createdAt)}</td>
@@ -1257,6 +1268,9 @@
             </tr>
           </tfoot>
         </table>
+        <div class="border-t p-2 flex justify-end bg-muted/10">
+          <Pagination bind:page={paymentsPage} {pageSize} totalItems={order?.payments.length ?? 0} />
+        </div>
       </div>
     </div>
 
