@@ -199,7 +199,6 @@ Map<String, VariantInfo> buildVariantLabelMap(List<dynamic> products) {
 class TransferSummary {
   TransferSummary({
     required this.id,
-    required this.sourceLocationId,
     required this.targetLocationId,
     required this.createdAt,
     this.notes,
@@ -208,7 +207,6 @@ class TransferSummary {
   });
 
   final String id;
-  final String sourceLocationId;
   final String targetLocationId;
   final String createdAt;
   final String? notes;
@@ -217,7 +215,6 @@ class TransferSummary {
 
   factory TransferSummary.fromJson(Map<String, dynamic> j) => TransferSummary(
         id: j['id'] as String,
-        sourceLocationId: j['sourceLocationId'] as String,
         targetLocationId: j['targetLocationId'] as String,
         createdAt: j['createdAt'] as String,
         notes: j['notes'] as String?,
@@ -232,16 +229,19 @@ class TransferItem {
   TransferItem({
     required this.id,
     required this.variantId,
+    required this.sourceLocationId,
     required this.qty,
   });
 
   final String id;
   final String variantId;
+  final String sourceLocationId;
   final num qty;
 
   factory TransferItem.fromJson(Map<String, dynamic> j) => TransferItem(
         id: j['id'] as String,
         variantId: j['variantId'] as String,
+        sourceLocationId: j['sourceLocationId'] as String,
         qty: j['qty'] as num,
       );
 }

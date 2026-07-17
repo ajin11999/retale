@@ -477,7 +477,7 @@ type Mutation {
   setTrackingAccountVariants(accountId: ID!, variantIds: [ID!]!): [TrackingLinkedVariant!]!
 
   """Draft a transfer between two locations. Moves no stock yet."""
-  createStockTransfer(sourceLocationId: ID!, targetLocationId: ID!, items: [StockTransferItemInput!]!, notes: String): StockTransfer!
+  createStockTransfer(targetLocationId: ID!, items: [StockTransferItemInput!], notes: String): StockTransfer!
 
   """Dispatch a draft — debits stock from the source location."""
   dispatchStockTransfer(id: ID!): StockTransfer!
@@ -1575,7 +1575,6 @@ enum TransferStatus {
 
 type StockTransfer {
   id: ID!
-  sourceLocationId: ID!
   targetLocationId: ID!
   status: TransferStatus!
   notes: String
@@ -1590,11 +1589,13 @@ type StockTransfer {
 type StockTransferItem {
   id: ID!
   transferId: ID!
+  sourceLocationId: ID!
   variantId: ID!
   qty: Float!
 }
 
 input StockTransferItemInput {
+  sourceLocationId: ID!
   variantId: ID!
   qty: Int!
 }

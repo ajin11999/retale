@@ -81,33 +81,31 @@ export function listTransferItems(transferId: string): Promise<TransferItem[]> {
     .where(eq(stockTransferItems.transferId, transferId));
 }
 
-/**
- * Draft a stock transfer. Validates the locations and lines but moves no
- * stock — that happens on dispatch.
- */
 export async function createTransfer(input: {
-  sourceLocationId: string;
   targetLocationId: string;
-  items: { variantId: string; qty: number }[];
+  items?: { variantId: string; qty: number; sourceLocationId: string }[];
   notes?: string | null;
   createdByUserId: string;
 }): Promise<Transfer> {
-  if (input.sourceLocationId === input.targetLocationId) {
-    throw new TransferError("SAME_LOCATION");
-  }
-  if (!input.items.length) throw new TransferError("EMPTY_TRANSFER");
+  const items = input.items || [];
 
   return db.transaction(async (tx) => {
-    for (const id of [input.sourceLocationId, input.targetLocationId]) {
-      const loc = await tx.query.locations.findFirst({
-        where: eq(locations.id, id),
-      });
-      if (!loc) throw new TransferError("LOCATION_NOT_FOUND", id);
-    }
-    for (const item of input.items) {
+    const loc = await tx.query.locations.findFirst({
+      where: eq(locations.id, input.targetLocationId),
+    });
+    if (!loc) throw new TransferError("LOCATION_NOT_FOUND", input.targetLocationId);
+
+    for (const item of items) {
+      if (item.sourceLocationId === input.targetLocationId) {
+        throw new TransferError("SAME_LOCATION");
+      }
       if (!Number.isInteger(item.qty) || item.qty <= 0) {
         throw new TransferError("INVALID_INPUT", "item qty must be a positive integer");
       }
+      const sloc = await tx.query.locations.findFirst({
+        where: eq(locations.id, item.sourceLocationId),
+      });
+      if (!sloc) throw new TransferError("LOCATION_NOT_FOUND", item.sourceLocationId);
       const variant = await tx.query.productVariants.findFirst({
         where: eq(productVariants.id, item.variantId),
       });
@@ -117,19 +115,21 @@ export async function createTransfer(input: {
     const transferId = ulid();
     await tx.insert(stockTransfers).values({
       id: transferId,
-      sourceLocationId: input.sourceLocationId,
       targetLocationId: input.targetLocationId,
       notes: input.notes ?? null,
       createdByUserId: input.createdByUserId,
     });
-    await tx.insert(stockTransferItems).values(
-      input.items.map((item) => ({
-        id: ulid(),
-        transferId,
-        variantId: item.variantId,
-        qty: item.qty,
-      })),
-    );
+    if (items.length > 0) {
+      await tx.insert(stockTransferItems).values(
+        items.map((item) => ({
+          id: ulid(),
+          transferId,
+          sourceLocationId: item.sourceLocationId,
+          variantId: item.variantId,
+          qty: item.qty,
+        })),
+      );
+    }
     const row = await tx.query.stockTransfers.findFirst({
       where: eq(stockTransfers.id, transferId),
     });
@@ -137,20 +137,22 @@ export async function createTransfer(input: {
   });
 }
 
-/** Move every line of a transfer through the ledger at one location. */
+/** Move every line of a transfer through the ledger. */
 async function moveLines(
   tx: Tx,
-  transferId: string,
-  locationId: string,
-  type: "transfer_out" | "transfer_in",
-  sign: 1 | -1,
+  transfer: Transfer,
+  direction: "out" | "in",
   createdByUserId: string,
 ): Promise<void> {
   const items = await tx
     .select()
     .from(stockTransferItems)
-    .where(eq(stockTransferItems.transferId, transferId));
+    .where(eq(stockTransferItems.transferId, transfer.id));
+  if (!items.length) throw new TransferError("EMPTY_TRANSFER");
+  const type = direction === "out" ? "transfer_out" : "transfer_in";
+  const sign = direction === "out" ? -1 : 1;
   for (const item of items) {
+    const locationId = direction === "out" ? item.sourceLocationId : transfer.targetLocationId;
     await recordMovement(
       {
         variantId: item.variantId,
@@ -158,7 +160,7 @@ async function moveLines(
         type,
         qtyDelta: sign * item.qty,
         refType: "transfer",
-        refId: transferId,
+        refId: transfer.id,
         createdByUserId,
       },
       tx,
@@ -166,11 +168,6 @@ async function moveLines(
   }
 }
 
-/**
- * Dispatch a draft transfer: `transfer_out` debits the source location for
- * every line. Stock may go negative — selling/moving into negative stock is
- * allowed, consistent with the rest of the system.
- */
 export async function dispatchTransfer(
   id: string,
   dispatchedByUserId: string,
@@ -185,10 +182,8 @@ export async function dispatchTransfer(
     }
     await moveLines(
       tx,
-      id,
-      transfer.sourceLocationId,
-      "transfer_out",
-      -1,
+      transfer,
+      "out",
       dispatchedByUserId,
     );
     await tx
@@ -202,10 +197,6 @@ export async function dispatchTransfer(
   });
 }
 
-/**
- * Receive an in-transit transfer: `transfer_in` credits the target location
- * for every line, completing the move.
- */
 export async function receiveTransfer(
   id: string,
   receivedByUserId: string,
@@ -220,10 +211,8 @@ export async function receiveTransfer(
     }
     await moveLines(
       tx,
-      id,
-      transfer.targetLocationId,
-      "transfer_in",
-      1,
+      transfer,
+      "in",
       receivedByUserId,
     );
     await tx
@@ -237,11 +226,6 @@ export async function receiveTransfer(
   });
 }
 
-/**
- * Cancel a transfer. A draft is cancelled outright; an in-transit transfer
- * has its dispatched stock returned to the source (`transfer_in` at source).
- * A received transfer cannot be cancelled — reverse it with a new transfer.
- */
 export async function cancelTransfer(
   id: string,
   reason: string,
@@ -261,14 +245,27 @@ export async function cancelTransfer(
 
     if (status === "in_transit") {
       // Stock already left the source — put it back.
-      await moveLines(
-        tx,
-        id,
-        transfer.sourceLocationId,
-        "transfer_in",
-        1,
-        cancelledByUserId,
-      );
+      // `moveLines` with "in" will normally credit target location, 
+      // but wait, for cancellation we need to credit the source location!
+      // I should write a custom loop here.
+      const items = await tx
+        .select()
+        .from(stockTransferItems)
+        .where(eq(stockTransferItems.transferId, transfer.id));
+      for (const item of items) {
+        await recordMovement(
+          {
+            variantId: item.variantId,
+            locationId: item.sourceLocationId,
+            type: "transfer_in",
+            qtyDelta: item.qty,
+            refType: "transfer",
+            refId: transfer.id,
+            createdByUserId: cancelledByUserId,
+          },
+          tx,
+        );
+      }
     }
     await tx
       .update(stockTransfers)
@@ -285,10 +282,10 @@ export async function cancelTransfer(
   });
 }
 
-/** Add lines to a draft transfer. Combines quantities if variant already exists. */
+/** Add lines to a draft transfer. Combines quantities if variant and source match. */
 export async function addTransferItems(
   id: string,
-  items: { variantId: string; qty: number }[],
+  items: { variantId: string; qty: number; sourceLocationId: string }[],
 ): Promise<Transfer> {
   if (!items.length) throw new TransferError("EMPTY_TRANSFER");
   
@@ -302,9 +299,16 @@ export async function addTransferItems(
     }
 
     for (const item of items) {
+      if (item.sourceLocationId === transfer.targetLocationId) {
+        throw new TransferError("SAME_LOCATION", "source and target must differ");
+      }
       if (!Number.isInteger(item.qty) || item.qty <= 0) {
         throw new TransferError("INVALID_INPUT", "item qty must be a positive integer");
       }
+      const sloc = await tx.query.locations.findFirst({
+        where: eq(locations.id, item.sourceLocationId),
+      });
+      if (!sloc) throw new TransferError("LOCATION_NOT_FOUND", item.sourceLocationId);
       const variant = await tx.query.productVariants.findFirst({
         where: eq(productVariants.id, item.variantId),
       });
@@ -315,7 +319,8 @@ export async function addTransferItems(
       const existing = await tx.query.stockTransferItems.findFirst({
         where: and(
           eq(stockTransferItems.transferId, id),
-          eq(stockTransferItems.variantId, item.variantId)
+          eq(stockTransferItems.variantId, item.variantId),
+          eq(stockTransferItems.sourceLocationId, item.sourceLocationId)
         )
       });
       if (existing) {
@@ -326,6 +331,7 @@ export async function addTransferItems(
         await tx.insert(stockTransferItems).values({
           id: ulid(),
           transferId: id,
+          sourceLocationId: item.sourceLocationId,
           variantId: item.variantId,
           qty: item.qty,
         });

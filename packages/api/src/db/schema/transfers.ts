@@ -22,9 +22,6 @@ export const stockTransfers = mysqlTable(
   "stock_transfers",
   {
     id: ulidPk(),
-    sourceLocationId: ulidRef()
-      .notNull()
-      .references(() => locations.id, { onDelete: "restrict" }),
     targetLocationId: ulidRef()
       .notNull()
       .references(() => locations.id, { onDelete: "restrict" }),
@@ -40,7 +37,6 @@ export const stockTransfers = mysqlTable(
     ...timestamps,
   },
   (t) => [
-    index("stock_transfers_source_location_id_idx").on(t.sourceLocationId),
     index("stock_transfers_target_location_id_idx").on(t.targetLocationId),
   ],
 );
@@ -56,17 +52,18 @@ export const stockTransferItems = mysqlTable(
     variantId: ulidRef()
       .notNull()
       .references(() => productVariants.id, { onDelete: "restrict" }),
+    sourceLocationId: ulidRef()
+      .notNull()
+      .references(() => locations.id, { onDelete: "restrict" }),
     qty: bigint({ mode: "number" }).notNull(),
   },
-  (t) => [index("stock_transfer_items_transfer_id_idx").on(t.transferId)],
+  (t) => [
+    index("stock_transfer_items_transfer_id_idx").on(t.transferId),
+    index("stock_transfer_items_source_location_id_idx").on(t.sourceLocationId),
+  ],
 );
 
 export const stockTransfersRelations = relations(stockTransfers, ({ one, many }) => ({
-  sourceLocation: one(locations, {
-    fields: [stockTransfers.sourceLocationId],
-    references: [locations.id],
-    relationName: "transfer_source",
-  }),
   targetLocation: one(locations, {
     fields: [stockTransfers.targetLocationId],
     references: [locations.id],
@@ -83,5 +80,10 @@ export const stockTransferItemsRelations = relations(stockTransferItems, ({ one 
   variant: one(productVariants, {
     fields: [stockTransferItems.variantId],
     references: [productVariants.id],
+  }),
+  sourceLocation: one(locations, {
+    fields: [stockTransferItems.sourceLocationId],
+    references: [locations.id],
+    relationName: "item_transfer_source",
   }),
 }));

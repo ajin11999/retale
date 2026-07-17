@@ -123,9 +123,8 @@ describe("creating transfers", () => {
   test("a draft transfer moves no stock", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 30 }],
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     expect(transferStatus(transfer)).toBe("draft");
@@ -137,9 +136,8 @@ describe("creating transfers", () => {
     const variantId = await seedVariant(100);
     await expectError("SAME_LOCATION", () =>
       createTransfer({
-        sourceLocationId: sourceId,
         targetLocationId: sourceId,
-        items: [{ variantId, qty: 1 }],
+        items: [{ variantId, qty: 1, sourceLocationId: sourceId }],
         createdByUserId: userId,
       }),
     );
@@ -148,7 +146,6 @@ describe("creating transfers", () => {
   test("rejects an empty transfer", async () => {
     await expectError("EMPTY_TRANSFER", () =>
       createTransfer({
-        sourceLocationId: sourceId,
         targetLocationId: targetId,
         items: [],
         createdByUserId: userId,
@@ -161,9 +158,8 @@ describe("the dispatch → receive lifecycle", () => {
   test("dispatch debits the source, receive credits the target", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 30 }],
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
 
@@ -181,9 +177,8 @@ describe("the dispatch → receive lifecycle", () => {
   test("rejects dispatching a transfer that is not a draft", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 10 }],
+      items: [{ variantId, qty: 10, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     await dispatchTransfer(transfer.id, userId);
@@ -193,9 +188,8 @@ describe("the dispatch → receive lifecycle", () => {
   test("rejects receiving a transfer that was never dispatched", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 10 }],
+      items: [{ variantId, qty: 10, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     await expectError("NOT_IN_TRANSIT", () =>
@@ -208,9 +202,8 @@ describe("cancellation", () => {
   test("cancelling a draft moves no stock", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 30 }],
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     const cancelled = await cancelTransfer(transfer.id, "changed plan", userId);
@@ -221,9 +214,8 @@ describe("cancellation", () => {
   test("cancelling an in-transit transfer returns stock to the source", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 30 }],
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     await dispatchTransfer(transfer.id, userId);
@@ -237,9 +229,8 @@ describe("cancellation", () => {
   test("a received transfer cannot be cancelled", async () => {
     const variantId = await seedVariant(100);
     const transfer = await createTransfer({
-      sourceLocationId: sourceId,
       targetLocationId: targetId,
-      items: [{ variantId, qty: 30 }],
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
       createdByUserId: userId,
     });
     await dispatchTransfer(transfer.id, userId);

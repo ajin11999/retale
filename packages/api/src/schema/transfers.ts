@@ -11,7 +11,6 @@ export const typeDefs = /* GraphQL */ `
 
   type StockTransfer {
     id: ID!
-    sourceLocationId: ID!
     targetLocationId: ID!
     status: TransferStatus!
     notes: String
@@ -26,11 +25,13 @@ export const typeDefs = /* GraphQL */ `
   type StockTransferItem {
     id: ID!
     transferId: ID!
+    sourceLocationId: ID!
     variantId: ID!
     qty: Float!
   }
 
   input StockTransferItemInput {
+    sourceLocationId: ID!
     variantId: ID!
     qty: Int!
   }
@@ -43,9 +44,8 @@ export const typeDefs = /* GraphQL */ `
   extend type Mutation {
     "Draft a transfer between two locations. Moves no stock yet."
     createStockTransfer(
-      sourceLocationId: ID!
       targetLocationId: ID!
-      items: [StockTransferItemInput!]!
+      items: [StockTransferItemInput!]
       notes: String
     ): StockTransfer!
     "Dispatch a draft — debits stock from the source location."
@@ -117,9 +117,8 @@ export const resolvers = {
     createStockTransfer: async (
       _: unknown,
       args: {
-        sourceLocationId: string;
         targetLocationId: string;
-        items: { variantId: string; qty: number }[];
+        items?: { variantId: string; qty: number; sourceLocationId: string }[];
         notes?: string | null;
       },
       ctx: GraphQLContext,
@@ -127,7 +126,6 @@ export const resolvers = {
       const viewer = await requirePermission(ctx, "stock.transfer.create");
       try {
         return await transfers.createTransfer({
-          sourceLocationId: args.sourceLocationId,
           targetLocationId: args.targetLocationId,
           items: args.items,
           notes: args.notes ?? null,
@@ -151,7 +149,7 @@ export const resolvers = {
     },
     addStockTransferItems: async (
       _: unknown,
-      args: { id: string; items: { variantId: string; qty: number }[] },
+      args: { id: string; items: { variantId: string; qty: number; sourceLocationId: string }[] },
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "stock.transfer.create");

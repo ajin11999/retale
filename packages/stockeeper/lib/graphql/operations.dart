@@ -124,8 +124,8 @@ class Ops {
   static const openTransfers = '''
     query OpenTransfers {
       stockTransfers {
-        id sourceLocationId targetLocationId createdAt notes status
-        items { id variantId qty }
+        id targetLocationId createdAt notes status
+        items { id variantId sourceLocationId qty }
       }
     }
   ''';

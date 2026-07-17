@@ -41,10 +41,15 @@ class _TransferListScreenState extends State<TransferListScreen> {
   void _refresh() => setState(() => _future = _load());
 
   void _open(TransferSummary transfer) async {
+    final uniqueSources = transfer.items.map((i) => i.sourceLocationId).toSet().toList();
+    final sourceName = uniqueSources.length == 1 
+      ? (_locations != null ? _locations![uniqueSources.first]?.name ?? 'Unknown' : 'Unknown')
+      : 'Multiple sources';
+
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => TransferReceiveScreen(
         transfer: transfer,
-        sourceLocation: _locations?[transfer.sourceLocationId]?.name ?? 'Source',
+        sourceLocation: sourceName,
         targetLocation: _locations?[transfer.targetLocationId]?.name ?? 'Target',
       ),
     ));
@@ -84,7 +89,10 @@ class _TransferListScreenState extends State<TransferListScreen> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final t = transfers[i];
-                final source = _locations?[t.sourceLocationId]?.name ?? 'Unknown';
+                final uniqueSources = t.items.map((i) => i.sourceLocationId).toSet().toList();
+                final source = uniqueSources.length == 1 
+                  ? (_locations != null ? _locations![uniqueSources.first]?.name ?? 'Unknown' : 'Unknown')
+                  : 'Multiple sources';
                 final target = _locations?[t.targetLocationId]?.name ?? 'Unknown';
                 return ListTile(
                   minTileHeight: 80,
