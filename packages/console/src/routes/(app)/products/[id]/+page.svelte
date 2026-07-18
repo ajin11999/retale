@@ -10,6 +10,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
+  import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
@@ -91,6 +92,10 @@
         id
         name
         parentId
+      }
+      products(includeArchived: true) {
+        id
+        name
       }
     }
   `);
@@ -1119,9 +1124,15 @@
       <h2 class="text-sm font-semibold">Details</h2>
 
       <div class="grid grid-cols-2 gap-4">
-        <label class="space-y-1">
+        <label class="relative space-y-1">
           <span class="text-sm font-medium">Name</span>
           <Input bind:value={form.name} disabled={!canEdit} />
+          <DuplicateHint
+            query={form.name}
+            items={$ProductDetail.data?.products ?? []}
+            excludeId={product?.id}
+            noun="product"
+          />
         </label>
         <label class="space-y-1">
           <span class="text-sm font-medium">Public name</span>
