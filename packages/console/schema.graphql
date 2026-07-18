@@ -147,11 +147,15 @@ type Query {
   """Cost / margin — revenue vs COGS over the period."""
   profitReport(periodStart: String!, periodEnd: String!): ProfitReport!
 
-  """Customer debt aging as of now."""
-  arAgingReport: AgingReport!
+  """
+  Customer debt aging as of now. When periodStart/periodEnd are given, only ledger entries in that range are considered.
+  """
+  arAgingReport(periodStart: String, periodEnd: String): AgingReport!
 
-  """Vendor debt aging as of now."""
-  apAgingReport: AgingReport!
+  """
+  Vendor debt aging as of now. When periodStart/periodEnd are given, only ledger entries in that range are considered.
+  """
+  apAgingReport(periodStart: String, periodEnd: String): AgingReport!
 
   """Cash-drawer variance for sessions closed in the period."""
   sessionVarianceReport(periodStart: String!, periodEnd: String!): SessionVarianceReport!

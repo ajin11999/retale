@@ -99,10 +99,10 @@ export const typeDefs = /* GraphQL */ `
     salesReport(periodStart: String!, periodEnd: String!): SalesReport!
     "Cost / margin — revenue vs COGS over the period."
     profitReport(periodStart: String!, periodEnd: String!): ProfitReport!
-    "Customer debt aging as of now."
-    arAgingReport: AgingReport!
-    "Vendor debt aging as of now."
-    apAgingReport: AgingReport!
+    "Customer debt aging as of now. When periodStart/periodEnd are given, only ledger entries in that range are considered."
+    arAgingReport(periodStart: String, periodEnd: String): AgingReport!
+    "Vendor debt aging as of now. When periodStart/periodEnd are given, only ledger entries in that range are considered."
+    apAgingReport(periodStart: String, periodEnd: String): AgingReport!
     "Cash-drawer variance for sessions closed in the period."
     sessionVarianceReport(
       periodStart: String!
@@ -131,13 +131,29 @@ export const resolvers = {
       await requirePermission(ctx, "report.margin.view");
       return reports.profitReport(args);
     },
-    arAgingReport: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+    arAgingReport: async (
+      _: unknown,
+      args: { periodStart?: string; periodEnd?: string },
+      ctx: GraphQLContext,
+    ) => {
       await requirePermission(ctx, "report.ar_aging.view");
-      return reports.arAgingReport();
+      const range =
+        args.periodStart && args.periodEnd
+          ? { periodStart: args.periodStart, periodEnd: args.periodEnd }
+          : undefined;
+      return reports.arAgingReport(range);
     },
-    apAgingReport: async (_: unknown, __: unknown, ctx: GraphQLContext) => {
+    apAgingReport: async (
+      _: unknown,
+      args: { periodStart?: string; periodEnd?: string },
+      ctx: GraphQLContext,
+    ) => {
       await requirePermission(ctx, "report.ap_aging.view");
-      return reports.apAgingReport();
+      const range =
+        args.periodStart && args.periodEnd
+          ? { periodStart: args.periodStart, periodEnd: args.periodEnd }
+          : undefined;
+      return reports.apAgingReport(range);
     },
     sessionVarianceReport: async (
       _: unknown,

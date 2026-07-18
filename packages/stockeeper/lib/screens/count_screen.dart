@@ -44,6 +44,8 @@ class _CountScreenState extends State<CountScreen> {
   late num _current = widget.target.initial;
   final _exact = TextEditingController();
   bool _busy = false;
+  num? _pendingNext;
+  num? _revertTo;
 
   @override
   void dispose() {
@@ -66,18 +68,43 @@ class _CountScreenState extends State<CountScreen> {
       }
     }
     if (next == _current) return;
-    setState(() => _busy = true);
-    final previous = _current;
+
+    if (_revertTo == null) {
+      _revertTo = _current;
+    }
+
     setState(() => _current = next);
-    try {
-      await t.onSet(next);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _current = previous);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(describeError(e))));
-    } finally {
-      if (mounted) setState(() => _busy = false);
+
+    _pendingNext = next;
+    if (_busy) return;
+
+    _busy = true;
+
+    while (_pendingNext != null) {
+      final toSet = _pendingNext!;
+      _pendingNext = null;
+
+      try {
+        await t.onSet(toSet);
+        if (_pendingNext == null) {
+          _revertTo = null;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        if (_pendingNext == null) {
+          final revert = _revertTo;
+          _revertTo = null;
+          if (revert != null) {
+            setState(() => _current = revert);
+          }
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(describeError(e))));
+        }
+      }
+    }
+
+    if (mounted) {
+      _busy = false;
     }
   }
 
@@ -146,8 +173,7 @@ class _CountScreenState extends State<CountScreen> {
                     if (step != 1) const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
-                        onPressed:
-                            _busy ? null : () => _set(_current + step),
+                        onPressed: () => _set(_current + step),
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 20),
                           textStyle: const TextStyle(
@@ -162,7 +188,7 @@ class _CountScreenState extends State<CountScreen> {
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed:
-                    _busy || _current <= 0 ? null : () => _set(_current - 1),
+                    _current <= 0 ? null : () => _set(_current - 1),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   textStyle: const TextStyle(fontSize: 20),
@@ -191,7 +217,7 @@ class _CountScreenState extends State<CountScreen> {
                   ),
                   const SizedBox(width: 12),
                   FilledButton.tonal(
-                    onPressed: _busy ? null : _setExact,
+                    onPressed: _setExact,
                     child: const Text('Set'),
                   ),
                 ],

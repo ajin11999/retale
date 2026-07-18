@@ -52,8 +52,8 @@
   `);
 
   const ArAgingReport = graphql(`
-    query ArAgingReport @cache(policy: NetworkOnly) {
-      arAgingReport {
+    query ArAgingReport($periodStart: String, $periodEnd: String) @cache(policy: NetworkOnly) {
+      arAgingReport(periodStart: $periodStart, periodEnd: $periodEnd) {
         asOf
         totalBalanceMinor
         rows {
@@ -70,8 +70,8 @@
   `);
 
   const ApAgingReport = graphql(`
-    query ApAgingReport @cache(policy: NetworkOnly) {
-      apAgingReport {
+    query ApAgingReport($periodStart: String, $periodEnd: String) @cache(policy: NetworkOnly) {
+      apAgingReport(periodStart: $periodStart, periodEnd: $periodEnd) {
         asOf
         totalBalanceMinor
         rows {
@@ -163,8 +163,8 @@
   const ALL_TABS: Tab[] = [
     { id: "sales", label: "Sales", perm: "report.sales.view", ranged: true },
     { id: "profit", label: "Profit", perm: "report.margin.view", ranged: true },
-    { id: "ar", label: "AR aging", perm: "report.ar_aging.view", ranged: false },
-    { id: "ap", label: "AP aging", perm: "report.ap_aging.view", ranged: false },
+    { id: "ar", label: "AR aging", perm: "report.ar_aging.view", ranged: true },
+    { id: "ap", label: "AP aging", perm: "report.ap_aging.view", ranged: true },
     {
       id: "variance",
       label: "Cash variance",
@@ -188,6 +188,48 @@
   let periodStart = $state(ago.toISOString().slice(0, 10));
   let periodEnd = $state(today.toISOString().slice(0, 10));
 
+  // ---- Filter mode: 'range' (date inputs) or 'month' (quick-select) --------
+  type FilterMode = "range" | "month";
+  let filterMode = $state<FilterMode>("range");
+
+  // For AR/AP/Tracking the user may want "All time" (no filter) or a specific
+  // period. Tabs like sales/profit always need a period.
+  const OPTIONAL_RANGE_TABS = new Set(["ar", "ap"]);
+  let useAllTime = $state(true); // default "All time" for AR/AP/Tracking
+
+  // Selected month in YYYY-MM format for the month picker.
+  let selectedMonth = $state(
+    `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`,
+  );
+
+  // Build an array of the last 12 months for the month picker buttons.
+  const MONTH_NAMES_SHORT = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const recentMonths = $derived.by(() => {
+    const months: { value: string; label: string }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = `${MONTH_NAMES_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+      months.push({ value: val, label });
+    }
+    return months;
+  });
+
+  /** Compute the effective period start/end from the current filter state. */
+  function effectiveRange(): { periodStart: string; periodEnd: string } {
+    if (filterMode === "month") {
+      const [y, m] = selectedMonth.split("-").map(Number);
+      const start = `${y}-${String(m).padStart(2, "0")}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      return { periodStart: start, periodEnd: end };
+    }
+    return { periodStart, periodEnd };
+  }
+
   let active = $state<string | null>(null);
   // Pick the first permitted tab once the viewer resolves.
   $effect(() => {
@@ -201,12 +243,21 @@
   async function load(tabId: string) {
     busy = true;
     error = null;
-    const range = { periodStart, periodEnd };
+    const range = effectiveRange();
+    // AR/AP/Tracking use optional filtering — when "All time" is selected,
+    // pass null so the API returns the full ledger.
+    const isOptional = OPTIONAL_RANGE_TABS.has(tabId);
+    const optionalRange =
+      isOptional && useAllTime
+        ? { periodStart: null as string | null, periodEnd: null as string | null }
+        : range;
     try {
       if (tabId === "sales") await SalesReport.fetch({ variables: range });
       else if (tabId === "profit") await ProfitReport.fetch({ variables: range });
-      else if (tabId === "ar") await ArAgingReport.fetch();
-      else if (tabId === "ap") await ApAgingReport.fetch();
+      else if (tabId === "ar")
+        await ArAgingReport.fetch({ variables: optionalRange });
+      else if (tabId === "ap")
+        await ApAgingReport.fetch({ variables: optionalRange });
       else if (tabId === "variance")
         await SessionVarianceReport.fetch({ variables: range });
       else if (tabId === "tracking") await TrackingBalances.fetch();
@@ -223,7 +274,25 @@
 
   function selectTab(id: string) {
     active = id;
+    // Reset to "All time" when switching to an optional-range tab.
+    if (OPTIONAL_RANGE_TABS.has(id)) useAllTime = true;
     load(id);
+  }
+
+  function selectMonth(monthValue: string) {
+    selectedMonth = monthValue;
+    useAllTime = false;
+    if (active) load(active);
+  }
+
+  function applyFilter() {
+    useAllTime = false;
+    if (active) load(active);
+  }
+
+  function clearFilter() {
+    useAllTime = true;
+    if (active) load(active);
   }
 
   // First load when a tab becomes active.
@@ -390,24 +459,96 @@
       {/each}
     </div>
 
-    <!-- Period control — only the ranged reports use it -->
+    <!-- Period control — ranged reports show a date filter -->
     {#if tabs.find((t) => t.id === active)?.ranged}
-      <div class="flex items-end gap-3">
-        <label class="space-y-1">
-          <span class="text-sm font-medium">From</span>
-          <Input type="date" bind:value={periodStart} class="w-44" />
-        </label>
-        <label class="space-y-1">
-          <span class="text-sm font-medium">To</span>
-          <Input type="date" bind:value={periodEnd} class="w-44" />
-        </label>
-        <Button
-          size="sm"
-          disabled={busy}
-          onclick={() => active && load(active)}
-        >
-          Apply
-        </Button>
+      {@const isOptionalTab = OPTIONAL_RANGE_TABS.has(active ?? "")}
+      <div class="space-y-3">
+        <!-- For AR/AP/Tracking: show All time toggle + filter mode toggle -->
+        {#if isOptionalTab}
+          <div class="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant={useAllTime ? "default" : "outline"}
+              onclick={clearFilter}
+            >
+              All time
+            </Button>
+            <span class="text-sm text-muted-foreground">or filter by:</span>
+            <div class="flex rounded-md border">
+              <button
+                class="px-3 py-1.5 text-sm transition-colors
+                  {filterMode === 'month'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'}"
+                onclick={() => (filterMode = "month")}
+              >
+                Month
+              </button>
+              <button
+                class="px-3 py-1.5 text-sm transition-colors border-l
+                  {filterMode === 'range'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'}"
+                onclick={() => (filterMode = "range")}
+              >
+                Date range
+              </button>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Month picker — quick-select grid of recent months -->
+        {#if (isOptionalTab && filterMode === "month") || false}
+          <div class="flex flex-wrap gap-1.5">
+            {#each recentMonths as m (m.value)}
+              <button
+                class="rounded-md border px-3 py-1.5 text-sm transition-colors
+                  {!useAllTime && selectedMonth === m.value
+                  ? 'border-primary bg-primary/10 font-medium text-primary'
+                  : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'}"
+                onclick={() => selectMonth(m.value)}
+              >
+                {m.label}
+              </button>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- Date range picker — standard From/To inputs -->
+        {#if (!isOptionalTab) || (isOptionalTab && filterMode === "range")}
+          <div class="flex items-end gap-3">
+            <label class="space-y-1">
+              <span class="text-sm font-medium">From</span>
+              <Input type="date" bind:value={periodStart} class="w-44" />
+            </label>
+            <label class="space-y-1">
+              <span class="text-sm font-medium">To</span>
+              <Input type="date" bind:value={periodEnd} class="w-44" />
+            </label>
+            <Button
+              size="sm"
+              disabled={busy}
+              onclick={() => isOptionalTab ? applyFilter() : active && load(active)}
+            >
+              Apply
+            </Button>
+          </div>
+        {/if}
+
+        <!-- Active filter indicator for optional-range tabs -->
+        {#if isOptionalTab && !useAllTime}
+          {@const eff = effectiveRange()}
+          <p class="text-xs text-muted-foreground">
+            Showing entries from <span class="font-medium text-foreground">{eff.periodStart}</span>
+            to <span class="font-medium text-foreground">{eff.periodEnd}</span>
+            <button
+              class="ml-2 text-xs text-primary hover:underline"
+              onclick={clearFilter}
+            >
+              ✕ Clear filter
+            </button>
+          </p>
+        {/if}
       </div>
     {/if}
 

@@ -319,23 +319,32 @@ function ageLedger(
 /** Build an aging report from a party-keyed set of ledger entries. */
 function buildAging(
   parties: Map<string, { name: string; entries: AgingEntry[] }>,
+  asOfTimestamp: number = Date.now(),
 ): AgingReport {
-  const now = Date.now();
   const rows: AgingRow[] = [];
   for (const [partyId, party] of parties) {
-    const aged = ageLedger(party.entries, now);
+    const aged = ageLedger(party.entries, asOfTimestamp);
     if (aged) rows.push({ partyId, partyName: party.name, ...aged });
   }
   rows.sort((a, b) => b.balanceMinor - a.balanceMinor);
   return {
-    asOf: new Date(now).toISOString(),
+    asOf: new Date(asOfTimestamp).toISOString(),
     rows,
     totalBalanceMinor: rows.reduce((s, r) => s + r.balanceMinor, 0),
   };
 }
 
-/** Customer debt aging — who owes us, and how overdue. */
-export async function arAgingReport(): Promise<AgingReport> {
+/** Customer debt aging — who owes us, and how overdue.
+ *  When `range` is provided, only ledger entries created within the period are
+ *  considered — useful for answering "how much did AR accrue this month?" */
+export async function arAgingReport(range?: DateRange): Promise<AgingReport> {
+  const conditions = [/* always join */];
+  if (range) {
+    const { start, end } = rangeBounds(range);
+    conditions.push(gte(customerLedger.createdAt, start));
+    conditions.push(lte(customerLedger.createdAt, end));
+  }
+
   const rows = await db
     .select({
       customerId: customerLedger.customerId,
@@ -344,7 +353,8 @@ export async function arAgingReport(): Promise<AgingReport> {
       createdAt: customerLedger.createdAt,
     })
     .from(customerLedger)
-    .innerJoin(customers, eq(customerLedger.customerId, customers.id));
+    .innerJoin(customers, eq(customerLedger.customerId, customers.id))
+    .where(conditions.length ? and(...conditions) : undefined);
 
   const parties = new Map<string, { name: string; entries: AgingEntry[] }>();
   for (const r of rows) {
@@ -357,11 +367,22 @@ export async function arAgingReport(): Promise<AgingReport> {
     });
     parties.set(r.customerId, p);
   }
-  return buildAging(parties);
+  
+  const asOfTimestamp = range ? rangeBounds(range).end.getTime() : Date.now();
+  return buildAging(parties, asOfTimestamp);
 }
 
-/** Vendor debt aging — who we owe, and how overdue (by each charge's due date). */
-export async function apAgingReport(): Promise<AgingReport> {
+/** Vendor debt aging — who we owe, and how overdue (by each charge's due date).
+ *  When `range` is provided, only ledger entries created within the period are
+ *  considered — useful for answering "how much did AP accrue this month?" */
+export async function apAgingReport(range?: DateRange): Promise<AgingReport> {
+  const conditions = [/* always join */];
+  if (range) {
+    const { start, end } = rangeBounds(range);
+    conditions.push(gte(vendorLedger.createdAt, start));
+    conditions.push(lte(vendorLedger.createdAt, end));
+  }
+
   const rows = await db
     .select({
       vendorId: vendorLedger.vendorId,
@@ -371,7 +392,8 @@ export async function apAgingReport(): Promise<AgingReport> {
       dueDate: vendorLedger.dueDate,
     })
     .from(vendorLedger)
-    .innerJoin(vendors, eq(vendorLedger.vendorId, vendors.id));
+    .innerJoin(vendors, eq(vendorLedger.vendorId, vendors.id))
+    .where(conditions.length ? and(...conditions) : undefined);
 
   const parties = new Map<string, { name: string; entries: AgingEntry[] }>();
   for (const r of rows) {
@@ -384,7 +406,9 @@ export async function apAgingReport(): Promise<AgingReport> {
     });
     parties.set(r.vendorId, p);
   }
-  return buildAging(parties);
+  
+  const asOfTimestamp = range ? rangeBounds(range).end.getTime() : Date.now();
+  return buildAging(parties, asOfTimestamp);
 }
 
 // --- Session variance ---
