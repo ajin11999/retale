@@ -9,6 +9,7 @@
   import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import {
+    AlertTriangle,
     ArrowDown,
     ArrowUp,
     Check,
@@ -779,6 +780,13 @@
       : null,
   );
 
+  const duplicateExistingLine = $derived.by(() => {
+    if (!itemDraft || !itemDraft.variantId || !purchase) return null;
+    return purchase.items.find(
+      (i) => i.variantId === itemDraft.variantId && i.id !== itemDraft.id
+    );
+  });
+
   // Move focus to a line-form field once it has rendered. Lets opening a new
   // line land the cursor in Variant, and picking a variant jump to Qty.
   async function focusLineField(id: "line-variant" | "line-qty") {
@@ -826,6 +834,13 @@
   async function saveItem() {
     const d = itemDraft;
     if (!d || !purchase) return;
+    if (duplicateExistingLine) {
+      feedback = {
+        ok: false,
+        text: "This variant is already on the order. Please edit the existing line instead.",
+      };
+      return;
+    }
     // A line is either a stock variant or a free-text non-stock line.
     if (!d.variantId && !d.description.trim()) {
       feedback = { ok: false, text: "Pick a variant or enter a description." };
@@ -2273,6 +2288,21 @@
                     focusLineField("line-qty");
                   }}
                 />
+                {#if duplicateExistingLine}
+                  <div class="mt-1 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                    <AlertTriangle class="size-4 shrink-0 text-amber-600" />
+                    <div class="flex-1 space-y-1">
+                      <p class="font-medium">This variant is already on the order.</p>
+                      <button
+                        type="button"
+                        class="text-amber-700 underline hover:text-amber-900"
+                        onclick={() => editItem(duplicateExistingLine)}
+                      >
+                        Edit existing line instead
+                      </button>
+                    </div>
+                  </div>
+                {/if}
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Section</span>
@@ -2295,9 +2325,8 @@
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium">Qty ordered</span>
-                <Input
+                <NumericInput
                   id="line-qty"
-                  type="number"
                   bind:value={itemDraft.qtyOrdered}
                   disabled={!editable}
                 />
