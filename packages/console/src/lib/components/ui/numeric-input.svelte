@@ -31,8 +31,20 @@
   let text = $state(value == null ? "" : value.toString());
 
   $effect(() => {
-    if (!isEditingExpr && (value == null ? "" : value.toString()) !== text) {
-      text = value == null ? "" : value.toString();
+    if (!isEditingExpr) {
+      const valStr = value == null ? "" : value.toString();
+      const textParsed = Number(text);
+      
+      let textMatchesValue = false;
+      if (value == null) {
+        textMatchesValue = text === "" || text === "-" || text === "." || text === "-.";
+      } else {
+        textMatchesValue = !isNaN(textParsed) && textParsed === value;
+      }
+
+      if (!textMatchesValue) {
+        text = valStr;
+      }
     }
   });
 
@@ -56,12 +68,26 @@
     }
 
     isEditingExpr = false;
-    const safe = raw.replace(/[^\d.-]/g, "");
+    let safe = raw.replace(/[^\d.-]/g, "");
+
+    // ensure only one decimal point
+    const dotIndex = safe.indexOf(".");
+    if (dotIndex !== -1) {
+      safe = safe.slice(0, dotIndex + 1) + safe.slice(dotIndex + 1).replace(/\./g, "");
+    }
+    
+    // ensure negative sign only at the beginning
+    const hasMinus = safe.startsWith("-");
+    safe = safe.replace(/-/g, "");
+    if (hasMinus) {
+      safe = "-" + safe;
+    }
+
     text = safe;
     node.value = safe;
     
     const parsed = Number(safe);
-    value = isNaN(parsed) || safe === "" || safe === "-" ? null : parsed;
+    value = isNaN(parsed) || safe === "" || safe === "-" || safe === "." || safe === "-." ? null : parsed;
     (rest as any).oninput?.(e);
   }
 
