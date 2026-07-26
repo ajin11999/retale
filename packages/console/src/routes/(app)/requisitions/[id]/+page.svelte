@@ -337,8 +337,8 @@
     requisition?.items.some((i: any) => i.variantId === newItemVariantId) && newItemVariantId !== ""
   );
 
-  let sectionOrder = $state<any[] | null>(null);
-  let itemOrders = $state<Record<string, any[]>>({});
+  let sectionOrder = $state.raw<any[] | null>(null);
+  let itemOrders = $state.raw<Record<string, any[]>>({});
 
   const sections = $derived.by(() => {
     if (sectionOrder) return sectionOrder;

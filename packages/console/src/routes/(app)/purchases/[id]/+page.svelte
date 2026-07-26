@@ -1757,8 +1757,8 @@
 
   // Drag and Drop
   const flipDurationMs = 200;
-  let dndSectionOrder = $state<any[] | null>(null);
-  let dndItemOrders = $state<Record<string, any[]>>({});
+  let dndSectionOrder = $state.raw<any[] | null>(null);
+  let dndItemOrders = $state.raw<Record<string, any[]>>({});
 
   function handleSectionConsider(e: CustomEvent<DndEvent>) {
     dndSectionOrder = e.detail.items;
