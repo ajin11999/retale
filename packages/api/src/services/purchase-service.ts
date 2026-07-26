@@ -13,6 +13,7 @@ import {
   purchaseSends,
   purchases,
 } from "../db/schema/purchases.ts";
+import { purchaseRequisitionItems, purchaseRequisitions } from "../db/schema/requisitions.ts";
 import { vendorVariantCodes } from "../db/schema/vendor-variant-codes.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
@@ -245,10 +246,23 @@ export async function updatePurchase(
 export async function cancelPurchase(id: string, userId: string): Promise<Purchase> {
   const purchase = await loadPurchase(id);
   if (purchase.status === "cancelled") return purchase;
-  await db
-    .update(purchases)
-    .set({ status: "cancelled", cancelledAt: new Date(), cancelledByUserId: userId })
-    .where(eq(purchases.id, id));
+  
+  await db.transaction(async (tx) => {
+    await tx
+      .update(purchases)
+      .set({ status: "cancelled", cancelledAt: new Date(), cancelledByUserId: userId })
+      .where(eq(purchases.id, id));
+      
+    const items = await tx.select({ requisitionItemId: purchaseItems.requisitionItemId, qtyOrdered: purchaseItems.qtyOrdered })
+      .from(purchaseItems)
+      .where(and(eq(purchaseItems.purchaseId, id), isNotNull(purchaseItems.requisitionItemId)));
+      
+    for (const item of items) {
+      if (item.requisitionItemId) {
+        await syncRequisitionItemQty(tx, item.requisitionItemId, -item.qtyOrdered);
+      }
+    }
+  });
   return loadPurchase(id);
 }
 
@@ -627,6 +641,7 @@ async function assertSectionInPurchase(sectionId: string, purchaseId: string): P
 export async function createItem(input: {
   purchaseId: string;
   sectionId?: string | null;
+  requisitionItemId?: string | null;
   variantId?: string | null;
   description?: string | null;
   qtyOrdered: number;
@@ -654,12 +669,16 @@ export async function createItem(input: {
       id,
       purchaseId: input.purchaseId,
       sectionId: input.sectionId ?? null,
+      requisitionItemId: input.requisitionItemId ?? null,
       variantId,
       description,
       qtyOrdered: input.qtyOrdered,
       unitCostMinor: input.unitCostMinor,
       sortOrder: input.sortOrder ?? 0,
     });
+    if (input.requisitionItemId) {
+      await syncRequisitionItemQty(tx, input.requisitionItemId, input.qtyOrdered);
+    }
     await bumpRevision(tx, input.purchaseId);
   });
   return loadItem(id);
@@ -676,6 +695,7 @@ export async function createItems(input: {
   purchaseId: string;
   lines: Array<{
     sectionId?: string | null;
+    requisitionItemId?: string | null;
     variantId?: string | null;
     description?: string | null;
     qtyOrdered: number;
@@ -693,6 +713,7 @@ export async function createItems(input: {
     id: string;
     purchaseId: string;
     sectionId: string | null;
+    requisitionItemId: string | null;
     variantId: string | null;
     description: string | null;
     qtyOrdered: number;
@@ -714,6 +735,7 @@ export async function createItems(input: {
       id: ulid(),
       purchaseId: input.purchaseId,
       sectionId: line.sectionId ?? null,
+      requisitionItemId: line.requisitionItemId ?? null,
       variantId,
       description,
       qtyOrdered: line.qtyOrdered,
@@ -729,6 +751,11 @@ export async function createItems(input: {
     let next = (maxSort ?? -1) + 1;
     const rows = prepared.map((p) => ({ ...p, sortOrder: next++ }));
     await tx.insert(purchaseItems).values(rows);
+    for (const r of rows) {
+      if (r.requisitionItemId) {
+        await syncRequisitionItemQty(tx, r.requisitionItemId, r.qtyOrdered);
+      }
+    }
     await bumpRevision(tx, input.purchaseId);
     return rows.map((r) => r.id);
   });
@@ -798,6 +825,10 @@ export async function updateItem(
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
       })
       .where(eq(purchaseItems.id, id));
+      
+    if (patch.qtyOrdered !== undefined && patch.qtyOrdered !== item.qtyOrdered && item.requisitionItemId) {
+      await syncRequisitionItemQty(tx, item.requisitionItemId, patch.qtyOrdered - item.qtyOrdered);
+    }
     await bumpRevision(tx, item.purchaseId);
   });
   return loadItem(id);
@@ -814,6 +845,9 @@ export async function deleteItem(id: string): Promise<void> {
 
   await db.transaction(async (tx) => {
     await tx.delete(purchaseItems).where(eq(purchaseItems.id, id));
+    if (item.requisitionItemId) {
+      await syncRequisitionItemQty(tx, item.requisitionItemId, -item.qtyOrdered);
+    }
     await bumpRevision(tx, item.purchaseId);
   });
 }
@@ -1037,4 +1071,49 @@ export async function confirmPurchaseSend(input: {
       .where(eq(purchases.id, send.purchaseId));
   });
   return loadSend(input.id);
+}
+
+async function syncRequisitionItemQty(tx: Tx, requisitionItemId: string, delta: number) {
+  if (delta === 0) return;
+  
+  await tx.update(purchaseRequisitionItems)
+    .set({ qtyOrdered: sql`${purchaseRequisitionItems.qtyOrdered} + ${delta}` })
+    .where(eq(purchaseRequisitionItems.id, requisitionItemId));
+    
+  const reqItemRows = await tx.select({ requisitionId: purchaseRequisitionItems.requisitionId })
+    .from(purchaseRequisitionItems)
+    .where(eq(purchaseRequisitionItems.id, requisitionItemId));
+    
+  const reqItem = reqItemRows[0];
+  if (!reqItem) return;
+  const requisitionId = reqItem.requisitionId;
+
+  const pending = await tx.select({ id: purchaseRequisitionItems.id })
+    .from(purchaseRequisitionItems)
+    .where(and(
+      eq(purchaseRequisitionItems.requisitionId, requisitionId),
+      sql`${purchaseRequisitionItems.qtyOrdered} < ${purchaseRequisitionItems.qtyRequested}`
+    ))
+    .limit(1);
+    
+  const ordered = await tx.select({ id: purchaseRequisitionItems.id })
+    .from(purchaseRequisitionItems)
+    .where(and(
+      eq(purchaseRequisitionItems.requisitionId, requisitionId),
+      sql`${purchaseRequisitionItems.qtyOrdered} > 0`
+    ))
+    .limit(1);
+
+  let status: typeof purchaseRequisitions.$inferSelect.status = "open";
+  if (ordered.length === 0) {
+    status = "open";
+  } else if (pending.length > 0) {
+    status = "partially_ordered";
+  } else {
+    status = "fully_ordered";
+  }
+
+  await tx.update(purchaseRequisitions)
+    .set({ status })
+    .where(eq(purchaseRequisitions.id, requisitionId));
 }

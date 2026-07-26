@@ -58,6 +58,7 @@ export const typeDefs = /* GraphQL */ `
     id: ID!
     purchaseId: ID!
     sectionId: ID
+    requisitionItemId: ID
     variantId: ID
     "Free-text line label; required (and the line identity) for non-stock lines."
     description: String
@@ -126,6 +127,7 @@ export const typeDefs = /* GraphQL */ `
   "One line for the bulk-add picker (reorder suggestions / by-stock)."
   input PurchaseLineInput {
     sectionId: ID
+    requisitionItemId: ID
     variantId: ID
     description: String
     qtyOrdered: Float!
@@ -183,6 +185,7 @@ export const typeDefs = /* GraphQL */ `
     createPurchaseItem(
       purchaseId: ID!
       sectionId: ID
+      requisitionItemId: ID
       variantId: ID
       description: String
       qtyOrdered: Float!
@@ -194,6 +197,7 @@ export const typeDefs = /* GraphQL */ `
     updatePurchaseItem(
       id: ID!
       sectionId: ID
+      requisitionItemId: ID
       variantId: ID
       description: String
       qtyOrdered: Float

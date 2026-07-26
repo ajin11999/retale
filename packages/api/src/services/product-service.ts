@@ -3,7 +3,7 @@
 // stock movements belong to the stock/purchase domains — this service only
 // sets initial cost/qty values. See docs/design-decisions.md.
 
-import { and, eq, inArray, isNull, like, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne, or, getTableColumns } from "drizzle-orm";
 import { ulid } from "ulid";
 import {
   bundleComponents,
@@ -291,20 +291,7 @@ export async function searchVariants(search: string, limitCount: number = 50): P
   }
 
   return db
-    .select({
-      id: productVariants.id,
-      productId: productVariants.productId,
-      interchangeGroupId: productVariants.interchangeGroupId,
-      sku: productVariants.sku,
-      barcode: productVariants.barcode,
-      label: productVariants.label,
-      unit: productVariants.unit,
-      qtyDecimals: productVariants.qtyDecimals,
-      priceMinor: productVariants.priceMinor,
-      costMinor: productVariants.costMinor,
-      totalQty: productVariants.totalQty,
-      sortOrder: productVariants.sortOrder,
-    })
+    .select(getTableColumns(productVariants))
     .from(productVariants)
     .innerJoin(products, eq(productVariants.productId, products.id))
     .where(filters.length ? and(isNull(products.archivedAt), ...filters) : isNull(products.archivedAt))

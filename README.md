@@ -61,10 +61,11 @@ The Flutter packages ship `lib/` + `pubspec` only — on first checkout run
 `flutter create . --platforms=...` and `flutter pub get` in the package dir
 (see each package's README, e.g. [`packages/pos/README.md`](packages/pos/README.md)).
 
-For a working dev login (root users require 2FA), seed a full-permission user:
+For a working dev login, first seed a root user, then seed a full-permission user (since root users require 2FA):
 
 ```sh
-bun run dev:seed-user       # creates manager / manager12345
+bun run dev:seed-root       # creates admin / admin123 (root user)
+bun run dev:seed-user       # creates manager / manager12345 (non-root)
 ```
 
 Dev data helpers: `bun run dev:seed-products`, `bun run db:seed`.

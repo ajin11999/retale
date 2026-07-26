@@ -16,9 +16,11 @@ import {
   text,
   timestamp,
   varchar,
+  foreignKey,
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { productVariants } from "./products.ts";
+import { purchaseRequisitionItems } from "./requisitions.ts";
 import { vendors } from "./vendors.ts";
 import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
@@ -86,6 +88,7 @@ export const purchaseItems = mysqlTable(
     sectionId: ulidRef().references((): AnyMySqlColumn => purchaseSections.id, {
       onDelete: "set null",
     }),
+    requisitionItemId: ulidRef(),
     variantId: ulidRef().references(() => productVariants.id, { onDelete: "set null" }),
     // Vendor free-text label. Required when variantId is null (it is the line).
     description: varchar({ length: 300 }),
@@ -95,6 +98,7 @@ export const purchaseItems = mysqlTable(
     sortOrder: int().notNull().default(0),
   },
   (t) => [
+    foreignKey({ name: "pi_req_item_id_fk", columns: [t.requisitionItemId], foreignColumns: [purchaseRequisitionItems.id] }).onDelete("set null"),
     index("purchase_items_purchase_id_idx").on(t.purchaseId),
     index("purchase_items_variant_id_idx").on(t.variantId),
   ],
@@ -164,6 +168,10 @@ export const purchaseItemsRelations = relations(purchaseItems, ({ one }) => ({
   variant: one(productVariants, {
     fields: [purchaseItems.variantId],
     references: [productVariants.id],
+  }),
+  requisitionItem: one(purchaseRequisitionItems, {
+    fields: [purchaseItems.requisitionItemId],
+    references: [purchaseRequisitionItems.id],
   }),
 }));
 

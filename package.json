@@ -20,6 +20,7 @@
     "jobs:run": "bun run --filter @retale/api jobs:run",
     "schema:dump": "bun run --filter @retale/api schema:dump",
     "dev:seed-user": "bun run --filter @retale/api dev:seed-user",
+    "dev:seed-root": "bun run --filter @retale/api dev:seed-root",
     "dev:seed-products": "bun run --filter @retale/api dev:seed-products"
   },
   "devDependencies": {

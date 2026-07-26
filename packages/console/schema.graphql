@@ -167,6 +167,8 @@ type Query {
 
   """Balanced double-entry journal for the period, for external accounting."""
   journalExport(periodStart: String!, periodEnd: String!): JournalExport!
+  requisitions(status: RequisitionStatus, includeCancelled: Boolean): [PurchaseRequisition!]!
+  requisition(id: ID!): PurchaseRequisition
 }
 
 type Mutation {
@@ -292,13 +294,13 @@ type Mutation {
   updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
   deletePurchaseSection(id: ID!): Boolean!
   reorderPurchaseSections(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseSection!]!
-  createPurchaseItem(purchaseId: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float!, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
+  createPurchaseItem(purchaseId: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float!, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
 
   """
   Append several lines at once (bulk-add picker); all-or-nothing, one revision bump.
   """
   createPurchaseItems(purchaseId: ID!, lines: [PurchaseLineInput!]!): [PurchaseItem!]!
-  updatePurchaseItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyOrdered: Float, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
+  updatePurchaseItem(id: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
   deletePurchaseItem(id: ID!): Boolean!
   reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
 
@@ -579,6 +581,17 @@ type Mutation {
 
   """Hard delete. Vendors pointing here revert to the fallback address."""
   deleteAddress(id: ID!): Boolean!
+  createRequisition(name: String!): PurchaseRequisition!
+  updateRequisition(id: ID!, name: String, status: RequisitionStatus): PurchaseRequisition!
+  deleteRequisition(id: ID!): Boolean!
+  createRequisitionSection(requisitionId: ID!, name: String!): PurchaseRequisitionSection!
+  updateRequisitionSection(id: ID!, name: String!): PurchaseRequisitionSection!
+  deleteRequisitionSection(id: ID!): Boolean!
+  reorderRequisitionSections(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionSection!]!
+  createRequisitionItem(requisitionId: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float!): PurchaseRequisitionItem!
+  updateRequisitionItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float): PurchaseRequisitionItem!
+  deleteRequisitionItem(id: ID!): Boolean!
+  reorderRequisitionItems(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionItem!]!
 }
 
 type User {
@@ -1036,6 +1049,7 @@ type PurchaseItem {
   id: ID!
   purchaseId: ID!
   sectionId: ID
+  requisitionItemId: ID
   variantId: ID
 
   """
@@ -1105,6 +1119,7 @@ type VendorLastCost {
 """One line for the bulk-add picker (reorder suggestions / by-stock)."""
 input PurchaseLineInput {
   sectionId: ID
+  requisitionItemId: ID
   variantId: ID
   description: String
   qtyOrdered: Float!
@@ -2088,4 +2103,42 @@ type JournalExport {
 
   """Events that could not be classified, plus any balance-check failures."""
   warnings: [JournalWarning!]!
+}
+
+enum RequisitionStatus {
+  draft
+  open
+  partially_ordered
+  fully_ordered
+  cancelled
+}
+
+type PurchaseRequisition {
+  id: ID!
+  name: String!
+  status: RequisitionStatus!
+  createdByUserId: ID!
+  createdAt: String!
+  updatedAt: String!
+  sections: [PurchaseRequisitionSection!]!
+  items: [PurchaseRequisitionItem!]!
+}
+
+type PurchaseRequisitionSection {
+  id: ID!
+  requisitionId: ID!
+  name: String!
+  sortOrder: Int!
+  items: [PurchaseRequisitionItem!]!
+}
+
+type PurchaseRequisitionItem {
+  id: ID!
+  requisitionId: ID!
+  sectionId: ID
+  variantId: ID
+  description: String
+  qtyRequested: Float!
+  qtyOrdered: Float!
+  sortOrder: Int!
 }

@@ -15,6 +15,7 @@
     "db:seed": "bun run scripts/seed-templates.ts",
     "schema:dump": "bun run scripts/dump-schema.ts",
     "dev:seed-user": "bun run scripts/seed-dev-user.ts",
+    "dev:seed-root": "bun run scripts/seed-dev-root.ts",
     "dev:seed-products": "bun run scripts/seed-dev-products.ts",
     "dev:seed-open-price": "bun run scripts/seed-open-price.ts",
     "dev:seed-receiving": "bun run scripts/seed-dev-receiving.ts",

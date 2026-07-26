@@ -28,6 +28,7 @@
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
+  import PullRequisitionModal from "./pull-requisition-modal.svelte";
 
   // Query document — Houdini scans this for codegen. The live store is
   // supplied by +page.ts through `data` (route-store wiring is unavailable).
@@ -783,7 +784,7 @@
   const duplicateExistingLine = $derived.by(() => {
     if (!itemDraft || !itemDraft.variantId || !purchase) return null;
     return purchase.items.find(
-      (i) => i.variantId === itemDraft.variantId && i.id !== itemDraft.id
+      (i) => i.variantId === itemDraft!.variantId && i.id !== itemDraft!.id
     );
   });
 
@@ -941,6 +942,7 @@
   // default tab), or sweep the catalog sorted by least stock (ad-hoc). Both end
   // in a single batch insert + refetch.
   let bulkOpen = $state(false);
+  let pullModalOpen = $state(false);
   let bulkTab = $state<"reorder" | "stock">("reorder");
   // Reorder tab: default-scope to this PO's vendor; toggle shows all vendors.
   let reorderAllVendors = $state(false);
@@ -2129,6 +2131,12 @@
             variant="outline"
             size="sm"
             disabled={busy || !editable}
+            onclick={() => pullModalOpen = true}>Pull from Requisition</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !editable}
             onclick={newItem}>Add line</Button
           >
         </div>
@@ -3312,3 +3320,12 @@
     {/if}
   {/if}
 </div>
+
+{#if purchase}
+<PullRequisitionModal 
+  bind:open={pullModalOpen} 
+  purchaseId={purchase.id} 
+  products={$RefData.data?.products ?? []} 
+  onAdd={() => PurchaseDetail.fetch({ policy: 'NetworkOnly', variables: { id: purchase.id } })} 
+/>
+{/if}
