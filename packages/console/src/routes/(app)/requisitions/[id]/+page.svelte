@@ -8,8 +8,9 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
-  import { AlertTriangle, Plus, Trash2, Printer, Pencil, Check, X, GripVertical } from "@lucide/svelte";
+  import { AlertTriangle, Plus, Trash2, Printer, Check, X, GripVertical, Pencil } from "@lucide/svelte";
   import type { PageData } from "./$types";
   import { matchesTokens, searchTokens } from "$lib/utils";
 
@@ -146,12 +147,59 @@
   let editingSectionId = $state<string | null>(null);
   let editedSectionName = $state("");
 
-  // Edit Item
-  let editingItemId = $state<string | null>(null);
-  let editedItemVariantId = $state("");
-  let editedItemDesc = $state("");
-  let editedItemQty = $state(1);
-  let editedItemSectionId = $state("");
+  type CellField = "qty" | "desc";
+  let cellEdit = $state<{ id: string; field: CellField } | null>(null);
+  let cellStr = $state("");
+  let cellQty = $state<number>(0);
+
+  function selectOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  function startCellEdit(item: any, field: CellField) {
+    if (field === "qty") cellQty = item.qtyRequested;
+    else cellStr = item.description || "";
+    cellEdit = { id: item.id, field };
+  }
+
+  async function commitCell() {
+    const c = cellEdit;
+    if (!c || !requisition) return;
+    const i = requisition.items.find((x: any) => x.id === c.id);
+    if (!i) {
+      cellEdit = null;
+      return;
+    }
+    
+    if (c.field === "qty") {
+      if (cellQty <= 0) {
+        cellEdit = null;
+        return;
+      }
+      if (cellQty !== i.qtyRequested) {
+        await UpdateRequisitionItem.mutate({ id: i.id, qtyRequested: cellQty });
+        await refetch();
+      }
+    } else {
+      const d = cellStr.trim();
+      if ((d || null) !== (i.description || null)) {
+        await UpdateRequisitionItem.mutate({ id: i.id, description: d || null });
+        await refetch();
+      }
+    }
+    cellEdit = null;
+  }
+
+  function cellKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitCell();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cellEdit = null;
+    }
+  }
 
   // Multi-select state
   let selectedItemIds = $state<Set<string>>(new Set());
@@ -236,30 +284,6 @@
     } finally {
       adding = false;
     }
-  }
-
-  function startEditItem(item: any) {
-    editingItemId = item.id;
-    editedItemVariantId = item.variantId || "";
-    editedItemDesc = item.description || "";
-    editedItemQty = item.qtyRequested;
-    editedItemSectionId = item.sectionId || "";
-  }
-
-  async function saveEditItem() {
-    if (!editingItemId) return;
-    if (editedItemQty <= 0) return;
-    if (!editedItemVariantId && !editedItemDesc.trim()) return;
-
-    await UpdateRequisitionItem.mutate({
-      id: editingItemId,
-      sectionId: editedItemSectionId || null,
-      variantId: editedItemVariantId || null,
-      description: editedItemDesc || null,
-      qtyRequested: editedItemQty
-    });
-    editingItemId = null;
-    await refetch();
   }
 
   async function deleteItem(id: string) {
@@ -358,12 +382,14 @@
   });
 
   // --- Drag and Drop ---
+  const dndSections = $derived([{ id: "unsectioned", name: "Items" }, ...sections]);
+
   function handleSectionConsider(e: CustomEvent<DndEvent>) {
-    sectionOrder = e.detail.items;
+    sectionOrder = e.detail.items.filter(x => x.id !== "unsectioned");
   }
 
   async function handleSectionFinalize(e: CustomEvent<DndEvent>) {
-    sectionOrder = e.detail.items;
+    sectionOrder = e.detail.items.filter(x => x.id !== "unsectioned");
     if (requisition) {
       await ReorderSections.mutate({ requisitionId: requisition.id, orderedIds: sectionOrder!.map(x => x.id) });
       await refetch();
@@ -587,41 +613,13 @@
         </div>
       {/snippet}
       
-      {#snippet editLineForm(item: any)}
-        <div class="flex gap-4 items-center">
-          <div class="flex-1 space-y-1">
-            <Combobox options={variantOptions} bind:value={editedItemVariantId} placeholder="Search variant..." />
-          </div>
-          {#if !editedItemVariantId}
-            <div class="flex-1 space-y-1">
-              <Input placeholder="Describe item..." bind:value={editedItemDesc} />
-            </div>
-          {/if}
-          <div class="w-24 space-y-1">
-            <Input type="number" bind:value={editedItemQty} min="1" />
-          </div>
-          <div class="w-48 space-y-1">
-            <select class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" bind:value={editedItemSectionId}>
-              <option value="">No Section</option>
-              {#each requisition.sections as sec}
-                <option value={sec.id}>{sec.name}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="flex items-center gap-1">
-             <Button size="icon" variant="ghost" onclick={saveEditItem}><Check class="h-4 w-4" /></Button>
-             <Button size="icon" variant="ghost" onclick={() => editingItemId = null}><X class="h-4 w-4" /></Button>
-          </div>
-        </div>
-      {/snippet}
-
       <div class="border rounded-lg bg-card">
-        <div use:dndzone={{items: [{id: "unsectioned", name: "Items"}, ...sections], dragDisabled: search !== "" || editingSectionId !== null || editingItemId !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize}>
-          {#each [{ id: "unsectioned", name: "Items" }, ...sections] as section (section.id)}
+        <div use:dndzone={{items: dndSections, dragDisabled: search !== "" || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize}>
+          {#each dndSections as section, idx (section.id)}
             <div animate:flip={{duration: flipDurationMs}}>
               {#if groupedItems[section.id] && (groupedItems[section.id].length > 0 || search === "")}
                 {#if section.id !== "unsectioned" || requisition.sections.length > 0}
-                  <div class="bg-muted/30 px-4 py-2 border-b font-medium text-sm flex justify-between items-center group">
+                  <div class="bg-muted/30 px-4 py-2 border-b {idx > 0 ? 'border-t' : ''} font-medium text-sm flex justify-between items-center group">
                     <div class="flex items-center gap-2">
                        <GripVertical class="h-4 w-4 text-muted-foreground opacity-50 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity print:hidden" />
                        {#if editingSectionId === section.id}
@@ -651,42 +649,59 @@
                       <th class="px-4 py-2 text-right font-medium">Requested</th>
                       <th class="px-4 py-2 text-right font-medium">Ordered</th>
                       <th class="px-4 py-2 text-right font-medium">Remaining</th>
-                      <th class="w-20 print:hidden"></th>
+                      <th class="w-12 print:hidden"></th>
                     </tr>
                   </thead>
-                  <tbody use:dndzone={{items: groupedItems[section.id], dragDisabled: search !== "" || editingItemId !== null || editingSectionId !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={(e) => handleItemConsider(section.id, e)} onfinalize={(e) => handleItemFinalize(section.id, e)}>
+                  <tbody use:dndzone={{items: groupedItems[section.id], dragDisabled: search !== "" || cellEdit !== null || editingSectionId !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={(e) => handleItemConsider(section.id, e)} onfinalize={(e) => handleItemFinalize(section.id, e)}>
                     {#each groupedItems[section.id] as item (item.id)}
                       {@const remaining = item.qtyRequested - item.qtyOrdered}
                       <tr animate:flip={{duration: flipDurationMs}} class="border-b last:border-0 hover:bg-muted/40 group/row {selectedItemIds.has(item.id) ? 'bg-sky-50 hover:bg-sky-50' : ''}">
-                        {#if editingItemId === item.id}
-                           <td colspan="8" class="p-2 bg-muted/10">
-                              {@render editLineForm(item)}
-                           </td>
-                        {:else}
-                          <td class="px-2 py-2 text-center print:hidden">
-                            <GripVertical class="h-4 w-4 text-muted-foreground opacity-30 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity inline-block" />
-                          </td>
-                          <td class="px-2 py-2 text-center print:hidden">
-                            <input type="checkbox" checked={selectedItemIds.has(item.id)} onchange={() => toggleItemSelection(item.id)} class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
-                          </td>
-                          <td class="px-4 py-2 text-muted-foreground">{item.sku || "-"}</td>
-                          <td class="px-4 py-2 font-medium">{item.variantName}</td>
-                          <td class="px-4 py-2 text-right">{item.qtyRequested}</td>
-                          <td class="px-4 py-2 text-right">{item.qtyOrdered}</td>
-                          <td class="px-4 py-2 text-right font-semibold {remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}">
-                            {remaining}
-                          </td>
-                          <td class="px-4 py-2 text-right print:hidden">
-                             <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
-                               <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-primary" onclick={() => startEditItem(item)}>
-                                 <Pencil class="h-3 w-3" />
-                               </Button>
-                               <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-destructive" onclick={() => deleteItem(item.id)}>
-                                 <Trash2 class="h-4 w-4" />
-                               </Button>
-                             </div>
-                          </td>
-                        {/if}
+                        <td class="px-2 py-2 text-center print:hidden w-8">
+                          <GripVertical class="h-4 w-4 text-muted-foreground opacity-30 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity inline-block" />
+                        </td>
+                        <td class="px-2 py-2 text-center print:hidden w-8">
+                          <input type="checkbox" checked={selectedItemIds.has(item.id)} onchange={() => toggleItemSelection(item.id)} class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
+                        </td>
+                        <td class="px-4 py-2 text-muted-foreground">{item.sku || "-"}</td>
+                        <td class="px-4 py-2 font-medium">
+                          {#if cellEdit?.id === item.id && cellEdit?.field === "desc"}
+                            <input
+                              bind:value={cellStr}
+                              use:selectOnMount
+                              onkeydown={cellKeydown}
+                              onblur={commitCell}
+                              class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            />
+                          {:else if !item.variantId}
+                            <button type="button" class="-mx-1 rounded px-1 text-left hover:bg-accent" title="Edit description" onclick={() => startCellEdit(item, "desc")}>{item.variantName}</button>
+                          {:else}
+                            {item.variantName}
+                          {/if}
+                        </td>
+                        <td class="px-4 py-2 text-right tabular-nums">
+                          {#if cellEdit?.id === item.id && cellEdit?.field === "qty"}
+                            <NumericInput
+                              bind:value={cellQty}
+                              autofocus={true}
+                              onkeydown={cellKeydown}
+                              onblur={commitCell}
+                              class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ml-auto"
+                            />
+                          {:else}
+                            <button type="button" class="-mx-1 rounded px-1 hover:bg-accent" title="Edit quantity" onclick={() => startCellEdit(item, "qty")}>{item.qtyRequested}</button>
+                          {/if}
+                        </td>
+                        <td class="px-4 py-2 text-right">{item.qtyOrdered}</td>
+                        <td class="px-4 py-2 text-right font-semibold {remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}">
+                          {remaining}
+                        </td>
+                        <td class="px-4 py-2 text-right print:hidden">
+                           <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                             <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-destructive" onclick={() => deleteItem(item.id)}>
+                               <Trash2 class="h-4 w-4" />
+                             </Button>
+                           </div>
+                        </td>
                       </tr>
                     {/each}
                     {#if groupedItems[section.id].length === 0}
