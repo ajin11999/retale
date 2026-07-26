@@ -38,8 +38,47 @@
   let discountFixed = $state<number | null>(null);
   let taxPct = $state<number | null>(null);
 
+  const getItemBaseCost = (item: any) => {
+    if (typeof item?.baseCostMinor === 'number' && item.baseCostMinor > 0) return item.baseCostMinor;
+    if (typeof item?.unitCostMinor === 'number' && item.unitCostMinor > 0) return item.unitCostMinor;
+    return 0;
+  };
+
   const selectedItems = $derived(items.filter(i => selectedItemIds.includes(i.id)));
-  const totalBaseAmount = $derived(selectedItems.reduce((acc, i) => acc + (i.baseCostMinor * i.qtyOrdered), 0));
+  const totalBaseAmount = $derived(selectedItems.reduce((acc, i) => acc + (getItemBaseCost(i) * (i.qtyOrdered || 0)), 0));
+
+  let prevOpen = false;
+  $effect(() => {
+    if (open && !prevOpen) {
+      const first = selectedItems[0];
+      const sameDiscount = selectedItems.length > 0 && selectedItems.every(i => (i.discount || null) === (first?.discount || null));
+      const sameTax = selectedItems.length > 0 && selectedItems.every(i => (i.taxPct ?? null) === (first?.taxPct ?? null));
+
+      if (sameDiscount && first?.discount) {
+        if (first.discount.startsWith("flat-")) {
+          discountType = "fixed";
+          const val = parseFloat(first.discount.replace("flat-", ""));
+          discountFixed = isNaN(val) ? null : val;
+          discountString = "";
+        } else {
+          discountType = "percentage";
+          discountString = first.discount;
+          discountFixed = null;
+        }
+      } else {
+        discountType = "percentage";
+        discountString = "";
+        discountFixed = null;
+      }
+
+      if (sameTax && first?.taxPct != null) {
+        taxPct = first.taxPct;
+      } else {
+        taxPct = null;
+      }
+    }
+    prevOpen = open;
+  });
 
   // Compute chained percentage discount from a string like "10+2.5"
   function getDiscountMultiplier(str: string) {
@@ -58,7 +97,9 @@
     const taxMultiplier = 1 + ((taxPct || 0) / 100);
 
     return selectedItems.map(item => {
-      const lineSubtotal = item.baseCostMinor * item.qtyOrdered;
+      const baseCost = getItemBaseCost(item);
+      const qty = item.qtyOrdered || 0;
+      const lineSubtotal = baseCost * qty;
       
       let netLineSubtotal = lineSubtotal;
       let finalDiscountString = "";
@@ -79,13 +120,13 @@
 
       netLineSubtotal = netLineSubtotal * taxMultiplier;
 
-      const newUnitCost = item.qtyOrdered > 0 ? netLineSubtotal / item.qtyOrdered : 0;
+      const newUnitCost = qty > 0 ? netLineSubtotal / qty : 0;
 
       return {
         id: item.id,
-        qtyOrdered: item.qtyOrdered,
+        qtyOrdered: qty,
         description: item.description || item.variant?.sku || 'Item',
-        baseCostMinor: item.baseCostMinor,
+        baseCostMinor: baseCost,
         discount: finalDiscountString || null,
         taxPct: taxPct || null,
         unitCostMinor: Math.max(0, Math.round(newUnitCost * 100) / 100),

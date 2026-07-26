@@ -67,6 +67,9 @@
           qtyDelivered
           qtyInTransit
           transitFreightMinor
+          baseCostMinor
+          discount
+          taxPct
           unitCostMinor
           sortOrder
         }
@@ -300,6 +303,9 @@
         variantId
         description
         qtyOrdered
+        baseCostMinor
+        discount
+        taxPct
         unitCostMinor
         sortOrder
       }
@@ -346,6 +352,9 @@
           qtyDelivered
           qtyInTransit
           transitFreightMinor
+          baseCostMinor
+          discount
+          taxPct
           unitCostMinor
           sortOrder
         }
@@ -3299,5 +3308,15 @@
   products={$RefData.data?.products ?? []} 
   prefillCost={prefillCost}
   onAdd={() => PurchaseDetail.fetch({ policy: 'NetworkOnly', variables: { id: purchase.id } })} 
+/>
+<DiscountModal
+  bind:open={showDiscountModal}
+  purchaseId={purchase.id}
+  selectedItemIds={[...selected]}
+  items={items}
+  onSaved={() => {
+    selected = new Set();
+    PurchaseDetail.fetch({ policy: 'NetworkOnly', variables: { id: purchase.id } });
+  }}
 />
 {/if}
