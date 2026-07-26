@@ -1760,24 +1760,15 @@
   let dndSectionOrder = $state<any[] | null>(null);
   let dndItemOrders = $state<Record<string, any[]>>({});
 
-  const dndSections = $derived.by(() => {
-    const arr = dndSectionOrder || visibleGroups;
-    // Ensure UNGROUPED is always at the bottom and never duplicated
-    const ungrouped = visibleGroups.find(g => g.key === UNGROUPED);
-    if (dndSectionOrder && ungrouped && !dndSectionOrder.find(g => g.key === UNGROUPED)) {
-      return [...dndSectionOrder, ungrouped];
-    }
-    return arr;
-  });
-
   function handleSectionConsider(e: CustomEvent<DndEvent>) {
-    dndSectionOrder = e.detail.items.filter(x => x.id !== UNGROUPED);
+    dndSectionOrder = e.detail.items;
   }
 
   async function handleSectionFinalize(e: CustomEvent<DndEvent>) {
-    dndSectionOrder = e.detail.items.filter(x => x.id !== UNGROUPED);
+    dndSectionOrder = e.detail.items;
     if (purchase) {
-      await persistOrder(() => ReorderSections.mutate({ purchaseId: purchase.id, orderedIds: dndSectionOrder!.map(x => x.id) }));
+      const orderedIds = e.detail.items.map(x => x.id).filter(id => id !== UNGROUPED);
+      await persistOrder(() => ReorderSections.mutate({ purchaseId: purchase.id, orderedIds }));
     }
   }
 
@@ -1788,7 +1779,7 @@
   let dndTimeout: any;
   async function handleItemFinalize(groupKey: string, e: CustomEvent<DndEvent>) {
     const draggedId = e.detail.info.id;
-    const currentSections = dndSections;
+    const currentSections = dndSectionOrder || visibleGroups;
 
     if (selected.has(draggedId) && selected.size > 1) {
       // 1. Gather all selected items from all sections
@@ -1844,7 +1835,7 @@
     dndTimeout = setTimeout(async () => {
       if (!purchase) return;
       const allItemIds: string[] = [];
-      const currentSections = dndSections;
+      const currentSections = dndSectionOrder || visibleGroups;
       for (const g of currentSections) {
          const itemsForSec = dndItemOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
          allItemIds.push(...itemsForSec.map((x: any) => x.id));
@@ -2495,8 +2486,8 @@
         {/if}
       {/snippet}
 
-      <div use:dndzone={{items: dndSections, dragDisabled: busy || !editable || filtering || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize} class="space-y-4">
-      {#each dndSections as g (g.key)}
+      <div use:dndzone={{items: dndSectionOrder || visibleGroups, dragDisabled: busy || !editable || filtering || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize} class="space-y-4">
+      {#each dndSectionOrder || visibleGroups as g (g.key)}
         {@const sIdx = sections.findIndex((s) => s.id === g.key)}
         <div class="rounded-md border bg-card overflow-hidden" animate:flip={{duration: flipDurationMs}}>
           <!-- Group header -->

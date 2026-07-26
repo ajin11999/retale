@@ -382,16 +382,18 @@
   });
 
   // --- Drag and Drop ---
-  const dndSections = $derived([{ id: "unsectioned", name: "Items" }, ...sections]);
+  const unsectionedGroup = { id: "unsectioned", name: "Items" };
+  const dndSections = $derived(sectionOrder || [unsectionedGroup, ...sections]);
 
   function handleSectionConsider(e: CustomEvent<DndEvent>) {
-    sectionOrder = e.detail.items.filter(x => x.id !== "unsectioned");
+    sectionOrder = e.detail.items;
   }
 
   async function handleSectionFinalize(e: CustomEvent<DndEvent>) {
-    sectionOrder = e.detail.items.filter(x => x.id !== "unsectioned");
+    sectionOrder = e.detail.items;
     if (requisition) {
-      await ReorderSections.mutate({ requisitionId: requisition.id, orderedIds: sectionOrder!.map(x => x.id) });
+      const orderedIds = e.detail.items.map(x => x.id).filter(id => id !== "unsectioned");
+      await ReorderSections.mutate({ requisitionId: requisition.id, orderedIds });
       await refetch();
     }
   }
