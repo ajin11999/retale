@@ -68,6 +68,9 @@ export const typeDefs = /* GraphQL */ `
     qtyInTransit: Float!
     "Freight banked against this line by committed transit hops."
     transitFreightMinor: Float!
+    baseCostMinor: Float!
+    discount: String
+    taxPct: Int
     unitCostMinor: Float!
     sortOrder: Int!
   }
@@ -131,6 +134,9 @@ export const typeDefs = /* GraphQL */ `
     variantId: ID
     description: String
     qtyOrdered: Float!
+    baseCostMinor: Float
+    discount: String
+    taxPct: Int
     unitCostMinor: Float!
   }
 
@@ -145,6 +151,14 @@ export const typeDefs = /* GraphQL */ `
     qty: Float!
     "Overrides the target vendor's last-charged cost default."
     unitCostMinor: Float
+  }
+
+  input PurchaseItemCostUpdate {
+    id: ID!
+    baseCostMinor: Float!
+    discount: String
+    taxPct: Int
+    unitCostMinor: Float!
   }
 
   extend type Mutation {
@@ -189,6 +203,9 @@ export const typeDefs = /* GraphQL */ `
       variantId: ID
       description: String
       qtyOrdered: Float!
+      baseCostMinor: Float
+      discount: String
+      taxPct: Int
       unitCostMinor: Float!
       sortOrder: Int
     ): PurchaseItem!
@@ -201,11 +218,17 @@ export const typeDefs = /* GraphQL */ `
       variantId: ID
       description: String
       qtyOrdered: Float
+      baseCostMinor: Float
+      discount: String
+      taxPct: Int
       unitCostMinor: Float
       sortOrder: Int
     ): PurchaseItem!
     deletePurchaseItem(id: ID!): Boolean!
     reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
+    
+    "Batch update costs/discounts for multiple items at once."
+    updatePurchaseItemsCosts(purchaseId: ID!, updates: [PurchaseItemCostUpdate!]!): [PurchaseItem!]!
 
     "Open a send: log a generated PO link. whatsapp/email start 'prepared'; manual is 'sent' at once."
     recordPurchaseSend(
@@ -522,6 +545,18 @@ export const resolvers = {
       await requirePermission(ctx, "purchase.edit");
       try {
         return await purchases.reorderItems(args.purchaseId, args.orderedIds);
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    updatePurchaseItemsCosts: async (
+      _: unknown,
+      args: { purchaseId: string; updates: any[] },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "purchase.edit");
+      try {
+        return await purchases.updateItemsCosts(args.purchaseId, args.updates);
       } catch (e) {
         asGraphQLError(e);
       }

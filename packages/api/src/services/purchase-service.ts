@@ -645,6 +645,9 @@ export async function createItem(input: {
   variantId?: string | null;
   description?: string | null;
   qtyOrdered: number;
+  baseCostMinor?: number | null;
+  discount?: string | null;
+  taxPct?: number | null;
   unitCostMinor: number;
   sortOrder?: number;
 }): Promise<Item> {
@@ -673,6 +676,9 @@ export async function createItem(input: {
       variantId,
       description,
       qtyOrdered: input.qtyOrdered,
+      baseCostMinor: input.baseCostMinor ?? input.unitCostMinor,
+      discount: input.discount ?? null,
+      taxPct: input.taxPct ?? null,
       unitCostMinor: input.unitCostMinor,
       sortOrder: input.sortOrder ?? 0,
     });
@@ -699,6 +705,9 @@ export async function createItems(input: {
     variantId?: string | null;
     description?: string | null;
     qtyOrdered: number;
+    baseCostMinor?: number | null;
+    discount?: string | null;
+    taxPct?: number | null;
     unitCostMinor: number;
   }>;
 }): Promise<Item[]> {
@@ -717,6 +726,9 @@ export async function createItems(input: {
     variantId: string | null;
     description: string | null;
     qtyOrdered: number;
+    baseCostMinor: number;
+    discount: string | null;
+    taxPct: number | null;
     unitCostMinor: number;
   }> = [];
   for (const line of input.lines) {
@@ -739,6 +751,9 @@ export async function createItems(input: {
       variantId,
       description,
       qtyOrdered: line.qtyOrdered,
+      baseCostMinor: line.baseCostMinor ?? line.unitCostMinor,
+      discount: line.discount ?? null,
+      taxPct: line.taxPct ?? null,
       unitCostMinor: line.unitCostMinor,
     });
   }
@@ -778,6 +793,9 @@ export async function updateItem(
     variantId?: string | null;
     description?: string | null;
     qtyOrdered?: number;
+    baseCostMinor?: number | null;
+    discount?: string | null;
+    taxPct?: number | null;
     unitCostMinor?: number;
     sortOrder?: number;
   },
@@ -821,6 +839,9 @@ export async function updateItem(
         ...(patch.variantId !== undefined && { variantId: patch.variantId }),
         ...(patch.description !== undefined && { description: nextDescription }),
         ...(patch.qtyOrdered !== undefined && { qtyOrdered: patch.qtyOrdered }),
+        ...(patch.baseCostMinor !== undefined && { baseCostMinor: patch.baseCostMinor ?? patch.unitCostMinor ?? item.unitCostMinor }),
+        ...(patch.discount !== undefined && { discount: patch.discount }),
+        ...(patch.taxPct !== undefined && { taxPct: patch.taxPct }),
         ...(patch.unitCostMinor !== undefined && { unitCostMinor: patch.unitCostMinor }),
         ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
       })
@@ -1116,4 +1137,70 @@ async function syncRequisitionItemQty(tx: Tx, requisitionItemId: string, delta: 
   await tx.update(purchaseRequisitions)
     .set({ status })
     .where(eq(purchaseRequisitions.id, requisitionId));
+}
+
+export async function updateItemsCosts(
+  purchaseId: string,
+  updates: Array<{
+    id: string;
+    baseCostMinor: number;
+    discount?: string | null;
+    taxPct?: number | null;
+    unitCostMinor: number;
+  }>
+): Promise<Item[]> {
+  const purchase = await loadPurchase(purchaseId);
+  assertEditable(purchase);
+
+  if (updates.length === 0) return [];
+
+  // Validate inputs
+  for (const update of updates) {
+    if (!isMoney(update.baseCostMinor) || update.baseCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "baseCostMinor must be a non-negative amount");
+    }
+    if (!isMoney(update.unitCostMinor) || update.unitCostMinor < 0) {
+      throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative amount");
+    }
+  }
+
+  const ids = updates.map((u) => u.id);
+  const items = await db.query.purchaseItems.findMany({
+    where: inArray(purchaseItems.id, ids),
+  });
+
+  if (items.length !== updates.length) {
+    throw new PurchaseError("INVALID_INPUT", "some items were not found");
+  }
+
+  for (const item of items) {
+    if (item.purchaseId !== purchaseId) {
+      throw new PurchaseError("INVALID_INPUT", "item belongs to a different purchase");
+    }
+    if (item.qtyDelivered > 0) {
+      throw new PurchaseError(
+        "ITEM_LOCKED",
+        "costs cannot change after a delivery"
+      );
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    for (const update of updates) {
+      await tx
+        .update(purchaseItems)
+        .set({
+          baseCostMinor: update.baseCostMinor,
+          discount: update.discount ?? null,
+          taxPct: update.taxPct ?? null,
+          unitCostMinor: update.unitCostMinor,
+        })
+        .where(eq(purchaseItems.id, update.id));
+    }
+    await bumpRevision(tx, purchaseId);
+  });
+
+  return db.query.purchaseItems.findMany({
+    where: inArray(purchaseItems.id, ids),
+  });
 }

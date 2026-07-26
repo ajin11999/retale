@@ -294,15 +294,18 @@ type Mutation {
   updatePurchaseSection(id: ID!, name: String, sortOrder: Int): PurchaseSection!
   deletePurchaseSection(id: ID!): Boolean!
   reorderPurchaseSections(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseSection!]!
-  createPurchaseItem(purchaseId: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float!, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
+  createPurchaseItem(purchaseId: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float!, baseCostMinor: Float, discount: String, taxPct: Int, unitCostMinor: Float!, sortOrder: Int): PurchaseItem!
 
   """
   Append several lines at once (bulk-add picker); all-or-nothing, one revision bump.
   """
   createPurchaseItems(purchaseId: ID!, lines: [PurchaseLineInput!]!): [PurchaseItem!]!
-  updatePurchaseItem(id: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
+  updatePurchaseItem(id: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyOrdered: Float, baseCostMinor: Float, discount: String, taxPct: Int, unitCostMinor: Float, sortOrder: Int): PurchaseItem!
   deletePurchaseItem(id: ID!): Boolean!
   reorderPurchaseItems(purchaseId: ID!, orderedIds: [ID!]!): [PurchaseItem!]!
+
+  """Batch update costs/discounts for multiple items at once."""
+  updatePurchaseItemsCosts(purchaseId: ID!, updates: [PurchaseItemCostUpdate!]!): [PurchaseItem!]!
 
   """
   Open a send: log a generated PO link. whatsapp/email start 'prepared'; manual is 'sent' at once.
@@ -1064,6 +1067,9 @@ type PurchaseItem {
 
   """Freight banked against this line by committed transit hops."""
   transitFreightMinor: Float!
+  baseCostMinor: Float!
+  discount: String
+  taxPct: Int
   unitCostMinor: Float!
   sortOrder: Int!
 }
@@ -1121,6 +1127,9 @@ input PurchaseLineInput {
   variantId: ID
   description: String
   qtyOrdered: Float!
+  baseCostMinor: Float
+  discount: String
+  taxPct: Int
   unitCostMinor: Float!
 }
 
@@ -1144,6 +1153,14 @@ input ResourceLineInput {
 
   """Overrides the target vendor's last-charged cost default."""
   unitCostMinor: Float
+}
+
+input PurchaseItemCostUpdate {
+  id: ID!
+  baseCostMinor: Float!
+  discount: String
+  taxPct: Int
+  unitCostMinor: Float!
 }
 
 enum DeliveryStatus {

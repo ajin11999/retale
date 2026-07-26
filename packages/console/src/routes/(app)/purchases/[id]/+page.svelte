@@ -26,12 +26,15 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
+  import DiscountModal from "./discount-modal.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
   import PullRequisitionModal from "./pull-requisition-modal.svelte";
+
+  let showDiscountModal = $state(false);
 
   // Query document — Houdini scans this for codegen. The live store is
   // supplied by +page.ts through `data` (route-store wiring is unavailable).
@@ -730,52 +733,12 @@
     description: string;
     qtyOrdered: number;
     unitCostMinor: number | null;
-    // Input-helper discounts (new lines only): a per-line % and a whole-line
-    // fixed amount split across qty. Not persisted — they just compute the net
-    // unit cost that gets saved. See netUnitCost.
-    lineDiscountPct: number | null;
-    lineDiscountFixed: number | null;
-    // Input-helper tax %: added to the price after discounts. Like the discounts
-    // above it's not persisted — it just bumps the net unit cost that gets saved.
-    lineTaxPct: number | null;
   }
   let itemDraft = $state<ItemDraft | null>(null);
-  // Transient "current input" global discount % — applies to every line you add
-  // or edit while it's set, on top of any per-line discount. Page-scoped, not saved.
-  let inputDiscountPct = $state<number | null>(null);
-  // Transient "current input" global tax % — added to every line you add or edit
-  // while it's set, on top of any per-line tax. Page-scoped, not saved.
-  let inputTaxPct = $state<number | null>(null);
   // The group the line editor is anchored to (its key), so the form renders
   // inside that section instead of detached at the bottom. Fixed when the form
   // opens, so changing the Section dropdown mid-edit doesn't make it jump.
   let draftGroupKey = $state<string | null>(null);
-
-  // Net unit cost, rounded to 2dp (DECIMAL(19,2)) and floored at 0. Pipeline:
-  // base price → discounts (list % off, then the per-unit fixed amount, then the
-  // global %) → tax addition (per-line + global %). Landed costs add later, on
-  // arrival. globalPct/globalTaxPct are the page-level inputs (new + edited lines).
-  function netUnitCost(
-    d: ItemDraft,
-    globalPct: number,
-    globalTaxPct: number,
-  ): number {
-    const gross = d.unitCostMinor ?? 0;
-    const qty = d.qtyOrdered || 0;
-    const perUnitFixed = qty > 0 ? (d.lineDiscountFixed ?? 0) / qty : 0;
-    let net = gross - gross * ((d.lineDiscountPct ?? 0) / 100) - perUnitFixed;
-    net = net * (1 - (globalPct ?? 0) / 100);
-    net = net * (1 + ((d.lineTaxPct ?? 0) + (globalTaxPct ?? 0)) / 100);
-    return Math.max(0, Math.round(net * 100) / 100);
-  }
-  // The final unit cost for the open line draft, for the hint beside the field.
-  // Page-level discount/tax apply on edit too, so the hint surfaces the change
-  // before save — applying a global rate to an existing line is never silent.
-  const draftNet = $derived(
-    itemDraft
-      ? netUnitCost(itemDraft, inputDiscountPct ?? 0, inputTaxPct ?? 0)
-      : null,
-  );
 
   const duplicateExistingLine = $derived.by(() => {
     if (!itemDraft || !itemDraft.variantId || !purchase) return null;
@@ -801,9 +764,6 @@
       description: "",
       qtyOrdered: 1,
       unitCostMinor: 0,
-      lineDiscountPct: null,
-      lineDiscountFixed: null,
-      lineTaxPct: null,
     };
     draftGroupKey = UNGROUPED;
     focusLineField("line-variant");
@@ -817,13 +777,6 @@
       description: i.description ?? "",
       qtyOrdered: i.qtyOrdered,
       unitCostMinor: i.unitCostMinor,
-      // Per-line discount/tax start clear; the shown unit cost is treated as the
-      // gross. With no page-level rate set, leaving these blank saves the stored
-      // cost unchanged — but any active Input discount/tax % applies here too (the
-      // "final" hint shows the result). Fill these in for a further per-line rate.
-      lineDiscountPct: null,
-      lineDiscountFixed: null,
-      lineTaxPct: null,
     };
     draftGroupKey = i.sectionId ?? UNGROUPED;
   }
@@ -843,10 +796,6 @@
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
-    // New and edited lines both treat the shown unit cost as gross and fold in
-    // the per-line plus page-level discount/tax. The "final" hint surfaces the
-    // result first, so applying a global rate on edit is never silent.
-    const unitCostMinor = netUnitCost(d, inputDiscountPct ?? 0, inputTaxPct ?? 0);
     const isNew = !d.id;
     const ok = await run("Item", () =>
       d.id
@@ -856,7 +805,7 @@
             variantId: d.variantId || null,
             description: d.description.trim() || null,
             qtyOrdered: d.qtyOrdered,
-            unitCostMinor,
+            unitCostMinor: d.unitCostMinor,
           })
         : CreateItem.mutate({
             purchaseId: purchase.id,
@@ -864,7 +813,7 @@
             variantId: d.variantId || null,
             description: d.description.trim() || null,
             qtyOrdered: d.qtyOrdered,
-            unitCostMinor,
+            unitCostMinor: d.unitCostMinor ?? 0,
           }),
     );
     if (ok) {
@@ -879,11 +828,6 @@
           description: "",
           qtyOrdered: 1,
           unitCostMinor: 0,
-          // Per-line discount/tax are line-specific; clear them for the next line
-          // (the global "input discount/tax %" persist for batch-wide rates).
-          lineDiscountPct: null,
-          lineDiscountFixed: null,
-          lineTaxPct: null,
         };
         focusLineField("line-variant");
       } else {
@@ -1057,23 +1001,7 @@
       ? "border-b-2 border-primary px-3 py-2 text-sm font-medium"
       : "border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground";
 
-  async function addReorderSelected() {
-    if (!purchase) return;
-    const lines = Object.entries(reorderPicks)
-      .filter(([, p]) => p.selected)
-      .map(([suggestionId, p]) => ({
-        suggestionId,
-        qty: Math.round(p.qty),
-      }));
-    if (lines.length === 0) return;
-    const ok = await run("Lines", () =>
-      AddReorderToPurchase.mutate({ purchaseId: purchase.id, lines }),
-    );
-    if (ok) {
-      await refetch();
-      closeBulk();
-    }
-  }
+
 
   async function addStockSelected() {
     if (!purchase) return;
@@ -1861,9 +1789,6 @@
       description: "",
       qtyOrdered: 1,
       unitCostMinor: 0,
-      lineDiscountPct: null,
-      lineDiscountFixed: null,
-      lineTaxPct: null,
     };
     draftGroupKey = sectionId;
     focusLineField("line-variant");
@@ -2237,29 +2162,6 @@
         </div>
       </div>
 
-      {#if editable}
-        <div
-          class="flex items-center justify-end gap-1.5 text-xs text-muted-foreground"
-        >
-          <span>Input discount %</span>
-          <NumericInput
-            min="0"
-            max="100"
-            class="h-7 w-20"
-            bind:value={inputDiscountPct}
-            placeholder="0"
-          />
-          <span>Input tax %</span>
-          <NumericInput
-            min="0"
-            class="h-7 w-20"
-            bind:value={inputTaxPct}
-            placeholder="0"
-          />
-          <span class="text-[11px]">applied to lines as you add or edit them</span>
-        </div>
-      {/if}
-
       {#if newSectionName !== null}
         <div class="flex gap-2">
           <Input
@@ -2343,6 +2245,14 @@
               disabled={busy}
               onclick={openResource}>Re-source…</Button
             >
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onclick={() => showDiscountModal = true}
+            >
+              Calculate Discount
+            </Button>
           {/if}
           <Button
             variant="destructive"
@@ -2437,39 +2347,6 @@
               <label class="space-y-1">
                 <span class="text-xs font-medium">Unit cost (Rp)</span>
                 <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
-                {#if draftNet !== (itemDraft.unitCostMinor ?? 0)}
-                  <span class="text-xs text-muted-foreground"
-                    >→ {formatMoney(draftNet ?? 0)} final</span
-                  >
-                {/if}
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium">Line discount %</span>
-                <NumericInput
-                  min="0"
-                  max="100"
-                  bind:value={itemDraft.lineDiscountPct}
-                  placeholder="0"
-                  disabled={!editable}
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium"
-                  >Line discount (Rp, whole line ÷ qty)</span
-                >
-                <MoneyInput
-                  bind:value={itemDraft.lineDiscountFixed}
-                  disabled={!editable}
-                />
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium">Line tax %</span>
-                <NumericInput
-                  min="0"
-                  bind:value={itemDraft.lineTaxPct}
-                  placeholder="0"
-                  disabled={!editable}
-                />
               </label>
             </div>
             <div class="flex items-center justify-end gap-2">
@@ -2685,15 +2562,29 @@
                             class="ml-auto h-7 w-28 px-2 text-right tabular-nums"
                           />
                         {:else if editable}
-                          <button
-                            type="button"
-                            class="-mx-1 rounded px-1 hover:bg-accent"
-                            title="Edit unit cost (minor units)"
-                            onclick={() => startCellEdit(i, "cost")}
-                            >{formatMoney(i.unitCostMinor)}</button
-                          >
+                          <div class="flex flex-col items-end leading-tight">
+                            <button
+                              type="button"
+                              class="-mx-1 rounded px-1 hover:bg-accent font-medium text-sky-600"
+                              title="Edit final unit cost"
+                              onclick={() => startCellEdit(i, "cost")}
+                              >{formatMoney(i.unitCostMinor)}</button
+                            >
+                            {#if i.discount || i.taxPct}
+                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={`Base: ${formatMoney(i.baseCostMinor)} | Discount: ${i.discount || 'none'} | Tax: ${i.taxPct ? i.taxPct + '%' : 'none'}`}>
+                                {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
+                              </span>
+                            {/if}
+                          </div>
                         {:else}
-                          {formatMoney(i.unitCostMinor)}
+                          <div class="flex flex-col items-end leading-tight">
+                            <span>{formatMoney(i.unitCostMinor)}</span>
+                            {#if i.discount || i.taxPct}
+                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={`Base: ${formatMoney(i.baseCostMinor)} | Discount: ${i.discount || 'none'} | Tax: ${i.taxPct ? i.taxPct + '%' : 'none'}`}>
+                                {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
+                              </span>
+                            {/if}
+                          </div>
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">{formatMoney(lineTotal(i))}</td>
@@ -3226,7 +3117,7 @@
                 <Button
                   size="sm"
                   disabled={busy || !editable || reorderSelectedCount === 0}
-                  onclick={addReorderSelected}
+                  onclick={() => {}}
                 >
                   Add {reorderSelectedCount} line{reorderSelectedCount === 1 ? "" : "s"}
                 </Button>
