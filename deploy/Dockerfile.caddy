@@ -1,0 +1,8 @@
+FROM caddy:2
+
+# Copy the Caddy configuration
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+
+# Copy the pre-built static web assets
+COPY packages/pos/build/web /srv/pos-web
+COPY packages/workshop/build/web /srv/workshop-web

@@ -31,6 +31,7 @@
     "houdini-svelte": "^2.1.16",
     "marked": "^15.0.12",
     "qrcode": "^1.5.4",
+    "svelte-dnd-action": "^0.9.74",
     "tailwind-merge": "^3.3.1"
   }
 }

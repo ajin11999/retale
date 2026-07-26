@@ -46,9 +46,11 @@
     : "bg-muted text-muted-foreground";
 
   let creating = $state(false);
+  let showCreate = $state(false);
+  let newName = $state("");
 
   async function createRequisition() {
-    const name = window.prompt("Requisition name:");
+    const name = newName.trim();
     if (!name) return;
     creating = true;
     try {
@@ -58,6 +60,8 @@
       }
     } finally {
       creating = false;
+      showCreate = false;
+      newName = "";
     }
   }
 
@@ -96,7 +100,15 @@
           </button>
         {/each}
       </div>
-      <Button size="sm" onclick={createRequisition} disabled={creating}>New Requisition</Button>
+      {#if showCreate}
+        <div class="flex items-center gap-2">
+          <Input placeholder="Requisition name..." bind:value={newName} class="w-48" onkeydown={(e: any) => e.key === 'Enter' && createRequisition()} autofocus />
+          <Button size="sm" onclick={createRequisition} disabled={creating}>Create</Button>
+          <Button size="sm" variant="ghost" onclick={() => showCreate = false}>Cancel</Button>
+        </div>
+      {:else}
+        <Button size="sm" onclick={() => showCreate = true}>New Requisition</Button>
+      {/if}
     </div>
   </div>
 

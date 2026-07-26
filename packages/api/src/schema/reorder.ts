@@ -36,13 +36,10 @@ export const typeDefs = /* GraphQL */ `
     generatedAt: String!
   }
 
-  "One selected suggestion to convert, with optional staff overrides."
   input ConvertReorderLineInput {
     suggestionId: ID!
     "Override the suggested quantity."
     qty: Int
-    "Override / assign the vendor."
-    vendorId: ID
   }
 
   "One selected suggestion to append to an existing PO, with optional qty override."
@@ -83,10 +80,10 @@ export const typeDefs = /* GraphQL */ `
   extend type Mutation {
     "Rescan tracked variants and rebuild the open suggestion set."
     runReorderScan: [ReorderSuggestion!]!
-    "Convert selected open suggestions into draft purchases (one per vendor)."
-    convertReorderSuggestions(lines: [ConvertReorderLineInput!]!): [Purchase!]!
-    "Append selected open suggestions as lines on an existing purchase; marks them converted."
-    addReorderSuggestionsToPurchase(purchaseId: ID!, lines: [AddReorderLineInput!]!): [PurchaseItem!]!
+    "Convert selected open suggestions into a draft requisition."
+    convertReorderSuggestions(name: String!, lines: [ConvertReorderLineInput!]!): PurchaseRequisition!
+    "Append selected open suggestions as lines on an existing requisition; marks them converted."
+    addReorderSuggestionsToRequisition(requisitionId: ID!, lines: [AddReorderLineInput!]!): [PurchaseRequisitionItem!]!
     "Drop a suggestion from the review list without ordering it."
     dismissReorderSuggestion(id: ID!): ReorderSuggestion!
   }
@@ -190,24 +187,24 @@ export const resolvers = {
     },
     convertReorderSuggestions: async (
       _: unknown,
-      args: { lines: reorder.ConvertLine[] },
+      args: { name: string; lines: reorder.ConvertLine[] },
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "purchase.create");
       try {
-        return await reorder.convertSuggestions(args.lines, viewer.userId);
+        return await reorder.convertSuggestionsToRequisition(args.name, args.lines, viewer.userId);
       } catch (e) {
         asGraphQLError(e);
       }
     },
-    addReorderSuggestionsToPurchase: async (
+    addReorderSuggestionsToRequisition: async (
       _: unknown,
-      args: { purchaseId: string; lines: reorder.AddReorderLine[] },
+      args: { requisitionId: string; lines: reorder.AddReorderLine[] },
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "purchase.create");
       try {
-        return await reorder.addSuggestionsToPurchase(args.purchaseId, args.lines);
+        return await reorder.addSuggestionsToRequisition(args.requisitionId, args.lines);
       } catch (e) {
         asGraphQLError(e);
       }

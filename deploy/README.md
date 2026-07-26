@@ -108,10 +108,10 @@ workshop-only change needs neither `up -d --build` nor the *other* app's build.
   touch the POS or workshop web bundles.
 - **Update POS web** (only when `packages/pos` changed):
   `bun run build:pos-web`, then
-  `docker compose -f docker-compose.prod.yml restart caddy` (it's a bind mount;
-  the restart just clears any cached file handles).
+  `docker compose -f docker-compose.prod.yml up -d --build caddy` (bakes the
+  new static files into the image).
 - **Update workshop web** (only when `packages/workshop` changed):
-  `bun run build:workshop-web`, then the same `restart caddy`. You do **not**
+  `bun run build:workshop-web`, then the same `up -d --build caddy`. You do **not**
   need this if only the api/console/POS changed.
 - **Update Stockeeper APK** (only when `packages/stockeeper` changed):
   `bun run build:stockeeper-apk`, then sideload the new APK onto staff Android devices.

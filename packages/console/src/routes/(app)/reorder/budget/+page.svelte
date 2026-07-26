@@ -30,33 +30,33 @@
     }
   `);
 
-  const OpenPurchasesQuery = graphql(`
-    query BudgetSandboxOpenPurchases {
-      purchases(status: open) {
+  const DraftRequisitionsQuery = graphql(`
+    query BudgetSandboxDraftRequisitions {
+      requisitions(status: draft) {
         id
-        vendor {
-          name
-        }
-        snapshotVendorName
-        date
+        name
+        createdAt
       }
     }
   `);
 
   const ConvertSuggestions = graphql(`
-    mutation ConsoleBudgetConvertReorderSuggestions($lines: [ConvertReorderLineInput!]!) {
-      convertReorderSuggestions(lines: $lines) {
+    mutation ConsoleBudgetConvertSuggestionsToRequisition(
+      $name: String!
+      $lines: [ConvertReorderLineInput!]!
+    ) {
+      convertReorderSuggestions(name: $name, lines: $lines) {
         id
       }
     }
   `);
 
-  const AddReorderToPurchase = graphql(`
-    mutation ConsoleBudgetAddReorderSuggestionsToPurchase(
-      $purchaseId: ID!
+  const AddReorderToRequisition = graphql(`
+    mutation ConsoleBudgetAddReorderSuggestionsToRequisition(
+      $requisitionId: ID!
       $lines: [AddReorderLineInput!]!
     ) {
-      addReorderSuggestionsToPurchase(purchaseId: $purchaseId, lines: $lines) {
+      addReorderSuggestionsToRequisition(requisitionId: $requisitionId, lines: $lines) {
         id
       }
     }
@@ -72,14 +72,14 @@
     feedback = null;
     try {
       await BudgetSandbox.fetch({ variables: { budgetAmount: budget }, policy: "NetworkOnly" });
-      await OpenPurchasesQuery.fetch({ policy: CachePolicy.NetworkOnly });
+      await DraftRequisitionsQuery.fetch({ policy: CachePolicy.NetworkOnly });
     } finally {
       busy = false;
     }
   }
   
   const plan = $derived($BudgetSandbox.data?.reorderBudgetSandbox);
-  const openPurchases = $derived($OpenPurchasesQuery.data?.purchases ?? []);
+  const draftRequisitions = $derived($DraftRequisitionsQuery.data?.requisitions ?? []);
   
   const formatNumber = (val: number) =>
     new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
@@ -138,35 +138,36 @@
     }
   }
 
-  let selectedPurchaseId = $state<string>("");
-  const purchaseOptions = $derived([
-    { value: "", label: "— Create New Purchases —" },
-    ...openPurchases.map((p) => ({ value: p.id, label: `${p.snapshotVendorName ?? p.vendor?.name} (${new Date(p.date).toLocaleDateString()})` })),
+  let selectedRequisitionId = $state<string>("");
+  const requisitionOptions = $derived([
+    { value: "", label: "— Create New Requisition —" },
+    ...draftRequisitions.map((p) => ({ value: p.id, label: `${p.name} (${new Date(p.createdAt).toLocaleDateString()})` })),
   ]);
 
-  const unassignedSelected = $derived(!selectedPurchaseId && selectedLines.some(l => !l.vendorId));
+  const unassignedSelected = $derived(false);
 
   async function convertSelected() {
     if (selectedLines.length === 0) return;
     busy = true;
     feedback = null;
     try {
-      if (selectedPurchaseId) {
+      if (selectedRequisitionId) {
         const payload = selectedLines.map(l => ({ suggestionId: l.suggestionId, qty: l.suggestedQty }));
-        const res = await AddReorderToPurchase.mutate({ purchaseId: selectedPurchaseId, lines: payload });
+        const res = await AddReorderToRequisition.mutate({ requisitionId: selectedRequisitionId, lines: payload });
         if (res.errors?.length) {
           feedback = { ok: false, text: res.errors[0].message };
           return;
         }
-        feedback = { ok: true, text: `Appended ${selectedLines.length} items to purchase.` };
+        feedback = { ok: true, text: `Appended ${selectedLines.length} items to requisition.` };
       } else {
-        const payload = selectedLines.map(l => ({ suggestionId: l.suggestionId, qty: l.suggestedQty, vendorId: l.vendorId }));
-        const res = await ConvertSuggestions.mutate({ lines: payload });
+        const payload = selectedLines.map(l => ({ suggestionId: l.suggestionId, qty: l.suggestedQty }));
+        const name = `Requisition from Budget Simulator ${new Date().toISOString()}`;
+        const res = await ConvertSuggestions.mutate({ name, lines: payload });
         if (res.errors?.length) {
           feedback = { ok: false, text: res.errors[0].message };
           return;
         }
-        feedback = { ok: true, text: `Created ${res.data?.convertReorderSuggestions.length ?? 0} draft purchase(s).` };
+        feedback = { ok: true, text: `Created draft requisition.` };
       }
       await generate();
     } catch (e) {
@@ -277,30 +278,16 @@
           </table>
         </div>
 
-        {#if selectedLines.length > 0}
-          <div class="flex items-center justify-between mt-4">
-            <p class="text-sm text-muted-foreground">
-              {selectedLines.length} selected
-              {#if unassignedSelected}
-                · <span class="text-destructive">Cannot create new purchase for unassigned lines</span>
+        {#if displaySelectedLines.length > 0}
+          <div class="flex items-center gap-3 justify-end">
+            <Combobox options={requisitionOptions} bind:value={selectedRequisitionId} class="w-64" />
+            <Button disabled={busy || displaySelectedLines.length === 0} onclick={convertSelected}>
+              {#if selectedRequisitionId}
+                Add {displaySelectedLines.length} item{displaySelectedLines.length === 1 ? '' : 's'} to Requisition
+              {:else}
+                Convert {displaySelectedLines.length} item{displaySelectedLines.length === 1 ? '' : 's'} to Requisition
               {/if}
-            </p>
-            <div class="flex items-center gap-3">
-              <Combobox
-                options={purchaseOptions}
-                bind:value={selectedPurchaseId}
-                placeholder="Target Purchase..."
-                class="w-64"
-                disabled={busy}
-              />
-              <Button
-                size="sm"
-                disabled={busy || selectedLines.length === 0 || unassignedSelected}
-                onclick={convertSelected}
-              >
-                {selectedPurchaseId ? 'Add to Purchase' : 'Convert to draft purchases'}
-              </Button>
-            </div>
+            </Button>
           </div>
         {/if}
       {/if}

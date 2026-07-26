@@ -8,6 +8,8 @@
   import type { Viewer } from "../../+layout.server";
   import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
+  import { dndzone, type DndEvent } from "svelte-dnd-action";
+  import { flip } from "svelte/animate";
   import {
     AlertTriangle,
     ArrowDown,
@@ -18,6 +20,7 @@
     Pencil,
     Trash2,
     X,
+    GripVertical
   } from "@lucide/svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -244,16 +247,7 @@
   `);
 
   // Append the checked suggestions to this PO and flip them to converted.
-  const AddReorderToPurchase = graphql(`
-    mutation ConsoleAddReorderSuggestionsToPurchase(
-      $purchaseId: ID!
-      $lines: [AddReorderLineInput!]!
-    ) {
-      addReorderSuggestionsToPurchase(purchaseId: $purchaseId, lines: $lines) {
-        id
-      }
-    }
-  `);
+
 
   // Quick-create a product without leaving the PO. Mirrors the products page's
   // create defaults (physical, tax-inclusive, one auto-SKU variant); we select
@@ -1369,6 +1363,7 @@
   const UNGROUPED = "__none";
   type Line = (typeof items)[number];
   interface Group {
+    id: string;
     key: string; // section id, or UNGROUPED
     name: string;
     items: Line[];
@@ -1395,11 +1390,11 @@
     }
     const out: Group[] = sections.map((s) => {
       const its = bySection.get(s.id) ?? [];
-      return { key: s.id, name: s.name, items: its, subtotal: its.reduce((a, i) => a + lineTotal(i), 0) };
+      return { id: s.id, key: s.id, name: s.name, items: its, subtotal: its.reduce((a, i) => a + lineTotal(i), 0) };
     });
     const ung = bySection.get(UNGROUPED) ?? [];
     if (ung.length)
-      out.push({ key: UNGROUPED, name: "Ungrouped", items: ung, subtotal: ung.reduce((a, i) => a + lineTotal(i), 0) });
+      out.push({ id: UNGROUPED, key: UNGROUPED, name: "Ungrouped", items: ung, subtotal: ung.reduce((a, i) => a + lineTotal(i), 0) });
     return out;
   });
 
@@ -1756,6 +1751,95 @@
     await persistOrder(() =>
       ReorderItems.mutate({ purchaseId: purchase.id, orderedIds }),
     );
+  }
+
+  // Drag and Drop
+  const flipDurationMs = 200;
+  let dndSectionOrder = $state<any[] | null>(null);
+  let dndItemOrders = $state<Record<string, any[]>>({});
+
+  function handleSectionConsider(e: CustomEvent<DndEvent>) {
+    dndSectionOrder = e.detail.items;
+  }
+
+  async function handleSectionFinalize(e: CustomEvent<DndEvent>) {
+    dndSectionOrder = e.detail.items;
+    if (purchase) {
+      await persistOrder(() => ReorderSections.mutate({ purchaseId: purchase.id, orderedIds: dndSectionOrder!.map(x => x.id) }));
+    }
+  }
+
+  function handleItemConsider(groupKey: string, e: CustomEvent<DndEvent>) {
+    dndItemOrders[groupKey] = e.detail.items;
+  }
+
+  let dndTimeout: any;
+  async function handleItemFinalize(groupKey: string, e: CustomEvent<DndEvent>) {
+    const draggedId = e.detail.info.id;
+    const currentSections = dndSectionOrder || visibleGroups;
+
+    if (selected.has(draggedId) && selected.size > 1) {
+      // 1. Gather all selected items from all sections
+      const allSelectedItems: any[] = [];
+      for (const g of currentSections) {
+         const itemsForSec = dndItemOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
+         for (const item of itemsForSec) {
+            if (selected.has(item.id) && !allSelectedItems.some(i => i.id === item.id)) {
+               allSelectedItems.push(item);
+            }
+         }
+      }
+      
+      // 2. Remove all selected items from all sections locally
+      for (const g of currentSections) {
+         const currentList = dndItemOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
+         dndItemOrders[g.key] = currentList.filter((i: any) => !selected.has(i.id));
+      }
+      
+      // 3. Find the anchor to insert before
+      const dropIdxInEvent = e.detail.items.findIndex(i => i.id === draggedId);
+      const anchorItem = e.detail.items.slice(dropIdxInEvent + 1).find(i => !selected.has(i.id));
+      
+      let insertIdx = dndItemOrders[groupKey].length;
+      if (anchorItem) {
+         insertIdx = dndItemOrders[groupKey].findIndex((i: any) => i.id === anchorItem.id);
+         if (insertIdx === -1) insertIdx = dndItemOrders[groupKey].length;
+      }
+      
+      // 4. Insert selected items
+      dndItemOrders[groupKey].splice(insertIdx, 0, ...allSelectedItems);
+      
+      // 5. Update DB section for moved items
+      const newSecId = groupKey === "" ? null : groupKey;
+      for (const item of allSelectedItems) {
+         if ((item.sectionId || "") !== groupKey) {
+            UpdateItem.mutate({ id: item.id, sectionId: newSecId });
+            item.sectionId = newSecId;
+         }
+      }
+    } else {
+      dndItemOrders[groupKey] = e.detail.items;
+      
+      const movedItem = e.detail.items.find((i: any) => (i.sectionId || "") !== groupKey);
+      if (movedItem) {
+        const newSecId = groupKey === "" ? null : groupKey;
+        UpdateItem.mutate({ id: movedItem.id, sectionId: newSecId });
+        movedItem.sectionId = newSecId;
+      }
+    }
+
+    clearTimeout(dndTimeout);
+    dndTimeout = setTimeout(async () => {
+      if (!purchase) return;
+      const allItemIds: string[] = [];
+      const currentSections = dndSectionOrder || visibleGroups;
+      for (const g of currentSections) {
+         const itemsForSec = dndItemOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
+         allItemIds.push(...itemsForSec.map((x: any) => x.id));
+      }
+      itemOrder = allItemIds;
+      await persistOrder(() => ReorderItems.mutate({ purchaseId: purchase.id, orderedIds: allItemIds }));
+    }, 50);
   }
 
   function newItemInSection(sectionId: string) {
@@ -2399,11 +2483,15 @@
         {/if}
       {/snippet}
 
-      {#each visibleGroups as g (g.key)}
+      <div use:dndzone={{items: dndSectionOrder || visibleGroups, dragDisabled: busy || !editable || filtering || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize} class="space-y-4">
+      {#each dndSectionOrder || visibleGroups as g (g.key)}
         {@const sIdx = sections.findIndex((s) => s.id === g.key)}
-        <div class="rounded-md border">
+        <div class="rounded-md border bg-card overflow-hidden" animate:flip={{duration: flipDurationMs}}>
           <!-- Group header -->
           <div class="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
+            {#if canReorder}
+              <GripVertical class="h-4 w-4 text-muted-foreground opacity-30 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity" />
+            {/if}
             <button
               class="text-muted-foreground hover:text-foreground"
               onclick={() => toggleCollapse(g.key)}
@@ -2447,18 +2535,6 @@
             {#if sIdx >= 0 && editingSectionId !== g.key}
               <span class="ml-auto flex items-center gap-0.5">
                 <IconButton
-                  icon={ArrowUp}
-                  label="Move section up"
-                  disabled={busy || !canReorder || sIdx === 0}
-                  onclick={(e) => moveSection(sIdx, -1, e.currentTarget)}
-                />
-                <IconButton
-                  icon={ArrowDown}
-                  label="Move section down"
-                  disabled={busy || !canReorder || sIdx === sections.length - 1}
-                  onclick={(e) => moveSection(sIdx, 1, e.currentTarget)}
-                />
-                <IconButton
                   icon={Pencil}
                   label="Rename section"
                   variant="primary"
@@ -2482,6 +2558,7 @@
                 <thead class="border-b text-left text-muted-foreground">
                   <tr>
                     {#if editable}
+                      <th class="w-8 px-2"></th>
                       <th class="w-8 px-3 py-2">
                         <input
                           type="checkbox"
@@ -2501,13 +2578,18 @@
                     <th class="px-3"></th>
                   </tr>
                 </thead>
-                <tbody>
-                  {#each g.visibleItems as i, idx (i.id)}
-                    <tr
+                <tbody use:dndzone={{items: dndItemOrders[g.key] || g.visibleItems, dragDisabled: busy || !editable || filtering || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={(e) => handleItemConsider(g.key, e)} onfinalize={(e) => handleItemFinalize(g.key, e)}>
+                  {#each dndItemOrders[g.key] || g.visibleItems as i, idx (i.id)}
+                    <tr animate:flip={{duration: flipDurationMs}}
                       class="border-b last:border-0 {selected.has(i.id)
                         ? 'bg-primary/10'
-                        : 'even:bg-muted/40'}"
+                        : 'even:bg-muted/40'} group/row"
                     >
+                      {#if editable}
+                        <td class="px-2 py-2 text-center w-8">
+                          <GripVertical class="h-4 w-4 text-muted-foreground opacity-30 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity inline-block" />
+                        </td>
+                      {/if}
                       {#if editable}
                         <td class="px-3 py-2">
                           <input
@@ -2520,7 +2602,7 @@
                         </td>
                       {/if}
                       <td class="px-4 py-2">
-                        {#if cellEdit?.id === i.id && cellEdit.field === "desc"}
+                        {#if cellEdit?.id === i.id && cellEdit?.field === "desc"}
                           <input
                             bind:value={cellStr}
                             use:selectOnMount
@@ -2541,7 +2623,7 @@
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">
-                        {#if cellEdit?.id === i.id && cellEdit.field === "qty"}
+                        {#if cellEdit?.id === i.id && cellEdit?.field === "qty"}
                           <NumericInput
                             
                             bind:value={cellStr}
@@ -2583,7 +2665,7 @@
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">
-                        {#if cellEdit?.id === i.id && cellEdit.field === "cost"}
+                        {#if cellEdit?.id === i.id && cellEdit?.field === "cost"}
                           <MoneyInput
                             autofocus
                             bind:value={cellMoney}
@@ -2605,21 +2687,7 @@
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">{formatMoney(lineTotal(i))}</td>
                       <td class="px-3 py-2 text-right whitespace-nowrap">
-                        <span class="inline-flex items-center gap-0.5">
-                          <IconButton
-                            icon={ArrowUp}
-                            label="Move line up"
-                            disabled={busy || !canReorder || idx === 0}
-                            onclick={(e) => moveLine(g, idx, -1, e.currentTarget)}
-                          />
-                          <IconButton
-                            icon={ArrowDown}
-                            label="Move line down"
-                            disabled={busy ||
-                              !canReorder ||
-                              idx === g.visibleItems.length - 1}
-                            onclick={(e) => moveLine(g, idx, 1, e.currentTarget)}
-                          />
+                        <span class="inline-flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
                           <IconButton
                             icon={Pencil}
                             label="Edit line"
@@ -2660,6 +2728,7 @@
           {/if}
         </div>
       {/each}
+      </div>
 
       <!-- Fallback: the editor's target group isn't currently rendered (e.g. a
            filtered-out section, or an empty Ungrouped bucket). -->
@@ -3326,6 +3395,7 @@
   bind:open={pullModalOpen} 
   purchaseId={purchase.id} 
   products={$RefData.data?.products ?? []} 
+  prefillCost={prefillCost}
   onAdd={() => PurchaseDetail.fetch({ policy: 'NetworkOnly', variables: { id: purchase.id } })} 
 />
 {/if}

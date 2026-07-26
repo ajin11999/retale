@@ -8,11 +8,13 @@
     open = $bindable(false), 
     purchaseId, 
     products = [],
+    prefillCost = (id: string) => 0,
     onAdd 
   }: { 
     open: boolean; 
     purchaseId: string;
     products: any[];
+    prefillCost?: (variantId: string) => number;
     onAdd: () => void;
   } = $props();
 
@@ -46,7 +48,7 @@
 
   let reqs = $state<any[]>([]);
   let selectedReqId = $state("");
-  let selectedItemIds = $state<string[]>([]); // chronological order of clicks
+  let selectedItems = $state<{ id: string, qtyOrdered: number, unitCostMinor: number }[]>([]);
   let busy = $state(false);
 
   // Fetch when opened
@@ -59,7 +61,7 @@
       });
     } else {
       selectedReqId = "";
-      selectedItemIds = [];
+      selectedItems = [];
     }
   });
 
@@ -89,27 +91,30 @@
     return "";
   }
 
-  function toggleItem(id: string) {
-    if (selectedItemIds.includes(id)) {
-      selectedItemIds = selectedItemIds.filter(x => x !== id);
+  function toggleItem(item: any) {
+    const idx = selectedItems.findIndex(x => x.id === item.id);
+    if (idx !== -1) {
+      selectedItems = selectedItems.filter(x => x.id !== item.id);
     } else {
-      selectedItemIds = [...selectedItemIds, id];
+      const remainingQty = item.qtyRequested - item.qtyOrdered;
+      const cost = prefillCost(item.variantId);
+      selectedItems = [...selectedItems, { id: item.id, qtyOrdered: remainingQty, unitCostMinor: cost }];
     }
   }
 
   async function addSelected() {
-    if (selectedItemIds.length === 0) return;
+    if (selectedItems.length === 0) return;
     busy = true;
     try {
       // Build lines in chronological selection order
-      const lines = selectedItemIds.map(id => {
-        const item = availableItems.find((i: any) => i.id === id);
+      const lines = selectedItems.map(sel => {
+        const item = availableItems.find((i: any) => i.id === sel.id);
         return {
           requisitionItemId: item.id,
           variantId: item.variantId,
           description: item.description,
-          qtyOrdered: item.qtyRequested - item.qtyOrdered,
-          unitCostMinor: 0 // User will fill this in after pulling
+          qtyOrdered: sel.qtyOrdered,
+          unitCostMinor: sel.unitCostMinor
         };
       });
 
@@ -157,19 +162,49 @@
               </thead>
               <tbody>
                 {#each availableItems as item}
-                  {@const selected = selectedItemIds.includes(item.id)}
-                  {@const selectedIndex = selectedItemIds.indexOf(item.id)}
-                  <tr class="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors {selected ? 'bg-sky-50 hover:bg-sky-50' : ''}" onclick={() => toggleItem(item.id)}>
-                    <td class="px-4 py-2 text-center">
+                  {@const selectedIdx = selectedItems.findIndex(x => x.id === item.id)}
+                  {@const selected = selectedIdx !== -1}
+                  <tr class="border-b last:border-0 hover:bg-muted/40 transition-colors {selected ? 'bg-sky-50/50 hover:bg-sky-50/50' : ''}">
+                    <td class="px-4 py-2 text-center cursor-pointer" onclick={() => toggleItem(item)}>
                       <div class="flex h-5 w-5 items-center justify-center rounded border {selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}">
                         {#if selected}
-                          <span class="text-xs font-bold">{selectedIndex + 1}</span>
+                          <span class="text-xs font-bold">{selectedIdx + 1}</span>
                         {/if}
                       </div>
                     </td>
-                    <td class="px-4 py-2 text-muted-foreground">{getSku(item.variantId)}</td>
-                    <td class="px-4 py-2 font-medium">{getVariantName(item.variantId, item.description)}</td>
-                    <td class="px-4 py-2 text-right text-amber-600 font-semibold">{item.qtyRequested - item.qtyOrdered}</td>
+                    <td class="px-4 py-2 text-muted-foreground cursor-pointer" onclick={() => toggleItem(item)}>{getSku(item.variantId)}</td>
+                    <td class="px-4 py-2 font-medium cursor-pointer" onclick={() => toggleItem(item)}>{getVariantName(item.variantId, item.description)}</td>
+                    <td class="px-4 py-2 text-right">
+                      {#if selected}
+                        <div class="flex justify-end gap-2" onclick={(e) => e.stopPropagation()}>
+                          <div class="flex flex-col items-end">
+                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">Qty</span>
+                            <input 
+                              type="number" 
+                              class="w-20 text-right text-sm border rounded px-2 py-1 bg-background" 
+                              bind:value={selectedItems[selectedIdx].qtyOrdered} 
+                              min="0"
+                            />
+                          </div>
+                          <div class="flex flex-col items-end">
+                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">Base Cost</span>
+                            <div class="relative">
+                              <span class="absolute left-2 top-1.5 text-xs text-muted-foreground">Rp</span>
+                              <input 
+                                type="number" 
+                                class="w-32 text-right text-sm border rounded px-2 py-1 pl-6 bg-background" 
+                                bind:value={selectedItems[selectedIdx].unitCostMinor} 
+                                min="0"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      {:else}
+                        <div class="flex flex-col items-end cursor-pointer" onclick={() => toggleItem(item)}>
+                          <span class="text-amber-600 font-semibold">{item.qtyRequested - item.qtyOrdered} <span class="text-xs font-normal">rem</span></span>
+                        </div>
+                      {/if}
+                    </td>
                   </tr>
                 {:else}
                   <tr><td colspan="4" class="px-4 py-8 text-center text-muted-foreground">No outstanding items on this requisition.</td></tr>
@@ -187,8 +222,8 @@
 
       <div class="flex shrink-0 items-center justify-end gap-2 border-t p-4 bg-muted/20">
         <Button variant="ghost" onclick={() => open = false}>Cancel</Button>
-        <Button disabled={selectedItemIds.length === 0 || busy} onclick={addSelected}>
-          Pull {selectedItemIds.length} {selectedItemIds.length === 1 ? 'line' : 'lines'}
+        <Button disabled={selectedItems.length === 0 || busy} onclick={addSelected}>
+          Pull {selectedItems.length} {selectedItems.length === 1 ? 'line' : 'lines'}
         </Button>
       </div>
     </div>

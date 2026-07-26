@@ -84,7 +84,7 @@
 </script>
 
 <div class="flex min-h-screen">
-  <aside class="flex w-60 flex-col border-r bg-card">
+  <aside class="flex w-60 flex-col border-r bg-card print:hidden">
     <a
       href="/"
       class="flex h-14 items-center gap-2.5 border-b px-5 font-semibold transition-colors hover:text-primary"
@@ -128,7 +128,7 @@
 
   <div class="flex flex-1 flex-col">
     <header
-      class="flex h-14 items-center justify-between border-b bg-card px-6"
+      class="flex h-14 items-center justify-between border-b bg-card px-6 print:hidden"
     >
       <div class="text-sm text-muted-foreground">
         {data.user.name}
@@ -149,7 +149,7 @@
       </form>
     </header>
 
-    <main class="flex-1 p-6">
+    <main class="flex-1 p-6 print:p-0">
       {@render children()}
     </main>
   </div>

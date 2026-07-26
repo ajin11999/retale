@@ -49,8 +49,8 @@
   `);
 
   const ConvertSuggestions = graphql(`
-    mutation ConsoleConvertReorderSuggestions($lines: [ConvertReorderLineInput!]!) {
-      convertReorderSuggestions(lines: $lines) {
+    mutation ConsoleConvertReorderSuggestions($name: String!, $lines: [ConvertReorderLineInput!]!) {
+      convertReorderSuggestions(name: $name, lines: $lines) {
         id
       }
     }
@@ -104,7 +104,6 @@
   interface Review {
     selected: boolean;
     qty: number;
-    vendorId: string;
   }
   let review = $state<Record<string, Review>>({});
 
@@ -121,7 +120,6 @@
       next[s.id] = {
         selected: false,
         qty: s.suggestedQty,
-        vendorId: s.vendorId ?? "",
       };
     }
     review = next;
@@ -129,10 +127,6 @@
 
   const selectedCount = $derived(
     rows.filter((s) => review[s.id]?.selected).length,
-  );
-  // Suggestions can only be converted once they have a vendor assigned.
-  const unassignedSelected = $derived(
-    rows.some((s) => review[s.id]?.selected && !review[s.id]?.vendorId),
   );
 
   let busy = $state(false);
@@ -166,22 +160,21 @@
       .map((s) => ({
         suggestionId: s.id,
         qty: Math.round(review[s.id].qty),
-        vendorId: review[s.id].vendorId || null,
       }));
     if (lines.length === 0) return;
     busy = true;
     feedback = null;
     try {
-      const res = await ConvertSuggestions.mutate({ lines });
+      const name = `Requisition from Reorder Scan ${fmtDate(new Date().toISOString())}`;
+      const res = await ConvertSuggestions.mutate({ name, lines });
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
         return;
       }
       await ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly });
-      const n = res.data?.convertReorderSuggestions.length ?? 0;
       feedback = {
         ok: true,
-        text: `Created ${n} draft purchase(s) — see the Purchases screen.`,
+        text: `Created draft requisition — see the Requisitions screen.`,
       };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -238,8 +231,8 @@
 
   <p class="text-sm text-muted-foreground">
     A scan rebuilds the open suggestion set from current stock. Review the
-    quantities and vendors, then convert the lines you want into draft
-    purchases — one per vendor.
+    quantities, then convert the lines you want into a draft
+    requisition.
   </p>
 
   {#if feedback}
@@ -310,16 +303,7 @@
                 {/if}
               </td>
               <td class="px-4 py-2">
-                {#if statusFilter === "open" && review[s.id]}
-                  <Combobox
-                    options={vendorOptions}
-                    bind:value={review[s.id].vendorId}
-                    placeholder="Search vendor…"
-                    disabled={!canAct}
-                  />
-                {:else}
-                  {s.vendorName ?? "—"}
-                {/if}
+                {s.vendorName ?? "—"}
               </td>
               {#if statusFilter !== "open"}
                 <td class="px-4 py-2">
@@ -362,18 +346,13 @@
       <div class="flex items-center justify-between">
         <p class="text-sm text-muted-foreground">
           {selectedCount} selected
-          {#if unassignedSelected}
-            · <span class="text-destructive"
-              >assign a vendor to every selected line</span
-            >
-          {/if}
         </p>
         <Button
           size="sm"
-          disabled={busy || !canAct || selectedCount === 0 || unassignedSelected}
+          disabled={busy || !canAct || selectedCount === 0}
           onclick={convertSelected}
         >
-          Convert {selectedCount} to draft purchases
+          Convert {selectedCount} to draft requisition
         </Button>
       </div>
     {/if}

@@ -503,15 +503,13 @@ type Mutation {
   """Rescan tracked variants and rebuild the open suggestion set."""
   runReorderScan: [ReorderSuggestion!]!
 
-  """
-  Convert selected open suggestions into draft purchases (one per vendor).
-  """
-  convertReorderSuggestions(lines: [ConvertReorderLineInput!]!): [Purchase!]!
+  """Convert selected open suggestions into a draft requisition."""
+  convertReorderSuggestions(name: String!, lines: [ConvertReorderLineInput!]!): PurchaseRequisition!
 
   """
-  Append selected open suggestions as lines on an existing purchase; marks them converted.
+  Append selected open suggestions as lines on an existing requisition; marks them converted.
   """
-  addReorderSuggestionsToPurchase(purchaseId: ID!, lines: [AddReorderLineInput!]!): [PurchaseItem!]!
+  addReorderSuggestionsToRequisition(requisitionId: ID!, lines: [AddReorderLineInput!]!): [PurchaseRequisitionItem!]!
 
   """Drop a suggestion from the review list without ordering it."""
   dismissReorderSuggestion(id: ID!): ReorderSuggestion!
@@ -1705,15 +1703,11 @@ type ReorderSuggestion {
   generatedAt: String!
 }
 
-"""One selected suggestion to convert, with optional staff overrides."""
 input ConvertReorderLineInput {
   suggestionId: ID!
 
   """Override the suggested quantity."""
   qty: Int
-
-  """Override / assign the vendor."""
-  vendorId: ID
 }
 
 """
