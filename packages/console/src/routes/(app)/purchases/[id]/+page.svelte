@@ -1773,7 +1773,7 @@
   }
 
   function handleItemConsider(groupKey: string, e: CustomEvent<DndEvent>) {
-    dndItemOrders[groupKey] = e.detail.items;
+    dndItemOrders = { ...dndItemOrders, [groupKey]: e.detail.items };
   }
 
   let dndTimeout: any;
@@ -1794,23 +1794,31 @@
       }
       
       // 2. Remove all selected items from all sections locally
+      let nextOrders = { ...dndItemOrders };
       for (const g of currentSections) {
-         const currentList = dndItemOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
-         dndItemOrders[g.key] = currentList.filter((i: any) => !selected.has(i.id));
+         const currentList = nextOrders[g.key] || groups.find(x => x.key === g.key)?.items || [];
+         nextOrders[g.key] = currentList.filter((i: any) => !selected.has(i.id));
       }
       
       // 3. Find the anchor to insert before
       const dropIdxInEvent = e.detail.items.findIndex(i => i.id === draggedId);
       const anchorItem = e.detail.items.slice(dropIdxInEvent + 1).find(i => !selected.has(i.id));
       
-      let insertIdx = dndItemOrders[groupKey].length;
-      if (anchorItem) {
-         insertIdx = dndItemOrders[groupKey].findIndex((i: any) => i.id === anchorItem.id);
-         if (insertIdx === -1) insertIdx = dndItemOrders[groupKey].length;
+      // 4. Insert all gathered items into the target section
+      const targetList = [...(nextOrders[groupKey] || groups.find(x => x.key === groupKey)?.items || [])];
+      
+      const cleanedTargetList = targetList.filter(i => !selected.has(i.id));
+      
+      const insertIdx = anchorItem ? cleanedTargetList.findIndex(i => i.id === anchorItem.id) : cleanedTargetList.length;
+      
+      if (insertIdx === -1) {
+         cleanedTargetList.push(...allSelectedItems);
+      } else {
+         cleanedTargetList.splice(insertIdx, 0, ...allSelectedItems);
       }
       
-      // 4. Insert selected items
-      dndItemOrders[groupKey].splice(insertIdx, 0, ...allSelectedItems);
+      nextOrders[groupKey] = cleanedTargetList;
+      dndItemOrders = nextOrders;
       
       // 5. Update DB section for moved items
       const newSecId = groupKey === "" ? null : groupKey;
@@ -1821,7 +1829,7 @@
          }
       }
     } else {
-      dndItemOrders[groupKey] = e.detail.items;
+      dndItemOrders = { ...dndItemOrders, [groupKey]: e.detail.items };
       
       const movedItem = e.detail.items.find((i: any) => (i.sectionId || "") !== groupKey);
       if (movedItem) {
@@ -2487,7 +2495,7 @@
       {/snippet}
 
       <div use:dndzone={{items: dndSectionOrder || visibleGroups, dragDisabled: busy || !editable || filtering || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize} class="space-y-4">
-      {#each dndSectionOrder || visibleGroups as g (g.key)}
+      {#each dndSectionOrder || visibleGroups as g (g.id)}
         {@const sIdx = sections.findIndex((s) => s.id === g.key)}
         <div class="rounded-md border bg-card overflow-hidden" animate:flip={{duration: flipDurationMs}}>
           <!-- Group header -->

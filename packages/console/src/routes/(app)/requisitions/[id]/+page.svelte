@@ -402,7 +402,7 @@
   let draggedSelectedIds = new Set<string>();
 
   function handleItemConsider(sectionId: string, e: CustomEvent<DndEvent>) {
-    itemOrders[sectionId] = e.detail.items;
+    itemOrders = { ...itemOrders, [sectionId]: e.detail.items };
   }
 
   let dndTimeout: any;
@@ -422,23 +422,31 @@
       }
       
       // 2. Remove all selected items from all sections locally
+      let nextOrders = { ...itemOrders };
       for (const sec of [{id: "unsectioned"}, ...sections]) {
-         const currentList = itemOrders[sec.id] || groupedItems[sec.id] || [];
-         itemOrders[sec.id] = currentList.filter((i: any) => !selectedItemIds.has(i.id));
+         const currentList = nextOrders[sec.id] || groupedItems[sec.id] || [];
+         nextOrders[sec.id] = currentList.filter((i: any) => !selectedItemIds.has(i.id));
       }
       
       // 3. Find the anchor to insert before
       const dropIdxInEvent = e.detail.items.findIndex(i => i.id === draggedId);
       const anchorItem = e.detail.items.slice(dropIdxInEvent + 1).find(i => !selectedItemIds.has(i.id));
       
-      let insertIdx = itemOrders[sectionId].length;
-      if (anchorItem) {
-         insertIdx = itemOrders[sectionId].findIndex((i: any) => i.id === anchorItem.id);
-         if (insertIdx === -1) insertIdx = itemOrders[sectionId].length;
+      // 4. Insert all gathered items into the target section
+      const targetList = [...(nextOrders[sectionId] || groupedItems[sectionId] || [])];
+      
+      const cleanedTargetList = targetList.filter(i => !selectedItemIds.has(i.id));
+      
+      const insertIdx = anchorItem ? cleanedTargetList.findIndex(i => i.id === anchorItem.id) : cleanedTargetList.length;
+      
+      if (insertIdx === -1) {
+         cleanedTargetList.push(...allSelectedItems);
+      } else {
+         cleanedTargetList.splice(insertIdx, 0, ...allSelectedItems);
       }
       
-      // 4. Insert selected items
-      itemOrders[sectionId].splice(insertIdx, 0, ...allSelectedItems);
+      nextOrders[sectionId] = cleanedTargetList;
+      itemOrders = nextOrders;
       
       // 5. Update DB section for moved items
       const newSecId = sectionId === "unsectioned" ? null : sectionId;
@@ -449,7 +457,7 @@
          }
       }
     } else {
-      itemOrders[sectionId] = e.detail.items;
+      itemOrders = { ...itemOrders, [sectionId]: e.detail.items };
       
       const movedItem = e.detail.items.find((i: any) => (i.sectionId || "unsectioned") !== sectionId);
       if (movedItem) {
