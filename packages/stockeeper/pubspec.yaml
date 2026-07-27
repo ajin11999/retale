@@ -1,7 +1,7 @@
 name: retale_stockeeper
 description: "Retale Stockeeper — warehouse receiving and stock reconcile for the Retale GraphQL API."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.7.0
