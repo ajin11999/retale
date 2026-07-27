@@ -63,8 +63,11 @@ services:
   caddy:
     image: ghcr.io/fransiscowijaya1999/retale-caddy:${RETALE_TAG:-latest}
     restart: unless-stopped
+    env_file:
+      - path: .env.prod
+        required: false
     environment:
-      HOST_IP: ${HOST_IP}
+      HOST_IP: ${HOST_IP:-192.168.0.251}
     ports: # only caddy publishes host ports
       - "80:80" # HTTP->HTTPS redirect, so bare-IP typing (no scheme) reaches 443
       - "443:443"
