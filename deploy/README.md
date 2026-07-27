@@ -81,7 +81,11 @@ part of this stack.
 
      Or double-click the file → Install Certificate → "Place all certificates in
      the following store" → Browse → *Trusted Root Certification Authorities*.
+   - Android (browsers & PWAs): Settings → Security → Encryption & credentials → Install a certificate → CA certificate.
    - ChromeOS: Settings → Security and privacy → Manage certificates → Authorities → Import.
+
+   > [!NOTE]
+   > **Android Stockeeper App:** Installing the CA certificate in Android Settings only enables trust for web browsers (Chrome) and POS PWAs. The Stockeeper Android app (`packages/stockeeper`) bundles `root.crt` directly inside the APK as `assets/retale_ca.crt` because Dart's `HttpClient` ignores user-installed Android system CAs. If Caddy's CA certificate is regenerated or rotated, copy `root.crt` to `packages/stockeeper/assets/retale_ca.crt` and rebuild the APK.
 
    After installing, **fully quit and reopen the browser** (or visit
    `chrome://restart`) — Chrome caches trust decisions per session, so a tab

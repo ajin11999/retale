@@ -40,6 +40,7 @@ https://192.168.0.29 {
 #     copy <data-dir>/pki/authorities/local/root.crt to the device.
 #   - Windows:  import root.crt into "Trusted Root Certification Authorities".
 #   - Android:  Settings → Security → Encryption → Install a certificate → CA.
+#               (For browsers & PWAs. Native Stockeeper app bundles root.crt in APK).
 #   - iOS:      install the profile, then enable it under
 #               Settings → General → About → Certificate Trust Settings.
 # Once trusted, the device can install the PWA and run it offline.

@@ -137,6 +137,8 @@ phones. Download the right APK from the
 Enable **"Install from unknown sources"** on the phone, then open the APK to
 install. The app connects to the API at the same `HOST_IP` address.
 
+> **Note on TLS Certificates:** The Stockeeper app bundles Caddy's root CA certificate directly inside the APK (`assets/retale_ca.crt`) because Flutter/Dart's `HttpClient` ignores user-installed Android system CAs. Installing `retale-root.crt` in Android system settings is **not sufficient** for the Stockeeper app. If Caddy's CA certificate is regenerated on the server, copy `root.crt` to `packages/stockeeper/assets/retale_ca.crt` and rebuild the APK.
+
 ---
 
 ## Offline / air-gapped install (no registry)

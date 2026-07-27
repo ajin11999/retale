@@ -3,14 +3,23 @@
   import { flip } from "svelte/animate";
   import { fly } from "svelte/transition";
   import { graphql } from "$houdini";
-  import { goto } from "$app/navigation";
-  import { page } from "$app/state";
-  import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
-  import { AlertTriangle, Plus, Trash2, Printer, Check, X, GripVertical, Pencil } from "@lucide/svelte";
+  import Badge from "$lib/components/ui/badge.svelte";
+  import {
+    AlertTriangle,
+    Plus,
+    Trash2,
+    Printer,
+    Check,
+    X,
+    GripVertical,
+    Pencil,
+    Layers,
+    Search
+  } from "@lucide/svelte";
   import type { PageData } from "./$types";
   import { matchesTokens, searchTokens } from "$lib/utils";
 
@@ -52,7 +61,33 @@
           id
           sku
           label
+          totalQty
+          reorderPoint
         }
+      }
+    }
+  `);
+
+  const ReorderSuggestionsQuery = graphql(`
+    query RequisitionReorderSuggestions {
+      reorderSuggestions(status: open) {
+        id
+        variantId
+        productName
+        sku
+        vendorId
+        vendorName
+        currentStock
+        reorderPoint
+        suggestedQty
+      }
+    }
+  `);
+
+  const AddReorderSuggestionsToRequisition = graphql(`
+    mutation ConsoleRequisitionAddReorderSuggestions($requisitionId: ID!, $lines: [AddReorderLineInput!]!) {
+      addReorderSuggestionsToRequisition(requisitionId: $requisitionId, lines: $lines) {
+        id
       }
     }
   `);
@@ -127,10 +162,10 @@
     }
   `);
 
-  // State
+  // --- State ---
   let search = $state("");
   let showAddItem = $state(false);
-  
+
   let newItemVariantId = $state("");
   let newItemDescription = $state("");
   let newItemQty = $state(1);
@@ -142,10 +177,22 @@
   // Edit Metadata
   let editingRequisitionName = $state(false);
   let editedRequisitionName = $state("");
-  
+
   // Edit Section
   let editingSectionId = $state<string | null>(null);
   let editedSectionName = $state("");
+
+  // Bulk Add Modal State
+  interface BulkPick {
+    selected: boolean;
+    qty: number;
+  }
+
+  let bulkOpen = $state(false);
+  let bulkTab = $state<"reorder" | "stock">("reorder");
+  let stockSearch = $state("");
+  let reorderPicks = $state<Record<string, BulkPick>>({});
+  let stockPicks = $state<Record<string, BulkPick>>({});
 
   type CellField = "qty" | "desc";
   let cellEdit = $state<{ id: string; field: CellField } | null>(null);
@@ -171,7 +218,7 @@
       cellEdit = null;
       return;
     }
-    
+
     if (c.field === "qty") {
       if (cellQty <= 0) {
         cellEdit = null;
@@ -222,8 +269,6 @@
     editingRequisitionName = false;
     await refetch();
   }
-
-  // PRs no longer use status workflows
 
   // --- Section Actions ---
   async function addSection() {
@@ -276,7 +321,7 @@
         description: newItemDescription || null,
         qtyRequested: newItemQty
       });
-      showAddItem = false;
+      // Keep form open for continuous additions
       newItemVariantId = "";
       newItemDescription = "";
       newItemQty = 1;
@@ -298,7 +343,6 @@
     } else {
       selectedItemIds.add(id);
     }
-    // trigger reactivity
     selectedItemIds = new Set(selectedItemIds);
   }
 
@@ -324,6 +368,7 @@
   // --- Computed Data ---
   const requisition = $derived($RequisitionDetail.data?.requisition);
   const products = $derived($RequisitionEditorRefData.data?.products ?? []);
+  const suggestions = $derived($ReorderSuggestionsQuery.data?.reorderSuggestions ?? []);
 
   const variantOptions = $derived(
     products.flatMap((p: any) => p.variants.map((v: any) => ({
@@ -337,6 +382,129 @@
     requisition?.items.some((i: any) => i.variantId === newItemVariantId) && newItemVariantId !== ""
   );
 
+  interface StockRow {
+    variantId: string;
+    label: string;
+    sku: string;
+    totalQty: number;
+    reorderPoint: number | null;
+  }
+
+  const stockRows = $derived.by<StockRow[]>(() => {
+    const term = searchTokens(stockSearch);
+    const rows: StockRow[] = [];
+    for (const p of products) {
+      for (const v of p.variants) {
+        const label = p.kind === "simple" ? p.name : `${p.name} - ${v.label}`;
+        const sku = v.sku || "";
+        if (term.length > 0 && !matchesTokens(term, label) && !matchesTokens(term, sku)) {
+          continue;
+        }
+        rows.push({
+          variantId: v.id,
+          label,
+          sku,
+          totalQty: v.totalQty ?? 0,
+          reorderPoint: v.reorderPoint ?? null
+        });
+      }
+    }
+    rows.sort((a, b) => a.totalQty - b.totalQty);
+    return rows;
+  });
+
+  const reorderRows = $derived(suggestions);
+
+  const stockDefaultQty = (r: StockRow) =>
+    r.reorderPoint != null ? Math.max(1, r.reorderPoint - r.totalQty) : 1;
+
+  async function openBulk() {
+    bulkOpen = true;
+    bulkTab = "reorder";
+    stockSearch = "";
+
+    const sp: Record<string, BulkPick> = {};
+    for (const r of stockRows) {
+      sp[r.variantId] = {
+        selected: false,
+        qty: stockDefaultQty(r)
+      };
+    }
+    stockPicks = sp;
+
+    await ReorderSuggestionsQuery.fetch({ policy: "NetworkOnly" });
+    const picks: Record<string, BulkPick> = {};
+    for (const s of suggestions) {
+      picks[s.id] = { selected: false, qty: s.suggestedQty };
+    }
+    reorderPicks = picks;
+  }
+
+  function closeBulk() {
+    bulkOpen = false;
+  }
+
+  const reorderSelectedCount = $derived(
+    Object.values(reorderPicks).filter((p) => p.selected).length
+  );
+  const stockSelectedCount = $derived(
+    Object.values(stockPicks).filter((p) => p.selected).length
+  );
+
+  const STOCK_CAP = 60;
+  const stockVisible = $derived(stockRows.slice(0, STOCK_CAP));
+  const stockTruncated = $derived(stockRows.length > STOCK_CAP);
+
+  const tabClass = (t: "reorder" | "stock") =>
+    bulkTab === t
+      ? "border-b-2 border-primary px-4 py-2.5 text-sm font-semibold text-primary"
+      : "border-b-2 border-transparent px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground";
+
+  async function addReorderSelected() {
+    if (!requisition) return;
+    const lines = Object.entries(reorderPicks)
+      .filter(([, p]) => p.selected && p.qty > 0)
+      .map(([suggestionId, p]) => ({
+        suggestionId,
+        qty: Math.round(p.qty)
+      }));
+    if (lines.length === 0) return;
+    adding = true;
+    try {
+      await AddReorderSuggestionsToRequisition.mutate({
+        requisitionId: requisition.id,
+        lines
+      });
+      closeBulk();
+      await refetch();
+    } finally {
+      adding = false;
+    }
+  }
+
+  async function addStockSelected() {
+    if (!requisition) return;
+    const selectedEntries = Object.entries(stockPicks).filter(([, p]) => p.selected && p.qty > 0);
+    if (selectedEntries.length === 0) return;
+
+    adding = true;
+    try {
+      for (const [variantId, p] of selectedEntries) {
+        await CreateRequisitionItem.mutate({
+          requisitionId: requisition.id,
+          sectionId: newItemSection || null,
+          variantId,
+          description: null,
+          qtyRequested: p.qty
+        });
+      }
+      closeBulk();
+      await refetch();
+    } finally {
+      adding = false;
+    }
+  }
+
   let sectionOrder = $state.raw<any[] | null>(null);
   let itemOrders = $state.raw<Record<string, any[]>>({});
 
@@ -349,9 +517,9 @@
     if (!requisition) return { unsectioned: [] };
     const groups: Record<string, any[]> = { unsectioned: [] };
     for (const sec of requisition.sections) groups[sec.id] = [];
-    
+
     const term = searchTokens(search);
-    
+
     for (const item of requisition.items) {
       let variantName = item.description || "";
       let sku = "";
@@ -364,7 +532,7 @@
       }
 
       if (term.length > 0 && !matchesTokens(term, variantName) && !matchesTokens(term, sku)) continue;
-      
+
       const itemWithMeta = { ...item, variantName, sku };
 
       if (item.sectionId && groups[item.sectionId]) {
@@ -373,7 +541,7 @@
         groups.unsectioned.push(itemWithMeta);
       }
     }
-    
+
     const orderedGroups: Record<string, any[]> = {};
     for (const [key, items] of Object.entries(groups)) {
        orderedGroups[key] = itemOrders[key] || items;
@@ -399,8 +567,6 @@
   }
 
   // Multi-select drag logic
-  let draggedSelectedIds = new Set<string>();
-
   function handleItemConsider(sectionId: string, e: CustomEvent<DndEvent>) {
     itemOrders = { ...itemOrders, [sectionId]: e.detail.items };
   }
@@ -410,7 +576,6 @@
     const draggedId = e.detail.info.id;
 
     if (selectedItemIds.has(draggedId) && selectedItemIds.size > 1) {
-      // 1. Gather all selected items from all sections
       const allSelectedItems: any[] = [];
       for (const sec of [{id: "unsectioned"}, ...sections]) {
          const itemsForSec = itemOrders[sec.id] || groupedItems[sec.id] || [];
@@ -420,35 +585,29 @@
             }
          }
       }
-      
-      // 2. Remove all selected items from all sections locally
+
       let nextOrders = { ...itemOrders };
       for (const sec of [{id: "unsectioned"}, ...sections]) {
          const currentList = nextOrders[sec.id] || groupedItems[sec.id] || [];
          nextOrders[sec.id] = currentList.filter((i: any) => !selectedItemIds.has(i.id));
       }
-      
-      // 3. Find the anchor to insert before
+
       const dropIdxInEvent = e.detail.items.findIndex(i => i.id === draggedId);
       const anchorItem = e.detail.items.slice(dropIdxInEvent + 1).find(i => !selectedItemIds.has(i.id));
-      
-      // 4. Insert all gathered items into the target section
+
       const targetList = [...(nextOrders[sectionId] || groupedItems[sectionId] || [])];
-      
       const cleanedTargetList = targetList.filter(i => !selectedItemIds.has(i.id));
-      
       const insertIdx = anchorItem ? cleanedTargetList.findIndex(i => i.id === anchorItem.id) : cleanedTargetList.length;
-      
+
       if (insertIdx === -1) {
          cleanedTargetList.push(...allSelectedItems);
       } else {
          cleanedTargetList.splice(insertIdx, 0, ...allSelectedItems);
       }
-      
+
       nextOrders[sectionId] = cleanedTargetList;
       itemOrders = nextOrders;
-      
-      // 5. Update DB section for moved items
+
       const newSecId = sectionId === "unsectioned" ? null : sectionId;
       for (const item of allSelectedItems) {
          if ((item.sectionId || "unsectioned") !== sectionId) {
@@ -458,7 +617,7 @@
       }
     } else {
       itemOrders = { ...itemOrders, [sectionId]: e.detail.items };
-      
+
       const movedItem = e.detail.items.find((i: any) => (i.sectionId || "unsectioned") !== sectionId);
       if (movedItem) {
          const newSecId = sectionId === "unsectioned" ? null : sectionId;
@@ -482,11 +641,17 @@
       await refetch();
     }, 50);
   }
-
 </script>
 
 <svelte:window
   onkeydown={(e) => {
+    if (bulkOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeBulk();
+      }
+      return;
+    }
     if (showAddItem && !adding) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
@@ -511,7 +676,7 @@
       <div class="flex items-center gap-2">
         <a href="/requisitions" class="text-sm text-muted-foreground hover:underline">Requisitions</a>
         <span class="text-muted-foreground">/</span>
-        
+
         {#if editingRequisitionName}
           <div class="flex items-center gap-1">
             <Input bind:value={editedRequisitionName} class="w-64 h-8" onkeydown={(e: any) => e.key === 'Enter' && saveRequisitionName()} autofocus />
@@ -521,24 +686,30 @@
         {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="flex items-center gap-1 group cursor-pointer" onclick={() => { editingRequisitionName = true; editedRequisitionName = requisition.name; }}>
+          <div class="flex items-center gap-1.5 group cursor-pointer" onclick={() => { editingRequisitionName = true; editedRequisitionName = requisition.name; }}>
             <h1 class="text-xl font-semibold group-hover:text-primary">{requisition.name}</h1>
             <Pencil class="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         {/if}
       </div>
       <div class="flex items-center gap-2 print:hidden">
-        <Button variant="outline" onclick={() => window.print()}>
-          <Printer class="mr-2 h-4 w-4" /> Print
+        <Button variant="outline" size="sm" onclick={() => window.print()}>
+          <Printer class="mr-1.5 h-4 w-4" /> Print
         </Button>
       </div>
     </div>
 
     <div class="space-y-4 max-w-5xl">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Requested Items</h2>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <h2 class="text-lg font-semibold">Requested Items</h2>
+          <Badge variant="secondary" class="font-normal text-xs">
+            {requisition.items.length} line{requisition.items.length === 1 ? '' : 's'}
+          </Badge>
+        </div>
+
         <div class="flex items-center gap-2 print:hidden">
-          <Input type="search" placeholder="Search items..." bind:value={search} class="w-64" />
+          <Input type="search" placeholder="Search items..." bind:value={search} class="w-56 h-9" />
           {#if newSectionName !== null}
             <div class="flex items-center gap-2">
               <Input placeholder="Section name..." bind:value={newSectionName} class="w-40 h-9 text-sm" onkeydown={(e: any) => e.key === 'Enter' && addSection()} autofocus />
@@ -549,7 +720,10 @@
             <Button variant="outline" size="sm" onclick={() => newSectionName = ""}>
               Add section
             </Button>
-            <Button variant="outline" size="sm" onclick={() => openAddItem("")}>
+            <Button variant="outline" size="sm" onclick={openBulk}>
+              <Layers class="mr-1.5 h-4 w-4" /> Add multiple
+            </Button>
+            <Button variant="default" size="sm" onclick={() => openAddItem("")}>
               <Plus class="mr-1 h-4 w-4" /> Add line
             </Button>
           {/if}
@@ -557,10 +731,12 @@
       </div>
 
       {#if selectedItemIds.size > 0}
-        <div class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-card px-3 py-2 shadow-lg print:hidden" transition:fly={{ y: 12, duration: 150 }}>
-          <span class="text-sm font-medium">{selectedItemIds.size} item{selectedItemIds.size === 1 ? '' : 's'} selected</span>
-          
-          <select class="flex h-9 w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" onchange={(e) => {
+        <div class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-wrap items-center gap-2.5 rounded-xl border border-primary/30 bg-card/95 px-4 py-2.5 shadow-2xl backdrop-blur-sm print:hidden" transition:fly={{ y: 12, duration: 150 }}>
+          <span class="text-xs font-semibold text-foreground">{selectedItemIds.size} item{selectedItemIds.size === 1 ? '' : 's'} selected</span>
+
+          <div class="h-4 w-px bg-border"></div>
+
+          <select class="flex h-8 w-44 rounded-md border border-input bg-background px-2.5 py-1 text-xs shadow-xs focus:outline-none focus:ring-1 focus:ring-primary" onchange={(e) => {
              const val = e.currentTarget.value;
              e.currentTarget.value = "";
              if (val) moveSelectedToSection(val === "unsectioned" ? null : val);
@@ -572,32 +748,38 @@
              <option value="unsectioned">— No section —</option>
           </select>
 
-          <Button variant="destructive" size="sm" onclick={deleteSelectedItems}>Delete selected</Button>
-          <Button variant="ghost" size="sm" onclick={() => selectedItemIds.clear()}>Clear</Button>
+          <Button variant="destructive" size="sm" class="h-8 text-xs" onclick={deleteSelectedItems}>Delete selected</Button>
+          <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => selectedItemIds.clear()}>Clear</Button>
         </div>
       {/if}
 
       {#snippet lineForm()}
-        <div class="bg-card border rounded-lg p-4 space-y-4">
-          <h3 class="text-sm font-medium">Add New Item</h3>
-          <div class="flex gap-4">
-            <div class="flex-1 space-y-1">
-              <label class="text-xs text-muted-foreground" for="variant-select">Variant</label>
-              <Combobox id="variant-select" options={variantOptions} bind:value={newItemVariantId} placeholder="Search variant..." />
+        <div class="m-3 p-4 bg-muted/20 border border-dashed rounded-lg space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Add Line Item</h3>
+            <span class="text-xs text-muted-foreground">
+              Press <kbd class="rounded border bg-background px-1 font-mono text-[10px]">Ctrl</kbd>+<kbd class="rounded border bg-background px-1 font-mono text-[10px]">Enter</kbd> to save
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div class="md:col-span-5 space-y-1">
+              <label class="text-xs font-medium text-muted-foreground" for="variant-select">Product Variant</label>
+              <Combobox id="variant-select" options={variantOptions} bind:value={newItemVariantId} placeholder="Search variant or SKU..." />
             </div>
             {#if !newItemVariantId}
-              <div class="flex-1 space-y-1">
-                <label class="text-xs text-muted-foreground" for="desc-input">Description (Non-stock)</label>
-                <Input id="desc-input" placeholder="Describe item..." bind:value={newItemDescription} />
+              <div class="md:col-span-4 space-y-1">
+                <label class="text-xs font-medium text-muted-foreground" for="desc-input">Non-Stock Description</label>
+                <Input id="desc-input" placeholder="Custom item name/spec..." bind:value={newItemDescription} />
               </div>
             {/if}
-            <div class="w-24 space-y-1">
-              <label class="text-xs text-muted-foreground" for="qty-input">Qty</label>
+            <div class="{newItemVariantId ? 'md:col-span-3' : 'md:col-span-2'} space-y-1">
+              <label class="text-xs font-medium text-muted-foreground" for="qty-input">Requested Qty</label>
               <Input id="qty-input" type="number" bind:value={newItemQty} min="1" />
             </div>
-            <div class="w-48 space-y-1">
-              <label class="text-xs text-muted-foreground" for="sec-select">Section</label>
-              <select id="sec-select" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" bind:value={newItemSection}>
+            <div class="md:col-span-4 space-y-1">
+              <label class="text-xs font-medium text-muted-foreground" for="sec-select">Target Section</label>
+              <select id="sec-select" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" bind:value={newItemSection}>
                 <option value="">No Section</option>
                 {#each requisition.sections as sec}
                   <option value={sec.id}>{sec.name}</option>
@@ -605,138 +787,341 @@
               </select>
             </div>
           </div>
-          
+
           {#if duplicateWarning}
-            <div class="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 p-2 rounded-md">
-              <AlertTriangle class="h-4 w-4" />
+            <div class="flex items-center gap-2 text-xs font-medium text-amber-700 bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-md">
+              <AlertTriangle class="h-4 w-4 shrink-0 text-amber-600" />
               <span>This variant is already on the requisition!</span>
             </div>
           {/if}
 
-          <div class="flex justify-end gap-2">
-            <span class="mr-auto text-xs text-muted-foreground mt-2">
-              <kbd class="rounded border px-1 font-mono">Ctrl</kbd>+<kbd class="rounded border px-1 font-mono">Enter</kbd> to save
-            </span>
+          <div class="flex justify-end gap-2 pt-1 border-t border-border/50">
             <Button variant="ghost" size="sm" onclick={() => showAddItem = false}>Cancel</Button>
-            <Button size="sm" onclick={saveItem} disabled={adding}>Save Item</Button>
+            <Button size="sm" onclick={saveItem} disabled={adding}>
+              {adding ? "Saving..." : "Save Line Item"}
+            </Button>
           </div>
         </div>
       {/snippet}
-      
-      <div class="border rounded-lg bg-card">
+
+      <div class="rounded-xl border bg-card text-card-foreground shadow-xs overflow-hidden">
         <div use:dndzone={{items: dndSections, dragDisabled: search !== "" || editingSectionId !== null || cellEdit !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={handleSectionConsider} onfinalize={handleSectionFinalize}>
           {#each dndSections as section, idx (section.id)}
             <div animate:flip={{duration: flipDurationMs}}>
               {#if groupedItems[section.id] && (groupedItems[section.id].length > 0 || search === "")}
                 {#if section.id !== "unsectioned" || requisition.sections.length > 0}
-                  <div class="bg-muted/30 px-4 py-2 border-b {idx > 0 ? 'border-t' : ''} font-medium text-sm flex justify-between items-center group">
-                    <div class="flex items-center gap-2">
-                       <GripVertical class="h-4 w-4 text-muted-foreground opacity-50 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity print:hidden" />
+                  <div class="bg-muted/40 px-4 py-2.5 border-b {idx > 0 ? 'border-t' : ''} font-medium text-sm flex items-center justify-between group select-none">
+                    <div class="flex items-center gap-2.5">
+                       <GripVertical class="h-4 w-4 text-muted-foreground/60 cursor-grab active:cursor-grabbing hover:text-foreground transition-colors print:hidden" />
                        {#if editingSectionId === section.id}
-                         <Input bind:value={editedSectionName} class="h-7 w-48 text-sm" onkeydown={(e: any) => e.key === 'Enter' && saveRenameSection()} autofocus />
-                         <Button size="icon" variant="ghost" class="h-7 w-7" onclick={saveRenameSection}><Check class="h-3 w-3" /></Button>
-                         <Button size="icon" variant="ghost" class="h-7 w-7" onclick={() => editingSectionId = null}><X class="h-3 w-3" /></Button>
+                         <div class="flex items-center gap-1">
+                           <Input bind:value={editedSectionName} class="h-7 w-48 text-sm" onkeydown={(e: any) => e.key === 'Enter' && saveRenameSection()} autofocus />
+                           <Button size="icon" variant="ghost" class="h-7 w-7" onclick={saveRenameSection}><Check class="h-3.5 w-3.5" /></Button>
+                           <Button size="icon" variant="ghost" class="h-7 w-7" onclick={() => editingSectionId = null}><X class="h-3.5 w-3.5" /></Button>
+                         </div>
                        {:else}
                          <!-- svelte-ignore a11y_click_events_have_key_events -->
                          <!-- svelte-ignore a11y_no_static_element_interactions -->
-                         <span class="cursor-pointer hover:text-primary transition-colors" onclick={() => startRenameSection(section.id, section.name)}>{section.name}</span>
+                         <span class="font-semibold text-foreground cursor-pointer hover:text-primary transition-colors flex items-center gap-2" onclick={() => startRenameSection(section.id, section.name)}>
+                           {section.name}
+                           <Badge variant="outline" class="font-normal text-xs py-0 px-1.5 bg-background">
+                             {groupedItems[section.id]?.length || 0} line{(groupedItems[section.id]?.length || 0) === 1 ? '' : 's'}
+                           </Badge>
+                         </span>
                        {/if}
                     </div>
                     {#if section.id !== "unsectioned"}
-                      <Button variant="ghost" size="icon" class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive print:hidden" onclick={() => deleteSection(section.id)}>
-                        <Trash2 class="h-3 w-3" />
+                      <Button variant="ghost" size="icon" class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive print:hidden" onclick={() => deleteSection(section.id)}>
+                        <Trash2 class="h-3.5 w-3.5" />
                       </Button>
                     {/if}
                   </div>
                 {/if}
-                <table class="w-full text-sm">
-                  <thead class="border-b text-left text-muted-foreground bg-muted/10">
-                    <tr>
-                      <th class="w-8 print:hidden"></th>
-                      <th class="w-8 print:hidden"></th>
-                      <th class="px-4 py-2 font-medium w-32">SKU</th>
-                      <th class="px-4 py-2 font-medium">Product Name</th>
-                      <th class="px-4 py-2 text-right font-medium">Requested</th>
-                      <th class="px-4 py-2 text-right font-medium">Ordered</th>
-                      <th class="px-4 py-2 text-right font-medium">Remaining</th>
-                      <th class="w-12 print:hidden"></th>
-                    </tr>
-                  </thead>
-                  <tbody use:dndzone={{items: groupedItems[section.id], dragDisabled: search !== "" || cellEdit !== null || editingSectionId !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={(e) => handleItemConsider(section.id, e)} onfinalize={(e) => handleItemFinalize(section.id, e)}>
-                    {#each groupedItems[section.id] as item (item.id)}
-                      {@const remaining = item.qtyRequested - item.qtyOrdered}
-                      <tr animate:flip={{duration: flipDurationMs}} class="border-b last:border-0 hover:bg-muted/40 group/row {selectedItemIds.has(item.id) ? 'bg-sky-50 hover:bg-sky-50' : ''}">
-                        <td class="px-2 py-2 text-center print:hidden w-8">
-                          <GripVertical class="h-4 w-4 text-muted-foreground opacity-30 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity inline-block" />
-                        </td>
-                        <td class="px-2 py-2 text-center print:hidden w-8">
-                          <input type="checkbox" checked={selectedItemIds.has(item.id)} onchange={() => toggleItemSelection(item.id)} class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
-                        </td>
-                        <td class="px-4 py-2 text-muted-foreground">{item.sku || "-"}</td>
-                        <td class="px-4 py-2 font-medium">
-                          {#if cellEdit?.id === item.id && cellEdit?.field === "desc"}
-                            <input
-                              bind:value={cellStr}
-                              use:selectOnMount
-                              onkeydown={cellKeydown}
-                              onblur={commitCell}
-                              class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                          {:else if !item.variantId}
-                            <button type="button" class="-mx-1 rounded px-1 text-left hover:bg-accent" title="Edit description" onclick={() => startCellEdit(item, "desc")}>{item.variantName}</button>
-                          {:else}
-                            {item.variantName}
-                          {/if}
-                        </td>
-                        <td class="px-4 py-2 text-right tabular-nums">
-                          {#if cellEdit?.id === item.id && cellEdit?.field === "qty"}
-                            <NumericInput
-                              bind:value={cellQty}
-                              autofocus={true}
-                              onkeydown={cellKeydown}
-                              onblur={commitCell}
-                              class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ml-auto"
-                            />
-                          {:else}
-                            <button type="button" class="-mx-1 rounded px-1 hover:bg-accent" title="Edit quantity" onclick={() => startCellEdit(item, "qty")}>{item.qtyRequested}</button>
-                          {/if}
-                        </td>
-                        <td class="px-4 py-2 text-right">{item.qtyOrdered}</td>
-                        <td class="px-4 py-2 text-right font-semibold {remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}">
-                          {remaining}
-                        </td>
-                        <td class="px-4 py-2 text-right print:hidden">
-                           <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
-                             <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-destructive" onclick={() => deleteItem(item.id)}>
-                               <Trash2 class="h-4 w-4" />
-                             </Button>
-                           </div>
-                        </td>
-                      </tr>
-                    {/each}
-                    {#if groupedItems[section.id].length === 0}
-                      <tr><td colspan="8" class="px-4 py-4 text-center text-muted-foreground text-xs">No items.</td></tr>
-                    {/if}
-                    {#if section.id !== "unsectioned" && !showAddItem}
-                      <tr class="hover:bg-muted/40 group">
-                        <td colspan="8" class="p-0">
-                          <button class="w-full text-left px-4 py-2 text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors" onclick={() => openAddItem(section.id)}>
-                            + Add line to {section.name}
-                          </button>
-                        </td>
-                      </tr>
-                    {:else if showAddItem && (newItemSection || "unsectioned") === section.id}
+
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead class="bg-muted/15 border-b text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       <tr>
-                        <td colspan="8" class="p-2 bg-muted/20">
-                          {@render lineForm()}
-                        </td>
+                        <th class="w-8 py-2.5 pl-3 print:hidden"></th>
+                        <th class="w-8 py-2.5 pr-2 print:hidden"></th>
+                        <th class="px-4 py-2.5 w-36">SKU</th>
+                        <th class="px-4 py-2.5">Product Name</th>
+                        <th class="px-4 py-2.5 text-right w-28">Requested</th>
+                        <th class="px-4 py-2.5 text-right w-24">Ordered</th>
+                        <th class="px-4 py-2.5 text-right w-28">Remaining</th>
+                        <th class="w-12 py-2.5 pr-3 text-right print:hidden"></th>
                       </tr>
-                    {/if}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody use:dndzone={{items: groupedItems[section.id], dragDisabled: search !== "" || cellEdit !== null || editingSectionId !== null, flipDurationMs, dropTargetStyle: {}}} onconsider={(e) => handleItemConsider(section.id, e)} onfinalize={(e) => handleItemFinalize(section.id, e)}>
+                      {#each groupedItems[section.id] as item (item.id)}
+                        {@const remaining = item.qtyRequested - item.qtyOrdered}
+                        <tr animate:flip={{duration: flipDurationMs}} class="border-b last:border-0 hover:bg-muted/30 transition-colors group/row {selectedItemIds.has(item.id) ? 'bg-primary/5 hover:bg-primary/10' : ''}">
+                          <td class="py-2 pl-3 text-center print:hidden w-8">
+                            <GripVertical class="h-4 w-4 text-muted-foreground/40 cursor-grab active:cursor-grabbing hover:text-foreground transition-colors inline-block" />
+                          </td>
+                          <td class="py-2 pr-2 text-center print:hidden w-8">
+                            <input type="checkbox" checked={selectedItemIds.has(item.id)} onchange={() => toggleItemSelection(item.id)} class="h-4 w-4 rounded border-input accent-primary cursor-pointer" />
+                          </td>
+                          <td class="px-4 py-2 font-mono text-xs text-muted-foreground">{item.sku || "—"}</td>
+                          <td class="px-4 py-2 font-medium text-foreground">
+                            {#if cellEdit?.id === item.id && cellEdit?.field === "desc"}
+                              <input
+                                bind:value={cellStr}
+                                use:selectOnMount
+                                onkeydown={cellKeydown}
+                                onblur={commitCell}
+                                class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              />
+                            {:else if !item.variantId}
+                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 text-left hover:bg-muted text-foreground transition-colors" title="Click to edit description" onclick={() => startCellEdit(item, "desc")}>
+                                {item.variantName}
+                              </button>
+                            {:else}
+                              {item.variantName}
+                            {/if}
+                          </td>
+                          <td class="px-4 py-2 text-right tabular-nums">
+                            {#if cellEdit?.id === item.id && cellEdit?.field === "qty"}
+                              <NumericInput
+                                bind:value={cellQty}
+                                autofocus={true}
+                                onkeydown={cellKeydown}
+                                onblur={commitCell}
+                                class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ml-auto"
+                              />
+                            {:else}
+                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 hover:bg-muted font-medium tabular-nums transition-colors" title="Click to edit quantity" onclick={() => startCellEdit(item, "qty")}>
+                                {item.qtyRequested}
+                              </button>
+                            {/if}
+                          </td>
+                          <td class="px-4 py-2 text-right tabular-nums text-muted-foreground">{item.qtyOrdered}</td>
+                          <td class="px-4 py-2 text-right tabular-nums">
+                            {#if remaining > 0}
+                              <span class="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                {remaining}
+                              </span>
+                            {:else}
+                              <span class="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                0
+                              </span>
+                            {/if}
+                          </td>
+                          <td class="py-2 pr-3 text-right print:hidden">
+                             <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                               <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" onclick={() => deleteItem(item.id)}>
+                                 <Trash2 class="h-3.5 w-3.5" />
+                               </Button>
+                             </div>
+                          </td>
+                        </tr>
+                      {/each}
+                      {#if groupedItems[section.id].length === 0}
+                        <tr><td colspan="8" class="px-4 py-6 text-center text-muted-foreground text-xs">No items in this section yet.</td></tr>
+                      {/if}
+                      {#if section.id !== "unsectioned" && !showAddItem}
+                        <tr class="hover:bg-muted/20 border-t group">
+                          <td colspan="8" class="p-0">
+                            <button class="w-full text-left px-4 py-2 text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-1.5" onclick={() => openAddItem(section.id)}>
+                              <Plus class="h-3.5 w-3.5" /> Add line to {section.name}
+                            </button>
+                          </td>
+                        </tr>
+                      {:else if showAddItem && (newItemSection || "unsectioned") === section.id}
+                        <tr>
+                          <td colspan="8" class="p-0">
+                            {@render lineForm()}
+                          </td>
+                        </tr>
+                      {/if}
+                    </tbody>
+                  </table>
+                </div>
               {/if}
             </div>
           {/each}
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if bulkOpen}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+    role="presentation"
+    onclick={(e) => e.target === e.currentTarget && closeBulk()}
+  >
+    <div
+      class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add multiple lines"
+    >
+      <div class="flex items-center justify-between border-b px-5 py-3.5">
+        <div class="flex items-center gap-2">
+          <Layers class="h-4 w-4 text-primary" />
+          <h2 class="text-base font-semibold">Add multiple lines</h2>
+        </div>
+        <Button variant="ghost" size="icon" class="h-8 w-8" onclick={closeBulk}>
+          <X class="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div class="flex border-b bg-muted/20 px-5">
+        <button class={tabClass("reorder")} onclick={() => (bulkTab = "reorder")}>
+          Reorder Suggestions
+        </button>
+        <button class={tabClass("stock")} onclick={() => (bulkTab = "stock")}>
+          By Stock Catalog
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-auto px-5 py-4 space-y-3">
+        {#if bulkTab === "reorder"}
+          <p class="text-xs text-muted-foreground">
+            Open reorder suggestions from inventory low-stock alerts. Adding them appends them to this requisition and marks them converted.
+          </p>
+
+          {#if $ReorderSuggestionsQuery.fetching && suggestions.length === 0}
+            <p class="py-12 text-center text-sm text-muted-foreground">Loading suggestions...</p>
+          {:else if reorderRows.length === 0}
+            <p class="py-12 text-center text-sm text-muted-foreground">
+              No open reorder suggestions. Run a scan on the Reorder screen to generate them.
+            </p>
+          {:else}
+            <div class="rounded-lg border overflow-hidden">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/40 border-b text-left text-xs font-semibold text-muted-foreground">
+                  <tr>
+                    <th class="w-10 px-3 py-2.5 text-center"></th>
+                    <th class="px-4 py-2.5 font-semibold">Product</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">Stock</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">Reorder Point</th>
+                    <th class="px-4 py-2.5 font-semibold">Vendor</th>
+                    <th class="px-4 py-2.5 w-32 font-semibold">Order Qty</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y">
+                  {#each reorderRows as s (s.id)}
+                    {#if reorderPicks[s.id]}
+                      <tr class="hover:bg-muted/30 transition-colors {reorderPicks[s.id].selected ? 'bg-primary/5' : ''}">
+                        <td class="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            bind:checked={reorderPicks[s.id].selected}
+                            class="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                          />
+                        </td>
+                        <td class="px-4 py-2">
+                          <span class="font-medium text-foreground">{s.productName}</span>
+                          {#if s.sku}
+                            <span class="ml-1.5 font-mono text-xs text-muted-foreground">({s.sku})</span>
+                          {/if}
+                        </td>
+                        <td class="px-4 py-2 text-right tabular-nums">{s.currentStock}</td>
+                        <td class="px-4 py-2 text-right tabular-nums">{s.reorderPoint ?? '—'}</td>
+                        <td class="px-4 py-2 text-xs text-muted-foreground">{s.vendorName ?? '—'}</td>
+                        <td class="px-4 py-2">
+                          <Input
+                            type="number"
+                            class="h-8 w-24 text-right tabular-nums ml-auto"
+                            bind:value={reorderPicks[s.id].qty}
+                            min="1"
+                          />
+                        </td>
+                      </tr>
+                    {/if}
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        {:else}
+          <div class="relative">
+            <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search by product name or SKU..."
+              bind:value={stockSearch}
+              class="pl-9"
+            />
+          </div>
+
+          {#if stockVisible.length === 0}
+            <p class="py-12 text-center text-sm text-muted-foreground">No matching product variants found.</p>
+          {:else}
+            <div class="rounded-lg border overflow-hidden">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/40 border-b text-left text-xs font-semibold text-muted-foreground">
+                  <tr>
+                    <th class="w-10 px-3 py-2.5 text-center"></th>
+                    <th class="px-4 py-2.5 font-semibold">SKU</th>
+                    <th class="px-4 py-2.5 font-semibold">Variant Name</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">Stock</th>
+                    <th class="px-4 py-2.5 w-32 font-semibold text-right">Requested Qty</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y">
+                  {#each stockVisible as r (r.variantId)}
+                    {#if stockPicks[r.variantId]}
+                      <tr class="hover:bg-muted/30 transition-colors {stockPicks[r.variantId].selected ? 'bg-primary/5' : ''}">
+                        <td class="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            bind:checked={stockPicks[r.variantId].selected}
+                            class="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                          />
+                        </td>
+                        <td class="px-4 py-2 font-mono text-xs text-muted-foreground">{r.sku || '—'}</td>
+                        <td class="px-4 py-2 font-medium text-foreground">{r.label}</td>
+                        <td class="px-4 py-2 text-right tabular-nums">{r.totalQty}</td>
+                        <td class="px-4 py-2">
+                          <Input
+                            type="number"
+                            class="h-8 w-24 text-right tabular-nums ml-auto"
+                            bind:value={stockPicks[r.variantId].qty}
+                            min="1"
+                          />
+                        </td>
+                      </tr>
+                    {/if}
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            {#if stockTruncated}
+              <p class="text-center text-xs text-muted-foreground">
+                Showing top {STOCK_CAP} low-stock results — refine search for more.
+              </p>
+            {/if}
+          {/if}
+        {/if}
+      </div>
+
+      <div class="flex items-center justify-between border-t bg-muted/10 px-5 py-3">
+        <span class="text-xs font-medium text-muted-foreground">
+          {bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount} item{(bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount) === 1 ? '' : 's'} selected
+        </span>
+        <div class="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onclick={closeBulk}>Cancel</Button>
+          {#if bulkTab === "reorder"}
+            <Button
+              size="sm"
+              disabled={adding || reorderSelectedCount === 0}
+              onclick={addReorderSelected}
+            >
+              {adding ? "Adding..." : `Add ${reorderSelectedCount} to Requisition`}
+            </Button>
+          {:else}
+            <Button
+              size="sm"
+              disabled={adding || stockSelectedCount === 0}
+              onclick={addStockSelected}
+            >
+              {adding ? "Adding..." : `Add ${stockSelectedCount} to Requisition`}
+            </Button>
+          {/if}
         </div>
       </div>
     </div>
