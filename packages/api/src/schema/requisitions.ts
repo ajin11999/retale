@@ -32,6 +32,7 @@ export const typeDefs = /* GraphQL */ `
     description: String
     qtyRequested: Float!
     qtyOrdered: Float!
+    estimatedUnitCostMinor: Float!
     sortOrder: Int!
   }
 
@@ -56,6 +57,7 @@ export const typeDefs = /* GraphQL */ `
       variantId: ID
       description: String
       qtyRequested: Float!
+      estimatedUnitCostMinor: Float
     ): PurchaseRequisitionItem!
     updateRequisitionItem(
       id: ID!
@@ -63,6 +65,7 @@ export const typeDefs = /* GraphQL */ `
       variantId: ID
       description: String
       qtyRequested: Float
+      estimatedUnitCostMinor: Float
     ): PurchaseRequisitionItem!
     deleteRequisitionItem(id: ID!): Boolean!
     reorderRequisitionItems(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionItem!]!

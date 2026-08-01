@@ -174,7 +174,7 @@
                     {v.product.publicDisplayName}{v.label ? ` - ${v.label}` : ''}
                   </span>
                 </td>
-                <td class="px-4 py-2 text-muted-foreground">
+                <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
                   {v.sku}
                 </td>
                 <td class="px-4 py-2">

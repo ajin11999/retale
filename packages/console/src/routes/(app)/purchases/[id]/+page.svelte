@@ -287,6 +287,7 @@
       $description: String
       $qtyOrdered: Float
       $unitCostMinor: Float
+      $baseCostMinor: Float
     ) {
       updatePurchaseItem(
         id: $id
@@ -295,6 +296,7 @@
         description: $description
         qtyOrdered: $qtyOrdered
         unitCostMinor: $unitCostMinor
+        baseCostMinor: $baseCostMinor
       ) {
         # Select the mutated scalars so Houdini normalizes them straight into
         # the cache — inline cell edits then update instantly, no refetch wait.
@@ -756,6 +758,14 @@
     );
   });
 
+  function ensureExpanded(key: string) {
+    if (collapsed.has(key)) {
+      const next = new Set(collapsed);
+      next.delete(key);
+      collapsed = next;
+    }
+  }
+
   // Move focus to a line-form field once it has rendered. Lets opening a new
   // line land the cursor in Variant, and picking a variant jump to Qty.
   async function focusLineField(id: "line-variant" | "line-qty") {
@@ -763,6 +773,7 @@
     const el = document.getElementById(id) as HTMLInputElement | null;
     el?.focus();
     el?.select?.();
+    el?.scrollIntoView?.({ behavior: "smooth", block: "center" });
   }
 
   function newItem() {
@@ -775,6 +786,8 @@
       unitCostMinor: 0,
     };
     draftGroupKey = UNGROUPED;
+    ensureExpanded(UNGROUPED);
+    if (lineSearch) lineSearch = "";
     focusLineField("line-variant");
   }
 
@@ -788,24 +801,20 @@
       unitCostMinor: i.unitCostMinor,
     };
     draftGroupKey = i.sectionId ?? UNGROUPED;
+    ensureExpanded(draftGroupKey);
+    focusLineField("line-variant");
   }
 
   async function saveItem() {
     const d = itemDraft;
     if (!d || !purchase) return;
-    if (duplicateExistingLine) {
-      feedback = {
-        ok: false,
-        text: "This variant is already on the order. Please edit the existing line instead.",
-      };
-      return;
-    }
     // A line is either a stock variant or a free-text non-stock line.
     if (!d.variantId && !d.description.trim()) {
       feedback = { ok: false, text: "Pick a variant or enter a description." };
       return;
     }
     const isNew = !d.id;
+    const existingItem = d.id ? items.find((x) => x.id === d.id) : null;
     const ok = await run("Item", () =>
       d.id
         ? UpdateItem.mutate({
@@ -815,6 +824,9 @@
             description: d.description.trim() || null,
             qtyOrdered: d.qtyOrdered,
             unitCostMinor: d.unitCostMinor,
+            ...(!existingItem?.discount && !existingItem?.taxPct
+              ? { baseCostMinor: d.unitCostMinor }
+              : {}),
           })
         : CreateItem.mutate({
             purchaseId: purchase.id,
@@ -1223,6 +1235,7 @@
       id: string;
       qtyOrdered?: number;
       unitCostMinor?: number;
+      baseCostMinor?: number;
       description?: string | null;
     } = { id: c.id };
 
@@ -1251,6 +1264,9 @@
         return;
       }
       patch.unitCostMinor = n;
+      if (!i.discount && !i.taxPct) {
+        patch.baseCostMinor = n;
+      }
     } else {
       const d = cellStr.trim();
       if (!i.variantId && !d) {
@@ -1294,6 +1310,18 @@
   const items = $derived(applyOrder(purchase?.items ?? [], itemOrder));
   const lineLabel = (i: (typeof items)[number]) =>
     variantLabel(i.variantId) ?? i.description ?? "—";
+
+  // Split a line's display into product name vs SKU suffix for visual
+  // differentiation.  The variant label format is "Name · SKU" or
+  // "Name · SKU · label"; we split on the first " · ".
+  const lineParts = (i: (typeof items)[number]): { name: string; sku: string | null } => {
+    if (!i.variantId) return { name: i.description ?? "—", sku: null };
+    const full = variantLabel(i.variantId);
+    if (!full) return { name: "Unknown", sku: null };
+    const idx = full.indexOf(" · ");
+    if (idx === -1) return { name: full, sku: null };
+    return { name: full.slice(0, idx), sku: full.slice(idx + 3) };
+  };
 
   // ---- Grouped / searchable / reorderable lines ----------------------------
   // Lines render grouped under their section (in section order), with an
@@ -1800,6 +1828,8 @@
       unitCostMinor: 0,
     };
     draftGroupKey = sectionId;
+    ensureExpanded(sectionId);
+    if (lineSearch) lineSearch = "";
     focusLineField("line-variant");
   }
 
@@ -2516,7 +2546,8 @@
                             >{lineLabel(i)}</button
                           >
                         {:else}
-                          {lineLabel(i)}
+                          {@const parts = lineParts(i)}
+                          {parts.name}{#if parts.sku}<span class="ml-1 font-mono text-xs text-muted-foreground">{parts.sku}</span>{/if}
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">

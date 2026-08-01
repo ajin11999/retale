@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { users } from "./auth.ts";
 import { productVariants } from "./products.ts";
-import { timestamps, ulidPk, ulidRef } from "./_helpers.ts";
+import { money, timestamps, ulidPk, ulidRef } from "./_helpers.ts";
 
 export const PURCHASE_REQUISITION_STATUSES = [
   "draft",
@@ -48,6 +48,7 @@ export const purchaseRequisitionItems = mysqlTable(
     description: varchar({ length: 300 }),
     qtyRequested: bigint({ mode: "number" }).notNull(),
     qtyOrdered: bigint({ mode: "number" }).notNull().default(0),
+    estimatedUnitCostMinor: money().notNull().default(0),
     sortOrder: int().notNull().default(0),
   },
   (t) => [

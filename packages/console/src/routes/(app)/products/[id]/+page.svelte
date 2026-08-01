@@ -1692,7 +1692,11 @@
           <div class="space-y-1">
             <div class="flex items-center justify-between">
               <span class="text-sm font-medium">
-                {v.label ? `${v.sku} · ${v.label}` : v.sku}
+                {#if v.label}
+                  {v.label} <span class="ml-1.5 text-xs font-mono font-normal text-muted-foreground">({v.sku})</span>
+                {:else}
+                  <span class="font-mono text-xs font-normal text-muted-foreground">{v.sku}</span>
+                {/if}
               </span>
               {#if bundleDraft?.variantId !== v.id}
                 <IconButton
@@ -1843,7 +1847,11 @@
         <div class="space-y-1">
           <div class="flex items-center justify-between">
             <span class="text-sm font-medium">
-              {v.label ? `${v.sku} · ${v.label}` : v.sku}
+              {#if v.label}
+                {v.label} <span class="ml-1 text-xs font-mono font-normal text-muted-foreground">({v.sku})</span>
+              {:else}
+                <span class="font-mono text-xs font-normal text-muted-foreground">{v.sku}</span>
+              {/if}
               <span class="ml-1 text-xs text-muted-foreground"
                 >({v.totalQty} total)</span
               >

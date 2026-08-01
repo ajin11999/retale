@@ -36,6 +36,7 @@
         { href: "/transfers", label: "Stock transfers" },
         { href: "/vendors", label: "Vendors" },
         { href: "/requisitions", label: "Purchase Requisitions" },
+        { href: "/rfqs", label: "Requests for Quotation" },
         { href: "/purchases", label: "Purchases" },
         { href: "/deliveries", label: "Deliveries", perm: "delivery.draft" },
         { href: "/reorder", label: "Reorder suggestions" },

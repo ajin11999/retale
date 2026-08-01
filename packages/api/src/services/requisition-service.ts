@@ -176,6 +176,7 @@ export async function createItem(input: {
   variantId?: string | null;
   description?: string | null;
   qtyRequested: number;
+  estimatedUnitCostMinor?: number;
   sortOrder?: number;
 }): Promise<Item> {
   const req = await loadRequisition(input.requisitionId);
@@ -193,6 +194,7 @@ export async function createItem(input: {
     variantId: input.variantId ?? null,
     description,
     qtyRequested: input.qtyRequested,
+    estimatedUnitCostMinor: input.estimatedUnitCostMinor ?? 0,
     sortOrder: input.sortOrder ?? 0,
   });
   return loadItem(id);
@@ -205,6 +207,7 @@ export async function updateItem(
     variantId?: string | null;
     description?: string | null;
     qtyRequested?: number;
+    estimatedUnitCostMinor?: number;
     sortOrder?: number;
   }
 ): Promise<Item> {
@@ -225,6 +228,7 @@ export async function updateItem(
       ...(patch.variantId !== undefined && { variantId: patch.variantId }),
       ...(patch.description !== undefined && { description: nextDescription }),
       ...(patch.qtyRequested !== undefined && { qtyRequested: patch.qtyRequested }),
+      ...(patch.estimatedUnitCostMinor !== undefined && { estimatedUnitCostMinor: patch.estimatedUnitCostMinor }),
       ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
     })
     .where(eq(purchaseRequisitionItems.id, id));

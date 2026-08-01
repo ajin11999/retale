@@ -453,7 +453,7 @@
                 <div class="flex items-center justify-between gap-2 p-2 rounded border bg-muted/20">
                   <div class="flex flex-col">
                     <span class="text-sm font-medium">{v.name}</span>
-                    <span class="text-xs text-muted-foreground">{v.sku}</span>
+                    <span class="text-xs font-mono text-muted-foreground">{v.sku}</span>
                     {#if v.isPreferred}
                       <span class="text-[10px] text-emerald-600 font-semibold uppercase mt-0.5">Preferred</span>
                     {/if}
@@ -513,7 +513,7 @@
                 />
                 <div class="flex flex-col">
                   <span class="text-sm font-medium">{v.name}</span>
-                  <span class="text-xs text-muted-foreground">{v.sku}</span>
+                  <span class="text-xs font-mono text-muted-foreground">{v.sku}</span>
                 </div>
               </label>
             {:else}

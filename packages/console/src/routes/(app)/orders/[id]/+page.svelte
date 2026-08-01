@@ -929,7 +929,7 @@
                   <div class="font-medium">{i.displayName}</div>
                 {/if}
                 <div class="text-xs text-muted-foreground">
-                  {i.snapshotProductSku}{i.snapshotVariantLabel
+                  <span class="font-mono text-xs text-muted-foreground">{i.snapshotProductSku}</span>{i.snapshotVariantLabel
                     ? ` · ${i.snapshotVariantLabel}`
                     : ""} · {i.snapshotUnit}
                   {#if i.snapshotCategoryName}

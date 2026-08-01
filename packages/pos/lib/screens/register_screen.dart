@@ -457,7 +457,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
             : '${product.variants.length} variants';
         return ListTile(
           title: Text(product.publicDisplayName),
-          subtitle: Text(first?.sku ?? ''),
+          subtitle: Text(
+            first?.sku ?? '',
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontFamily: 'monospace',
+            ),
+          ),
           trailing: Text(priceLabel,
               style: const TextStyle(fontWeight: FontWeight.bold)),
           onTap: () => _pickProduct(product),
@@ -626,7 +633,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// Confirm the sale with a snackbar whose action opens the receipt choices
   /// (print or WhatsApp). Ctrl+P is the faster path to the same print.
   ///
-  /// The snackbar is temporary and dismisses automatically after a few seconds.
+  /// The snackbar is temporary and dismisses automatically after 10 seconds.
   /// [queued] flags an offline sale — the receipt still
   /// prints locally, it just hasn't synced to the server yet.
   void _announceSale(_CompletedSale sale, {bool queued = false}) {
@@ -639,6 +646,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         content: Text(label),
+        duration: const Duration(seconds: 10),
         showCloseIcon: true,
         action: SnackBarAction(
           label: 'Receipt',
@@ -1026,7 +1034,14 @@ class _VariantPicker extends StatelessWidget {
           ),
           ...product.variants.map((v) => ListTile(
                 title: Text(v.label ?? v.sku),
-                subtitle: Text(v.sku),
+                subtitle: Text(
+                  v.sku,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    fontFamily: 'monospace',
+                  ),
+                ),
                 trailing: Text(Money.format(v.priceMinor)),
                 onTap: () => Navigator.pop(context, v),
               )),

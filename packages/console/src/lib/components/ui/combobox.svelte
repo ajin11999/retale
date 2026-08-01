@@ -216,7 +216,15 @@
               opt.value === value ? "font-medium" : "",
             )}
           >
-            {opt.label}
+            {#if opt.label.includes(" · ")}
+              {@const parts = opt.label.split(" · ")}
+              <span class="truncate">
+                <span class="font-medium">{parts[0]}</span>
+                <span class="ml-1.5 text-xs font-mono font-normal text-muted-foreground">· {parts.slice(1).join(" · ")}</span>
+              </span>
+            {:else}
+              {opt.label}
+            {/if}
           </button>
         </li>
       {/each}

@@ -39,8 +39,11 @@
   let taxPct = $state<number | null>(null);
 
   const getItemBaseCost = (item: any) => {
-    if (typeof item?.baseCostMinor === 'number' && item.baseCostMinor > 0) return item.baseCostMinor;
+    if (item?.discount || item?.taxPct) {
+      if (typeof item?.baseCostMinor === 'number' && item.baseCostMinor > 0) return item.baseCostMinor;
+    }
     if (typeof item?.unitCostMinor === 'number' && item.unitCostMinor > 0) return item.unitCostMinor;
+    if (typeof item?.baseCostMinor === 'number' && item.baseCostMinor > 0) return item.baseCostMinor;
     return 0;
   };
 

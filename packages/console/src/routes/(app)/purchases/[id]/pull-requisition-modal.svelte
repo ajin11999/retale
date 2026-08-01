@@ -172,7 +172,7 @@
                         {/if}
                       </div>
                     </td>
-                    <td class="px-4 py-2 text-muted-foreground cursor-pointer" onclick={() => toggleItem(item)}>{getSku(item.variantId)}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-muted-foreground cursor-pointer" onclick={() => toggleItem(item)}>{getSku(item.variantId)}</td>
                     <td class="px-4 py-2 font-medium cursor-pointer" onclick={() => toggleItem(item)}>{getVariantName(item.variantId, item.description)}</td>
                     <td class="px-4 py-2 text-right">
                       {#if selected}

@@ -703,7 +703,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2">
           <h2 class="text-lg font-semibold">Requested Items</h2>
-          <Badge variant="secondary" class="font-normal text-xs">
+          <Badge class="font-normal text-xs bg-secondary text-secondary-foreground">
             {requisition.items.length} line{requisition.items.length === 1 ? '' : 's'}
           </Badge>
         </div>
@@ -824,7 +824,7 @@
                          <!-- svelte-ignore a11y_no_static_element_interactions -->
                          <span class="font-semibold text-foreground cursor-pointer hover:text-primary transition-colors flex items-center gap-2" onclick={() => startRenameSection(section.id, section.name)}>
                            {section.name}
-                           <Badge variant="outline" class="font-normal text-xs py-0 px-1.5 bg-background">
+                           <Badge class="font-normal text-xs py-0 px-1.5 bg-background border">
                              {groupedItems[section.id]?.length || 0} line{(groupedItems[section.id]?.length || 0) === 1 ? '' : 's'}
                            </Badge>
                          </span>

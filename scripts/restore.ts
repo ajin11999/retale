@@ -114,7 +114,7 @@ try {
       "mariadb",
       "-uroot",
       "-e",
-      `DROP DATABASE IF EXISTS \`${stack.dbName}\`; CREATE DATABASE \`${stack.dbName}\`;`,
+      `DROP DATABASE IF EXISTS \`${stack.dbName}\`; CREATE DATABASE \`${stack.dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`,
     ],
     env,
   );
@@ -147,7 +147,7 @@ try {
           `${uploadsDir}:/restore:ro`,
           "api",
           "-c",
-          "find /data/uploads -mindepth 1 -delete && cp -a /restore/. /data/uploads/",
+          "mkdir -p /data/uploads && find /data/uploads -mindepth 1 -delete && cp -a /restore/. /data/uploads/",
         ],
         env,
       );

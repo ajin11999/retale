@@ -169,6 +169,8 @@ type Query {
   journalExport(periodStart: String!, periodEnd: String!): JournalExport!
   requisitions(status: RequisitionStatus, includeCancelled: Boolean): [PurchaseRequisition!]!
   requisition(id: ID!): PurchaseRequisition
+  rfqs(status: RfqStatus): [RequestForQuotation!]!
+  rfq(id: ID!): RequestForQuotation
 }
 
 type Mutation {
@@ -589,10 +591,23 @@ type Mutation {
   updateRequisitionSection(id: ID!, name: String!): PurchaseRequisitionSection!
   deleteRequisitionSection(id: ID!): Boolean!
   reorderRequisitionSections(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionSection!]!
-  createRequisitionItem(requisitionId: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float!): PurchaseRequisitionItem!
-  updateRequisitionItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float): PurchaseRequisitionItem!
+  createRequisitionItem(requisitionId: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float!, estimatedUnitCostMinor: Float): PurchaseRequisitionItem!
+  updateRequisitionItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float, estimatedUnitCostMinor: Float): PurchaseRequisitionItem!
   deleteRequisitionItem(id: ID!): Boolean!
   reorderRequisitionItems(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionItem!]!
+  createRfq(vendorId: ID, date: String!, dueDate: String, memo: String, termsAndConditions: String): RequestForQuotation!
+  createRfqFromRequisitions(vendorId: ID, date: String!, dueDate: String, memo: String, termsAndConditions: String, requisitionItemIds: [ID!]!): RequestForQuotation!
+  updateRfq(id: ID!, vendorId: ID, date: String, dueDate: String, status: RfqStatus, memo: String, termsAndConditions: String): RequestForQuotation!
+  deleteRfq(id: ID!): Boolean!
+  createRfqSection(rfqId: ID!, name: String!): RfqSection!
+  updateRfqSection(id: ID!, name: String!): RfqSection!
+  deleteRfqSection(id: ID!): Boolean!
+  reorderRfqSections(rfqId: ID!, orderedIds: [ID!]!): [RfqSection!]!
+  createRfqItem(rfqId: ID!, sectionId: ID, requisitionItemId: ID, variantId: ID, description: String, qtyRequested: Float!, targetUnitCostMinor: Float, quotedUnitCostMinor: Float): RfqItem!
+  updateRfqItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float, targetUnitCostMinor: Float, quotedUnitCostMinor: Float): RfqItem!
+  deleteRfqItem(id: ID!): Boolean!
+  reorderRfqItems(rfqId: ID!, orderedIds: [ID!]!): [RfqItem!]!
+  convertRfqToPurchase(rfqId: ID!, vendorId: ID): Purchase!
 }
 
 type User {
@@ -2151,5 +2166,52 @@ type PurchaseRequisitionItem {
   description: String
   qtyRequested: Float!
   qtyOrdered: Float!
+  estimatedUnitCostMinor: Float!
+  sortOrder: Int!
+}
+
+enum RfqStatus {
+  draft
+  sent
+  received
+  awarded
+  cancelled
+}
+
+type RequestForQuotation {
+  id: ID!
+  rfqNumber: String!
+  vendorId: ID
+  snapshotVendorName: String!
+  date: String!
+  dueDate: String
+  status: RfqStatus!
+  memo: String
+  termsAndConditions: String
+  createdByUserId: ID
+  createdAt: String!
+  updatedAt: String!
+  sections: [RfqSection!]!
+  items: [RfqItem!]!
+}
+
+type RfqSection {
+  id: ID!
+  rfqId: ID!
+  name: String!
+  sortOrder: Int!
+  items: [RfqItem!]!
+}
+
+type RfqItem {
+  id: ID!
+  rfqId: ID!
+  sectionId: ID
+  requisitionItemId: ID
+  variantId: ID
+  description: String
+  qtyRequested: Float!
+  targetUnitCostMinor: Float!
+  quotedUnitCostMinor: Float!
   sortOrder: Int!
 }

@@ -88,6 +88,7 @@ export async function createTransfer(input: {
   createdByUserId: string;
 }): Promise<Transfer> {
   const items = input.items || [];
+  if (items.length === 0) throw new TransferError("EMPTY_TRANSFER");
 
   return db.transaction(async (tx) => {
     const loc = await tx.query.locations.findFirst({

@@ -11,13 +11,14 @@ import { eq, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { users } from "../db/schema/auth.ts";
 import { products, productVariants } from "../db/schema/products.ts";
+import { purchaseRequisitionItems, purchaseRequisitions } from "../db/schema/requisitions.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
 import { reorderSuggestions } from "../db/schema/reorder.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import {
-  addSuggestionsToPurchase,
-  convertSuggestions,
+  addSuggestionsToRequisition,
+  convertSuggestionsToRequisition,
   dismissSuggestion,
   listSuggestions,
   purgeResolvedSuggestions,
@@ -33,6 +34,8 @@ async function wipe(): Promise<void> {
   await db.execute(sql`SET FOREIGN_KEY_CHECKS = 0`);
   for (const t of [
     "reorder_suggestions",
+    "purchase_requisition_items",
+    "purchase_requisitions",
     "purchase_items",
     "purchases",
     "vendor_variant_codes",
@@ -312,11 +315,11 @@ describe("dismissSuggestion", () => {
   });
 });
 
-describe("convertSuggestions", () => {
-  test("creates one draft purchase per vendor and marks suggestions converted", async () => {
+describe("convertSuggestionsToRequisition", () => {
+  test("creates a draft requisition containing selected suggestions and marks suggestions converted", async () => {
     const vendorA = await seedVendor("A");
     const vendorB = await seedVendor("B");
-    const v1 = await seedVariant({
+    await seedVariant({
       totalQty: 0,
       reorderPoint: 10,
       reorderQty: 20,
@@ -336,134 +339,64 @@ describe("convertSuggestions", () => {
       primaryVendorId: vendorB,
     });
     const open = await runReorderScan();
-    const created = await convertSuggestions(
+    const created = await convertSuggestionsToRequisition(
+      "Stock Replenishment",
       open.map((s) => ({ suggestionId: s.id })),
       userId,
     );
-    expect(created).toHaveLength(2); // vendor A and vendor B
-
-    const items = await db.select().from(purchaseItems);
-    expect(items).toHaveLength(3);
-    // v1's line is priced at the variant's current cost.
-    const v1Item = items.find((i) => i.variantId === v1);
-    expect(v1Item!.unitCostMinor).toBe(700);
-    expect(v1Item!.qtyOrdered).toBe(20);
+    expect(created.name).toBe("Stock Replenishment");
+    expect(created.status).toBe("draft");
 
     expect(await listSuggestions("converted")).toHaveLength(3);
     expect(await listSuggestions("open")).toHaveLength(0);
   });
 
-  test("applies qty and vendor overrides", async () => {
-    const original = await seedVendor("Original");
-    const override = await seedVendor("Override");
+  test("applies qty overrides", async () => {
     await seedVariant({
       totalQty: 0,
       reorderPoint: 10,
       reorderQty: 10,
-      primaryVendorId: original,
     });
     const [s] = await runReorderScan();
-    const created = await convertSuggestions(
-      [{ suggestionId: s!.id, qty: 99, vendorId: override }],
+    const created = await convertSuggestionsToRequisition(
+      "Custom Qty Requisition",
+      [{ suggestionId: s!.id, qty: 99 }],
       userId,
     );
-    expect(created).toHaveLength(1);
-    expect(created[0]!.vendorId).toBe(override);
-    const items = await db.select().from(purchaseItems);
-    expect(items[0]!.qtyOrdered).toBe(99);
-  });
-
-  test("prices lines at the vendor's last purchase cost over current variant cost", async () => {
-    const vendorId = await seedVendor();
-    const variantId = await seedVariant({
-      totalQty: 0,
-      reorderPoint: 10,
-      reorderQty: 20,
-      primaryVendorId: vendorId,
-      costMinor: 700, // current cost — landed costs folded in, must not win
-    });
-    // What the vendor actually charged on its latest (fully delivered) PO.
-    await seedPurchase({
-      vendorId,
-      variantId,
-      qtyOrdered: 5,
-      qtyDelivered: 5,
-      status: "complete",
-      unitCostMinor: 555,
-    });
-    const [s] = await runReorderScan();
-    const created = await convertSuggestions([{ suggestionId: s!.id }], userId);
-    const items = await db
-      .select()
-      .from(purchaseItems)
-      .where(eq(purchaseItems.purchaseId, created[0]!.id));
-    expect(items[0]!.unitCostMinor).toBe(555);
-  });
-
-  test("rejects an unassigned suggestion with no vendor override", async () => {
-    await seedVariant({ totalQty: 0, reorderPoint: 10 });
-    const [s] = await runReorderScan();
-    expect(s!.vendorId).toBeNull();
-    await expectError(
-      () => convertSuggestions([{ suggestionId: s!.id }], userId),
-      "UNASSIGNED_VENDOR",
-    );
-  });
-
-  test("converts an unassigned suggestion when a vendor is supplied", async () => {
-    const vendorId = await seedVendor();
-    await seedVariant({ totalQty: 0, reorderPoint: 10 });
-    const [s] = await runReorderScan();
-    const created = await convertSuggestions(
-      [{ suggestionId: s!.id, vendorId }],
-      userId,
-    );
-    expect(created).toHaveLength(1);
+    expect(created.name).toBe("Custom Qty Requisition");
   });
 
   test("rejects converting an already-converted suggestion", async () => {
     const vendorId = await seedVendor();
     await seedVariant({ totalQty: 0, reorderPoint: 10, primaryVendorId: vendorId });
     const [s] = await runReorderScan();
-    await convertSuggestions([{ suggestionId: s!.id }], userId);
+    await convertSuggestionsToRequisition("Req 1", [{ suggestionId: s!.id }], userId);
     await expectError(
-      () => convertSuggestions([{ suggestionId: s!.id }], userId),
+      () => convertSuggestionsToRequisition("Req 2", [{ suggestionId: s!.id }], userId),
       "NOT_OPEN",
     );
   });
 
   test("rejects an empty selection", async () => {
-    await expectError(() => convertSuggestions([], userId), "EMPTY_SELECTION");
-  });
-
-  test("rejects an unknown vendor override", async () => {
-    const vendorId = await seedVendor();
-    await seedVariant({ totalQty: 0, reorderPoint: 10, primaryVendorId: vendorId });
-    const [s] = await runReorderScan();
-    await expectError(
-      () => convertSuggestions([{ suggestionId: s!.id, vendorId: ulid() }], userId),
-      "VENDOR_NOT_FOUND",
-    );
+    await expectError(() => convertSuggestionsToRequisition("Req Empty", [], userId), "EMPTY_SELECTION");
   });
 });
 
-describe("addSuggestionsToPurchase", () => {
-  /** Seed an empty target purchase; returns its id. */
-  async function seedEmptyPurchase(
-    status: "open" | "cancelled" = "open",
+describe("addSuggestionsToRequisition", () => {
+  async function seedEmptyRequisition(
+    status: "draft" | "cancelled" = "draft",
   ): Promise<string> {
     const id = ulid();
-    await db.insert(purchases).values({
+    await db.insert(purchaseRequisitions).values({
       id,
-      vendorId: null,
-      snapshotVendorName: "Target",
-      date: "2026-01-01",
+      name: "Target Requisition",
       status,
+      createdByUserId: userId,
     });
     return id;
   }
 
-  test("appends suggestions as lines priced at variant cost and marks them converted", async () => {
+  test("appends suggestions as requisition items and marks them converted", async () => {
     await seedVariant({
       totalQty: 2,
       reorderPoint: 10,
@@ -471,105 +404,46 @@ describe("addSuggestionsToPurchase", () => {
       costMinor: 700,
     });
     const [s] = await runReorderScan();
-    const purchaseId = await seedEmptyPurchase();
-    const [before] = await db
-      .select()
-      .from(purchases)
-      .where(eq(purchases.id, purchaseId));
+    const requisitionId = await seedEmptyRequisition();
 
-    const added = await addSuggestionsToPurchase(purchaseId, [
+    const added = await addSuggestionsToRequisition(requisitionId, [
       { suggestionId: s!.id },
     ]);
 
     expect(added).toHaveLength(1);
     expect(added[0]!.variantId).toBe(s!.variantId);
-    expect(added[0]!.qtyOrdered).toBe(8); // reorderQty
-    expect(added[0]!.unitCostMinor).toBe(700); // variant cost
+    expect(added[0]!.qtyRequested).toBe(8); // reorderQty
     expect(added[0]!.sortOrder).toBe(0);
 
     expect(await listSuggestions("converted")).toHaveLength(1);
     expect(await listSuggestions("open")).toHaveLength(0);
-
-    const [row] = await db
-      .select()
-      .from(purchases)
-      .where(eq(purchases.id, purchaseId));
-    expect(row!.revision).toBe(before!.revision + 1); // one bump for the batch
   });
 
   test("applies a qty override", async () => {
     await seedVariant({ totalQty: 0, reorderPoint: 10, costMinor: 100 });
     const [s] = await runReorderScan();
-    const purchaseId = await seedEmptyPurchase();
-    const added = await addSuggestionsToPurchase(purchaseId, [
+    const requisitionId = await seedEmptyRequisition();
+    const added = await addSuggestionsToRequisition(requisitionId, [
       { suggestionId: s!.id, qty: 42 },
     ]);
-    expect(added[0]!.qtyOrdered).toBe(42);
+    expect(added[0]!.qtyRequested).toBe(42);
   });
 
-  test("appends after existing lines' sortOrder", async () => {
-    const vendorId = await seedVendor();
-    const existingVariant = await seedVariant({ totalQty: 5, reorderPoint: 0 });
-    const purchaseId = await seedPurchase({
-      vendorId,
-      variantId: existingVariant,
-      qtyOrdered: 3,
-    });
+  test("rejects adding to a cancelled requisition", async () => {
     await seedVariant({ totalQty: 0, reorderPoint: 10 });
     const [s] = await runReorderScan();
-    const added = await addSuggestionsToPurchase(purchaseId, [
-      { suggestionId: s!.id },
-    ]);
-    expect(added[0]!.sortOrder).toBe(1); // existing line was sortOrder 0
-  });
-
-  test("prefers the PO vendor's last purchase cost over current variant cost", async () => {
-    const vendorId = await seedVendor();
-    const variantId = await seedVariant({
-      totalQty: 0,
-      reorderPoint: 10,
-      costMinor: 700, // current cost — landed costs folded in, must not win
-    });
-    // The vendor's latest (fully delivered) PO priced this variant at 555.
-    await seedPurchase({
-      vendorId,
-      variantId,
-      qtyOrdered: 5,
-      qtyDelivered: 5,
-      status: "complete",
-      unitCostMinor: 555,
-    });
-    const [s] = await runReorderScan();
-    // Target PO belongs to the same vendor.
-    const targetId = ulid();
-    await db.insert(purchases).values({
-      id: targetId,
-      vendorId,
-      snapshotVendorName: "Target",
-      date: "2026-02-01",
-      status: "open",
-    });
-    const added = await addSuggestionsToPurchase(targetId, [
-      { suggestionId: s!.id },
-    ]);
-    expect(added[0]!.unitCostMinor).toBe(555);
-  });
-
-  test("rejects adding to a cancelled purchase", async () => {
-    await seedVariant({ totalQty: 0, reorderPoint: 10 });
-    const [s] = await runReorderScan();
-    const purchaseId = await seedEmptyPurchase("cancelled");
+    const requisitionId = await seedEmptyRequisition("cancelled");
     await expectError(
-      () => addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]),
+      () => addSuggestionsToRequisition(requisitionId, [{ suggestionId: s!.id }]),
       "PURCHASE_NOT_OPEN",
     );
   });
 
-  test("rejects an unknown purchase", async () => {
+  test("rejects an unknown requisition", async () => {
     await seedVariant({ totalQty: 0, reorderPoint: 10 });
     const [s] = await runReorderScan();
     await expectError(
-      () => addSuggestionsToPurchase(ulid(), [{ suggestionId: s!.id }]),
+      () => addSuggestionsToRequisition(ulid(), [{ suggestionId: s!.id }]),
       "PURCHASE_NOT_FOUND",
     );
   });
@@ -577,18 +451,18 @@ describe("addSuggestionsToPurchase", () => {
   test("rejects an already-converted suggestion", async () => {
     await seedVariant({ totalQty: 0, reorderPoint: 10 });
     const [s] = await runReorderScan();
-    const purchaseId = await seedEmptyPurchase();
-    await addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]);
+    const requisitionId = await seedEmptyRequisition();
+    await addSuggestionsToRequisition(requisitionId, [{ suggestionId: s!.id }]);
     await expectError(
-      () => addSuggestionsToPurchase(purchaseId, [{ suggestionId: s!.id }]),
+      () => addSuggestionsToRequisition(requisitionId, [{ suggestionId: s!.id }]),
       "NOT_OPEN",
     );
   });
 
   test("rejects an empty selection", async () => {
-    const purchaseId = await seedEmptyPurchase();
+    const requisitionId = await seedEmptyRequisition();
     await expectError(
-      () => addSuggestionsToPurchase(purchaseId, []),
+      () => addSuggestionsToRequisition(requisitionId, []),
       "EMPTY_SELECTION",
     );
   });

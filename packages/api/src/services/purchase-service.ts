@@ -831,21 +831,28 @@ export async function updateItem(
     throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
   }
 
-  await db.transaction(async (tx) => {
-    await tx
-      .update(purchaseItems)
-      .set({
-        ...(patch.sectionId !== undefined && { sectionId: patch.sectionId }),
-        ...(patch.variantId !== undefined && { variantId: patch.variantId }),
-        ...(patch.description !== undefined && { description: nextDescription }),
-        ...(patch.qtyOrdered !== undefined && { qtyOrdered: patch.qtyOrdered }),
-        ...(patch.baseCostMinor !== undefined && { baseCostMinor: patch.baseCostMinor ?? patch.unitCostMinor ?? item.unitCostMinor }),
-        ...(patch.discount !== undefined && { discount: patch.discount }),
-        ...(patch.taxPct !== undefined && { taxPct: patch.taxPct }),
-        ...(patch.unitCostMinor !== undefined && { unitCostMinor: patch.unitCostMinor }),
-        ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
-      })
-      .where(eq(purchaseItems.id, id));
+    const nextBaseCostMinor =
+      patch.baseCostMinor !== undefined
+        ? patch.baseCostMinor ?? patch.unitCostMinor ?? item.unitCostMinor
+        : patch.unitCostMinor !== undefined && !item.discount && !item.taxPct
+          ? patch.unitCostMinor
+          : undefined;
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(purchaseItems)
+        .set({
+          ...(patch.sectionId !== undefined && { sectionId: patch.sectionId }),
+          ...(patch.variantId !== undefined && { variantId: patch.variantId }),
+          ...(patch.description !== undefined && { description: nextDescription }),
+          ...(patch.qtyOrdered !== undefined && { qtyOrdered: patch.qtyOrdered }),
+          ...(nextBaseCostMinor !== undefined && { baseCostMinor: nextBaseCostMinor }),
+          ...(patch.discount !== undefined && { discount: patch.discount }),
+          ...(patch.taxPct !== undefined && { taxPct: patch.taxPct }),
+          ...(patch.unitCostMinor !== undefined && { unitCostMinor: patch.unitCostMinor }),
+          ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
+        })
+        .where(eq(purchaseItems.id, id));
       
     if (patch.qtyOrdered !== undefined && patch.qtyOrdered !== item.qtyOrdered && item.requisitionItemId) {
       await syncRequisitionItemQty(tx, item.requisitionItemId, patch.qtyOrdered - item.qtyOrdered);
