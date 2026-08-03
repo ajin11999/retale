@@ -8,6 +8,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -55,12 +56,12 @@
 
   // ---- Tree build ----------------------------------------------------------
   type Account = (typeof accounts)[number];
-  type Node = { acc: Account; children: Node[] };
+  type Node = { acc: Account; depth: number };
 
   // Archived accounts are hidden by default; toggled by the header checkbox.
   let showArchived = $state(false);
 
-  const tree = $derived.by(() => {
+  const tree = $derived.by<Node[]>(() => {
     const visible = showArchived
       ? accounts
       : accounts.filter((a) => !a.archivedAt);
@@ -78,12 +79,15 @@
         return xv - yv || x.name.localeCompare(y.name);
       });
     }
-    const build = (parentId: string | null): Node[] =>
-      (byParent.get(parentId) ?? []).map((acc) => ({
-        acc,
-        children: build(acc.id),
-      }));
-    return build(null);
+    const out: Node[] = [];
+    const walk = (parentId: string | null, depth: number) => {
+      for (const acc of byParent.get(parentId) ?? []) {
+        out.push({ acc, depth });
+        walk(acc.id, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return out;
   });
 
   // Parent options for the new-account form, as a flat searchable list where
@@ -113,21 +117,36 @@
   // Match by name, code, or account category; a parent is kept if any
   // descendant matches, so the hierarchy still reads.
   let search = $state("");
-  const filteredTree = $derived.by<Node[]>(() => {
+  const visibleTree = $derived.by<Node[]>(() => {
     const tokens = searchTokens(search.trim());
     if (!tokens.length) return tree;
     const matches = (a: Account) =>
       matchesTokens(tokens, a.name, a.code, a.accountCategory);
-    const filter = (nodes: Node[]): Node[] => {
-      const out: Node[] = [];
-      for (const n of nodes) {
-        const kids = filter(n.children);
-        if (matches(n.acc) || kids.length) out.push({ acc: n.acc, children: kids });
+    const byId = new Map(tree.map((n) => [n.acc.id, n]));
+    const visibleIds = new Set<string>();
+    for (const n of tree) {
+      if (!matches(n.acc)) continue;
+      let cur: Node | undefined = n;
+      while (cur && !visibleIds.has(cur.acc.id)) {
+        visibleIds.add(cur.acc.id);
+        cur = cur.acc.parentId ? byId.get(cur.acc.parentId) : undefined;
       }
-      return out;
-    };
-    return filter(tree);
+    }
+    return tree.filter((n) => visibleIds.has(n.acc.id));
   });
+
+  let pageNumber = $state(1);
+  const pageSize = 50;
+
+  $effect(() => {
+    search;
+    showArchived;
+    pageNumber = 1;
+  });
+
+  const paginatedTree = $derived(
+    visibleTree.slice((pageNumber - 1) * pageSize, pageNumber * pageSize),
+  );
 
   // ---- New form ------------------------------------------------------------
   let showNew = $state(false);
@@ -267,10 +286,41 @@
           </tr>
         </thead>
         <tbody>
-          {#each filteredTree as node (node.acc.id)}
-            {@render row(node, 0)}
+          {#each paginatedTree as node (node.acc.id)}
+            <tr class="border-b last:border-0 hover:bg-muted/40">
+              <td class="px-4 py-2" style:padding-left="{node.depth * 1.25 + 1}rem">
+                <a
+                  href={`/tracking/${node.acc.id}`}
+                  class="font-medium text-primary hover:underline"
+                >
+                  {node.acc.name}
+                </a>
+                {#if node.acc.code}
+                  <span class="ml-1 text-xs text-muted-foreground">
+                    {node.acc.code}
+                  </span>
+                {/if}
+              </td>
+              <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
+                {node.acc.accountCategory}
+              </td>
+              <td class="px-4 py-2 text-right">
+                <span class={node.acc.balanceMinor > 0 ? "font-medium" : ""}>
+                  {formatMoney(node.acc.balanceMinor)}
+                </span>
+              </td>
+              <td class="px-4 py-2">
+                <Badge
+                  class={node.acc.archivedAt
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-emerald-100 text-emerald-700"}
+                >
+                  {node.acc.archivedAt ? "Archived" : "Active"}
+                </Badge>
+              </td>
+            </tr>
           {/each}
-          {#if filteredTree.length === 0}
+          {#if visibleTree.length === 0}
             <tr>
               <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
                 No accounts match.
@@ -280,43 +330,11 @@
         </tbody>
       </table>
     </div>
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-muted-foreground">
+        {visibleTree.length} account{visibleTree.length === 1 ? "" : "s"}
+      </p>
+      <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleTree.length} />
+    </div>
   {/if}
 </div>
-
-{#snippet row(node: Node, depth: number)}
-  <tr class="border-b last:border-0 hover:bg-muted/40">
-    <td class="px-4 py-2" style:padding-left="{depth * 1.25 + 1}rem">
-      <a
-        href={`/tracking/${node.acc.id}`}
-        class="font-medium text-primary hover:underline"
-      >
-        {node.acc.name}
-      </a>
-      {#if node.acc.code}
-        <span class="ml-1 text-xs text-muted-foreground">
-          {node.acc.code}
-        </span>
-      {/if}
-    </td>
-    <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
-      {node.acc.accountCategory}
-    </td>
-    <td class="px-4 py-2 text-right">
-      <span class={node.acc.balanceMinor > 0 ? "font-medium" : ""}>
-        {formatMoney(node.acc.balanceMinor)}
-      </span>
-    </td>
-    <td class="px-4 py-2">
-      <Badge
-        class={node.acc.archivedAt
-          ? "bg-muted text-muted-foreground"
-          : "bg-emerald-100 text-emerald-700"}
-      >
-        {node.acc.archivedAt ? "Archived" : "Active"}
-      </Badge>
-    </td>
-  </tr>
-  {#each node.children as child (child.acc.id)}
-    {@render row(child, depth + 1)}
-  {/each}
-{/snippet}

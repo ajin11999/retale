@@ -3,13 +3,15 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
+  import Pagination from "$lib/components/ui/pagination.svelte";
+  import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
 
@@ -44,7 +46,7 @@
         currentTrackingAccountId
         currentTrackingAccountName
       }
-      trackingAccountLedger(accountId: $id, limit: 200) {
+      trackingAccountLedger(accountId: $id, limit: 500) {
         id
         type
         amountMinor
@@ -169,6 +171,62 @@
     $Detail.data?.assignableTrackingVariants ?? [],
   );
   const linkedVariants = $derived(account?.linkedVariants ?? []);
+
+  // Each ledger row's running balance immediately after that entry. The
+  // ledger comes newest-first, so we anchor at the account's live balanceMinor
+  // and walk backwards, subtracting each newer entry's amountMinor.
+  const ledgerWithBalance = $derived.by(() => {
+    let balance = account?.balanceMinor ?? 0;
+    return ledger.map((e) => {
+      const balanceAfter = balance;
+      balance -= e.amountMinor;
+      return { ...e, balanceAfter };
+    });
+  });
+
+  let ledgerSearch = $state("");
+  let ledgerTypeFilter = $state<"all" | "attribution" | "payout" | "deposit" | "adjustment" | "opening_balance">("all");
+
+  const filteredLedger = $derived.by(() => {
+    const tokens = searchTokens(ledgerSearch.trim());
+    let list = ledgerWithBalance;
+    if (ledgerTypeFilter !== "all") {
+      list = list.filter((e) => e.type === ledgerTypeFilter);
+    }
+    if (tokens.length > 0) {
+      list = list.filter((e) =>
+        matchesTokens(
+          tokens,
+          e.type,
+          e.refType,
+          e.refId,
+          e.note,
+          e.counterCategoryOverride,
+        ),
+      );
+    }
+    return list;
+  });
+
+  let ledgerPage = $state(1);
+  let variantsPage = $state(1);
+  const pageSize = 50;
+
+  $effect(() => {
+    ledgerSearch;
+    ledgerTypeFilter;
+    ledgerPage = 1;
+  });
+
+  const paginatedLedger = $derived(
+    filteredLedger.slice((ledgerPage - 1) * pageSize, ledgerPage * pageSize),
+  );
+  const paginatedLinkedVariants = $derived(
+    linkedVariants.slice(
+      (variantsPage - 1) * pageSize,
+      variantsPage * pageSize,
+    ),
+  );
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -588,7 +646,7 @@
         </p>
       {:else}
         <ul class="divide-y rounded-md border">
-          {#each linkedVariants as v (v.variantId)}
+          {#each paginatedLinkedVariants as v (v.variantId)}
             <li class="flex items-center justify-between px-3 py-2 text-sm">
               <span>
                 <a
@@ -611,6 +669,14 @@
             </li>
           {/each}
         </ul>
+        {#if linkedVariants.length > pageSize}
+          <div class="mt-2 flex items-center justify-between">
+            <p class="text-sm text-muted-foreground">
+              {linkedVariants.length} variant{linkedVariants.length === 1 ? "" : "s"}
+            </p>
+            <Pagination bind:page={variantsPage} {pageSize} totalItems={linkedVariants.length} />
+          </div>
+        {/if}
       {/if}
 
       {#if canEdit}
@@ -673,8 +739,26 @@
     </div>
 
     <!-- Ledger -->
-    <div>
-      <h2 class="mb-2 text-sm font-semibold">Ledger</h2>
+    <div class="space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold">Ledger</h2>
+        <div class="flex flex-wrap items-center gap-2">
+          <Input
+            type="search"
+            placeholder="Search note or ref…"
+            bind:value={ledgerSearch}
+            class="w-48 text-xs"
+          />
+          <Select bind:value={ledgerTypeFilter} class="w-40 text-xs">
+            <option value="all">All types</option>
+            <option value="attribution">Attribution</option>
+            <option value="payout">Payout</option>
+            <option value="deposit">Deposit</option>
+            <option value="adjustment">Adjustment</option>
+            <option value="opening_balance">Opening balance</option>
+          </Select>
+        </div>
+      </div>
       <div class="overflow-hidden rounded-lg border bg-card">
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
@@ -684,13 +768,14 @@
               <th class="px-4 py-2 font-medium">Reference</th>
               <th class="px-4 py-2 font-medium">Note</th>
               <th class="px-4 py-2 text-right font-medium">Amount</th>
+              <th class="px-4 py-2 text-right font-medium">Balance</th>
             </tr>
           </thead>
           <tbody>
-            {#each ledger as e (e.id)}
+            {#each paginatedLedger as e (e.id)}
               <tr class="border-b last:border-0">
                 <td class="px-4 py-2">{fmtDateTime(e.createdAt)}</td>
-                <td class="px-4 py-2 capitalize">{e.type.replace("_", " ")}</td>
+                <td class="px-4 py-2 capitalize">{statusLabel(e.type)}</td>
                 <td class="px-4 py-2 text-xs">
                   {#if e.refType === "order_item" || e.refType === "order"}
                     <a
@@ -715,18 +800,36 @@
                 >
                   {formatMoney(e.amountMinor)}
                 </td>
+                <td class="px-4 py-2 text-right font-medium tabular-nums">
+                  {formatMoney(e.balanceAfter)}
+                </td>
               </tr>
             {/each}
-            {#if ledger.length === 0}
+            {#if filteredLedger.length === 0}
               <tr>
-                <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">
-                  No ledger entries yet.
+                <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
+                  {#if ledger.length === 0}
+                    No ledger entries yet.
+                  {:else}
+                    No matching ledger entries found.
+                  {/if}
                 </td>
               </tr>
             {/if}
           </tbody>
         </table>
       </div>
+      {#if filteredLedger.length > 0}
+        <div class="mt-2 flex items-center justify-between">
+          <p class="text-sm text-muted-foreground">
+            {filteredLedger.length} ledger {filteredLedger.length === 1 ? "entry" : "entries"}
+            {#if filteredLedger.length !== ledger.length}
+              (filtered from {ledger.length})
+            {/if}
+          </p>
+          <Pagination bind:page={ledgerPage} {pageSize} totalItems={filteredLedger.length} />
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
