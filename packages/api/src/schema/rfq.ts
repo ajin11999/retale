@@ -48,9 +48,18 @@ export const typeDefs = /* GraphQL */ `
     rfq(id: ID!): RequestForQuotation
   }
 
+  input ImportRfqItemInput {
+    requisitionItemId: ID!
+    variantId: ID
+    description: String
+    qtyRequested: Float!
+    targetUnitCostMinor: Float!
+  }
+
   extend type Mutation {
     createRfq(
       vendorId: ID
+      snapshotVendorName: String
       date: String!
       dueDate: String
       memo: String
@@ -59,6 +68,7 @@ export const typeDefs = /* GraphQL */ `
 
     createRfqFromRequisitions(
       vendorId: ID
+      snapshotVendorName: String
       date: String!
       dueDate: String
       memo: String
@@ -66,9 +76,15 @@ export const typeDefs = /* GraphQL */ `
       requisitionItemIds: [ID!]!
     ): RequestForQuotation!
 
+    importRfqItemsFromRequisition(
+      rfqId: ID!
+      items: [ImportRfqItemInput!]!
+    ): RequestForQuotation!
+
     updateRfq(
       id: ID!
       vendorId: ID
+      snapshotVendorName: String
       date: String
       dueDate: String
       status: RfqStatus
@@ -145,6 +161,10 @@ export const resolvers = {
         ...args,
         createdByUserId: viewer.userId,
       });
+    },
+    importRfqItemsFromRequisition: async (_: any, args: any, ctx: GraphQLContext) => {
+      await requirePermission(ctx, "purchase.edit");
+      return rfqService.importRfqItemsFromRequisition(args);
     },
     updateRfq: async (_: any, args: any, ctx: GraphQLContext) => {
       await requirePermission(ctx, "purchase.edit");

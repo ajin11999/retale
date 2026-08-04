@@ -18,6 +18,7 @@
     Printer,
     Trash2,
     ArrowRight,
+    FileDown,
   } from "@lucide/svelte";
   import type { PageData } from "./$types";
 
@@ -68,8 +69,31 @@
         variants {
           id
           sku
+          barcode
           label
           costMinor
+        }
+      }
+      requisitions(includeCancelled: false) {
+        id
+        name
+        status
+        createdAt
+        sections {
+          id
+          name
+          sortOrder
+        }
+        items {
+          id
+          requisitionId
+          sectionId
+          variantId
+          description
+          qtyRequested
+          qtyOrdered
+          estimatedUnitCostMinor
+          sortOrder
         }
       }
     }
@@ -79,6 +103,7 @@
     mutation ConsoleUpdateRfq(
       $id: ID!
       $vendorId: ID
+      $snapshotVendorName: String
       $date: String
       $dueDate: String
       $status: RfqStatus
@@ -88,6 +113,7 @@
       updateRfq(
         id: $id
         vendorId: $vendorId
+        snapshotVendorName: $snapshotVendorName
         date: $date
         dueDate: $dueDate
         status: $status
@@ -102,6 +128,17 @@
         status
         memo
         termsAndConditions
+      }
+    }
+  `);
+
+  const ImportRfqItemsFromRequisition = graphql(`
+    mutation ConsoleImportRfqItemsFromRequisition(
+      $rfqId: ID!
+      $items: [ImportRfqItemInput!]!
+    ) {
+      importRfqItemsFromRequisition(rfqId: $rfqId, items: $items) {
+        id
       }
     }
   `);
@@ -214,7 +251,7 @@
   );
 
   const vendorOptions = $derived([
-    { value: "", label: "— Unspecified Vendor —" },
+    { value: "", label: "— Ad-hoc / Walk-in vendor —" },
     ...vendors.map((v: any) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -248,6 +285,7 @@
   // ---- Form state ----
   interface HeaderForm {
     vendorId: string;
+    adHocName: string;
     date: string;
     dueDate: string;
     status: string;
@@ -257,6 +295,7 @@
 
   let form = $state<HeaderForm>({
     vendorId: "",
+    adHocName: "",
     date: "",
     dueDate: "",
     status: "draft",
@@ -271,6 +310,7 @@
       syncedId = r.id;
       form = {
         vendorId: r.vendorId ?? "",
+        adHocName: r.vendorId ? "" : (r.snapshotVendorName !== "Unspecified Vendor" ? r.snapshotVendorName : ""),
         date: r.date ?? "",
         dueDate: r.dueDate ?? "",
         status: r.status,
@@ -298,6 +338,7 @@
       const res = await UpdateRfq.mutate({
         id: rfq.id,
         vendorId: form.vendorId || null,
+        snapshotVendorName: form.vendorId ? null : (form.adHocName.trim() || null),
         date: form.date,
         dueDate: form.dueDate || null,
         status: form.status as any,
@@ -308,6 +349,137 @@
         feedback = { ok: false, text: res.errors[0].message };
       } else {
         feedback = { ok: true, text: "RFQ header updated." };
+        await refetch();
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ---- Step-by-Step PR Import Modal state ----
+  let showImportModal = $state(false);
+  let importStep = $state<1 | 2>(1);
+  let selectedPrId = $state<string | null>(null);
+  let prSearch = $state("");
+
+  interface ImportItemConfig {
+    selected: boolean;
+    qty: number;
+    cost: number;
+  }
+  let importItemsMap = $state<Record<string, ImportItemConfig>>({});
+
+  const openImportPrModal = () => {
+    importStep = 1;
+    selectedPrId = null;
+    prSearch = "";
+    importItemsMap = {};
+    showImportModal = true;
+  };
+
+  const availablePrs = $derived(
+    ($RefData.data?.requisitions ?? []).filter((r: any) =>
+      r.status === "open" || r.status === "partially_ordered" || r.status === "draft"
+    )
+  );
+
+  const filteredPrs = $derived.by(() => {
+    const q = prSearch.trim().toLowerCase();
+    if (!q) return availablePrs;
+    return availablePrs.filter((r: any) => r.name.toLowerCase().includes(q));
+  });
+
+  const selectedPr = $derived(
+    availablePrs.find((r: any) => r.id === selectedPrId)
+  );
+
+  function selectPr(prId: string) {
+    selectedPrId = prId;
+    importStep = 2;
+    const pr = availablePrs.find((r: any) => r.id === prId);
+    const nextMap: Record<string, ImportItemConfig> = {};
+    if (pr) {
+      for (const item of pr.items) {
+        const remaining = item.qtyRequested - item.qtyOrdered;
+        if (remaining > 0) {
+          nextMap[item.id] = {
+            selected: true,
+            qty: remaining,
+            cost: item.estimatedUnitCostMinor,
+          };
+        }
+      }
+    }
+    importItemsMap = nextMap;
+  }
+
+  function selectAllItems() {
+    for (const k of Object.keys(importItemsMap)) {
+      importItemsMap[k].selected = true;
+    }
+  }
+
+  function deselectAllItems() {
+    for (const k of Object.keys(importItemsMap)) {
+      importItemsMap[k].selected = false;
+    }
+  }
+
+  function toggleSectionItems(sectionId: string | null, select: boolean) {
+    if (!selectedPr) return;
+    const itemsInSection = selectedPr.items.filter((i: any) => (i.sectionId ?? null) === sectionId);
+    for (const item of itemsInSection) {
+      if (importItemsMap[item.id]) {
+        importItemsMap[item.id].selected = select;
+      }
+    }
+  }
+
+  const selectedImportItemsCount = $derived(
+    Object.values(importItemsMap).filter((cfg) => cfg.selected).length
+  );
+
+  async function doImportPrItems() {
+    if (!rfq || !selectedPr) return;
+    const itemsToImport: Array<{
+      requisitionItemId: string;
+      variantId?: string | null;
+      description?: string | null;
+      qtyRequested: number;
+      targetUnitCostMinor: number;
+    }> = [];
+
+    for (const prItem of selectedPr.items) {
+      const cfg = importItemsMap[prItem.id];
+      if (cfg && cfg.selected && cfg.qty > 0) {
+        itemsToImport.push({
+          requisitionItemId: prItem.id,
+          variantId: prItem.variantId ?? null,
+          description: prItem.description ?? null,
+          qtyRequested: cfg.qty,
+          targetUnitCostMinor: cfg.cost,
+        });
+      }
+    }
+
+    if (itemsToImport.length === 0) {
+      feedback = { ok: false, text: "No items selected to import." };
+      return;
+    }
+
+    busy = true;
+    try {
+      const res = await ImportRfqItemsFromRequisition.mutate({
+        rfqId: rfq.id,
+        items: itemsToImport,
+      });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      } else {
+        feedback = { ok: true, text: `Imported ${itemsToImport.length} items from ${selectedPr.name}.` };
+        showImportModal = false;
         await refetch();
       }
     } catch (e) {
@@ -568,9 +740,11 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <Button variant="outline" size="sm" onclick={() => window.print()}>
-          <Printer class="mr-1.5 size-4" /> Print / Export
-        </Button>
+        <a href={`/rfqs/${rfq.id}/print`} target="_blank" rel="noopener noreferrer">
+          <Button variant="outline" size="sm">
+            <Printer class="mr-1.5 size-4" /> Print / Export
+          </Button>
+        </a>
 
         {#if isEditable}
           {#if rfq.status === "draft"}
@@ -627,7 +801,7 @@
 
     <!-- Header form card -->
     <div class="rounded-lg border bg-card p-5 space-y-4">
-      <div class="grid grid-cols-4 gap-4">
+      <div class="grid grid-cols-5 gap-4">
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
             >Vendor</span
@@ -640,6 +814,21 @@
             />
           {:else}
             <p class="text-sm font-medium">{rfq.snapshotVendorName}</p>
+          {/if}
+        </label>
+
+        <label class="space-y-1">
+          <span class="text-xs font-semibold uppercase text-muted-foreground"
+            >Ad-hoc / Walk-in Vendor</span
+          >
+          {#if isEditable}
+            <Input
+              bind:value={form.adHocName}
+              placeholder="Used when no vendor picked"
+              disabled={form.vendorId !== ""}
+            />
+          {:else}
+            <p class="text-sm font-medium">{rfq.vendorId ? "—" : rfq.snapshotVendorName}</p>
           {/if}
         </label>
 
@@ -740,6 +929,13 @@
         <h2 class="text-lg font-semibold">Line Items ({items.length})</h2>
         {#if isEditable}
           <div class="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={openImportPrModal}
+            >
+              <FileDown class="mr-1.5 size-4" /> Import from PR
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -948,6 +1144,206 @@
           </tbody>
         </table>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if showImportModal}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-3xl rounded-xl border bg-card shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between border-b px-6 py-4 bg-muted/40">
+        <div>
+          <h2 class="text-lg font-bold text-foreground">Import Items from Purchase Requisition</h2>
+          <div class="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+            <span class={importStep === 1 ? "font-semibold text-primary" : ""}>Step 1: Select PR</span>
+            <span>&rarr;</span>
+            <span class={importStep === 2 ? "font-semibold text-primary" : ""}>Step 2: Select Items &amp; Costs</span>
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" onclick={() => (showImportModal = false)}>
+          &times;
+        </Button>
+      </div>
+
+      <!-- Modal Body -->
+      {#if importStep === 1}
+        <div class="p-6 space-y-4 overflow-y-auto flex-1">
+          <div class="flex items-center justify-between gap-4">
+            <p class="text-xs text-muted-foreground">Select an open Purchase Requisition to import items into this RFQ:</p>
+            <div class="w-64">
+              <Input type="search" placeholder="Search PR name..." bind:value={prSearch} class="h-8 text-xs" />
+            </div>
+          </div>
+
+          {#if filteredPrs.length === 0}
+            <div class="py-12 text-center text-sm text-muted-foreground border rounded-lg bg-muted/20">
+              No open purchase requisitions with available items found.
+            </div>
+          {:else}
+            <div class="space-y-2">
+              {#each filteredPrs as pr (pr.id)}
+                {@const availableCount = pr.items.filter((i: any) => (i.qtyRequested - i.qtyOrdered) > 0).length}
+                <div
+                  class="flex items-center justify-between border rounded-lg p-4 hover:border-primary hover:bg-accent/40 transition-colors cursor-pointer"
+                  onclick={() => selectPr(pr.id)}
+                >
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-sm">{pr.name}</span>
+                      <Badge class="bg-sky-100 text-sky-700 capitalize text-xs">{pr.status.replace("_", " ")}</Badge>
+                    </div>
+                    <p class="text-xs text-muted-foreground font-mono">
+                      Created {new Date(pr.createdAt).toLocaleDateString()} &middot; {pr.items.length} total line{pr.items.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
+                      {availableCount} item{availableCount === 1 ? "" : "s"} available
+                    </span>
+                    <Button size="sm" variant="outline" onclick={(e) => { e.stopPropagation(); selectPr(pr.id); }}>
+                      Select PR &rarr;
+                    </Button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <div class="flex justify-end px-6 py-3 border-t bg-muted/20">
+          <Button variant="outline" size="sm" onclick={() => (showImportModal = false)}>Cancel</Button>
+        </div>
+
+      {:else if importStep === 2 && selectedPr}
+        <div class="px-6 py-3 border-b bg-muted/20 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => (importStep = 1)}>
+              &larr; Back to PRs
+            </Button>
+            <span class="text-sm font-semibold text-foreground border-l pl-3">
+              PR: {selectedPr.name}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={selectAllItems}>Select All</Button>
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={deselectAllItems}>Deselect All</Button>
+          </div>
+        </div>
+
+        <div class="p-6 space-y-4 overflow-y-auto flex-1">
+          {#if selectedPr.items.filter((i: any) => (i.qtyRequested - i.qtyOrdered) > 0).length === 0}
+            <div class="py-8 text-center text-sm text-muted-foreground">
+              No remaining items in this PR to import.
+            </div>
+          {:else}
+            <!-- Group by PR Sections -->
+            {@const sectionMap = (() => {
+              const map = new Map<string | null, typeof selectedPr.items>();
+              for (const item of selectedPr.items) {
+                const remaining = item.qtyRequested - item.qtyOrdered;
+                if (remaining <= 0) continue;
+                const secId = item.sectionId ?? null;
+                if (!map.has(secId)) map.set(secId, []);
+                map.get(secId)!.push(item);
+              }
+              return map;
+            })()}
+
+            {#each Array.from(sectionMap.entries()) as [secId, secItems] (secId ?? "none")}
+              {@const secObj = selectedPr.sections.find((s: any) => s.id === secId)}
+              {@const secName = secObj ? secObj.name : (sectionMap.size > 1 ? "General Items" : null)}
+              {@const allSecSelected = secItems.every((i: any) => importItemsMap[i.id]?.selected)}
+
+              <div class="border rounded-lg overflow-hidden space-y-0">
+                {#if secName}
+                  <div class="bg-muted/60 px-4 py-2 flex items-center justify-between border-b">
+                    <span class="font-bold text-xs uppercase tracking-wider text-muted-foreground">{secName}</span>
+                    <button
+                      type="button"
+                      class="text-xs font-semibold text-primary hover:underline"
+                      onclick={() => toggleSectionItems(secId, !allSecSelected)}
+                    >
+                      {allSecSelected ? "Deselect Section" : "Select Section"}
+                    </button>
+                  </div>
+                {/if}
+
+                <div class="divide-y bg-card">
+                  {#each secItems as item (item.id)}
+                    {@const cfg = importItemsMap[item.id]}
+                    {@const remaining = item.qtyRequested - item.qtyOrdered}
+                    {@const vLabel = variantLabel(item.variantId)}
+                    {#if cfg}
+                      <div class="p-3 flex items-center justify-between gap-4 hover:bg-muted/20 transition-colors">
+                        <label class="flex items-start gap-3 cursor-pointer flex-1">
+                          <input
+                            type="checkbox"
+                            class="mt-1 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            bind:checked={cfg.selected}
+                          />
+                          <div class="space-y-0.5">
+                            <p class="text-sm font-medium leading-tight">
+                              {vLabel ?? item.description ?? "Custom Item"}
+                            </p>
+                            {#if vLabel && item.description}
+                              <p class="text-xs text-muted-foreground">{item.description}</p>
+                            {/if}
+                            <p class="text-xs text-muted-foreground font-mono">
+                              Remaining: <span class="font-semibold text-foreground">{remaining}</span> (Requested: {item.qtyRequested}, Ordered: {item.qtyOrdered})
+                            </p>
+                          </div>
+                        </label>
+
+                        {#if cfg.selected}
+                          <div class="flex items-center gap-3">
+                            <label class="flex items-center gap-1.5">
+                              <span class="text-xs text-muted-foreground font-medium">Qty:</span>
+                              <NumericInput
+                                bind:value={cfg.qty}
+                                min={1}
+                                max={remaining}
+                                class="h-8 w-20 text-right text-xs"
+                              />
+                            </label>
+                            <label class="flex items-center gap-1.5">
+                              <span class="text-xs text-muted-foreground font-medium">Est. Cost:</span>
+                              <div class="w-32">
+                                <MoneyInput
+                                  bind:value={cfg.cost}
+                                  class="h-8 text-xs text-right font-mono"
+                                />
+                              </div>
+                            </label>
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          {/if}
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="flex items-center justify-between px-6 py-4 border-t bg-muted/20">
+          <p class="text-xs text-muted-foreground font-medium">
+            <span class="font-bold text-foreground">{selectedImportItemsCount}</span> item{selectedImportItemsCount === 1 ? "" : "s"} selected for import
+          </p>
+          <div class="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onclick={() => (showImportModal = false)}>Cancel</Button>
+            <Button variant="outline" size="sm" onclick={() => (importStep = 1)}>&larr; Back</Button>
+            <Button
+              size="sm"
+              disabled={busy || selectedImportItemsCount === 0}
+              onclick={doImportPrItems}
+            >
+              Import {selectedImportItemsCount} Item{selectedImportItemsCount === 1 ? "" : "s"}
+            </Button>
+          </div>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}

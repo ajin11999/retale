@@ -89,6 +89,7 @@ async function generateRfqNumber(): Promise<string> {
 
 export async function createRfq(input: {
   vendorId?: string | null;
+  snapshotVendorName?: string | null;
   date: string;
   dueDate?: string | null;
   memo?: string | null;
@@ -101,6 +102,9 @@ export async function createRfq(input: {
       where: eq(vendors.id, input.vendorId),
     });
     if (v) snapshotVendorName = v.name;
+  }
+  if (!snapshotVendorName && input.snapshotVendorName?.trim()) {
+    snapshotVendorName = input.snapshotVendorName.trim();
   }
 
   const id = ulid();
@@ -124,6 +128,7 @@ export async function createRfq(input: {
 
 export async function createRfqFromRequisitions(input: {
   vendorId?: string | null;
+  snapshotVendorName?: string | null;
   date: string;
   dueDate?: string | null;
   memo?: string | null;
@@ -170,10 +175,58 @@ export async function createRfqFromRequisitions(input: {
   return loadRfq(rfq.id);
 }
 
+export async function importRfqItemsFromRequisition(input: {
+  rfqId: string;
+  items: Array<{
+    requisitionItemId: string;
+    variantId?: string | null;
+    description?: string | null;
+    qtyRequested: number;
+    targetUnitCostMinor: number;
+  }>;
+}): Promise<Rfq> {
+  const rfq = await loadRfq(input.rfqId);
+  assertEditable(rfq);
+
+  if (!input.items || input.items.length === 0) {
+    throw new RfqError("INVALID_INPUT", "items cannot be empty");
+  }
+
+  const existing = await db
+    .select({ maxSort: sql<number>`MAX(${rfqItems.sortOrder})` })
+    .from(rfqItems)
+    .where(eq(rfqItems.rfqId, input.rfqId));
+  let currentSort = (existing[0]?.maxSort ?? -1) + 1;
+
+  await db.transaction(async (tx) => {
+    for (const itemInput of input.items) {
+      if (itemInput.qtyRequested <= 0) {
+        throw new RfqError("INVALID_INPUT", "qtyRequested must be positive");
+      }
+
+      await tx.insert(rfqItems).values({
+        id: ulid(),
+        rfqId: input.rfqId,
+        sectionId: null,
+        requisitionItemId: itemInput.requisitionItemId,
+        variantId: itemInput.variantId ?? null,
+        description: itemInput.description?.trim() || null,
+        qtyRequested: itemInput.qtyRequested,
+        targetUnitCostMinor: itemInput.targetUnitCostMinor ?? 0,
+        quotedUnitCostMinor: itemInput.targetUnitCostMinor ?? 0,
+        sortOrder: currentSort++,
+      });
+    }
+  });
+
+  return loadRfq(input.rfqId);
+}
+
 export async function updateRfq(
   id: string,
   patch: {
     vendorId?: string | null;
+    snapshotVendorName?: string | null;
     date?: string;
     dueDate?: string | null;
     status?: typeof requestForQuotations.$inferSelect["status"];
@@ -192,16 +245,19 @@ export async function updateRfq(
   if (patch.termsAndConditions !== undefined)
     set.termsAndConditions = patch.termsAndConditions?.trim() || null;
 
-  if (patch.vendorId !== undefined) {
-    set.vendorId = patch.vendorId;
+  if (patch.vendorId !== undefined || patch.snapshotVendorName !== undefined) {
+    set.vendorId = patch.vendorId ?? null;
+    let vendorName: string | null = null;
     if (patch.vendorId) {
       const v = await db.query.vendors.findFirst({
         where: eq(vendors.id, patch.vendorId),
       });
-      if (v) set.snapshotVendorName = v.name;
-    } else {
-      set.snapshotVendorName = "Unspecified Vendor";
+      if (v) vendorName = v.name;
     }
+    if (!vendorName && patch.snapshotVendorName?.trim()) {
+      vendorName = patch.snapshotVendorName.trim();
+    }
+    set.snapshotVendorName = vendorName ?? "Unspecified Vendor";
   }
 
   if (Object.keys(set).length > 0) {

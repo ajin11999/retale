@@ -29,7 +29,7 @@ export const typeDefs = /* GraphQL */ `
 
   extend type Query {
     "Every variant code mapped for a vendor."
-    codesForVendor(vendorId: ID!): [VendorVariantCode!]!
+    codesForVendor(vendorId: ID): [VendorVariantCode!]!
     "Every vendor that has a code mapped for a variant."
     codesForVariant(variantId: ID!): [VendorVariantCode!]!
   }
@@ -73,9 +73,10 @@ export const resolvers = {
   Query: {
     codesForVendor: async (
       _: unknown,
-      args: { vendorId: string },
+      args: { vendorId?: string | null },
       ctx: GraphQLContext,
     ) => {
+      if (!args.vendorId) return [];
       await requirePermission(ctx, "vendor.variant_code.manage");
       return codes.listCodesForVendor(args.vendorId);
     },

@@ -107,7 +107,7 @@ type Query {
   resolveReceivingScan(purchaseId: ID!, code: String!): [PurchaseItem!]!
 
   """Every variant code mapped for a vendor."""
-  codesForVendor(vendorId: ID!): [VendorVariantCode!]!
+  codesForVendor(vendorId: ID): [VendorVariantCode!]!
 
   """Every vendor that has a code mapped for a variant."""
   codesForVariant(variantId: ID!): [VendorVariantCode!]!
@@ -595,9 +595,10 @@ type Mutation {
   updateRequisitionItem(id: ID!, sectionId: ID, variantId: ID, description: String, qtyRequested: Float, estimatedUnitCostMinor: Float): PurchaseRequisitionItem!
   deleteRequisitionItem(id: ID!): Boolean!
   reorderRequisitionItems(requisitionId: ID!, orderedIds: [ID!]!): [PurchaseRequisitionItem!]!
-  createRfq(vendorId: ID, date: String!, dueDate: String, memo: String, termsAndConditions: String): RequestForQuotation!
-  createRfqFromRequisitions(vendorId: ID, date: String!, dueDate: String, memo: String, termsAndConditions: String, requisitionItemIds: [ID!]!): RequestForQuotation!
-  updateRfq(id: ID!, vendorId: ID, date: String, dueDate: String, status: RfqStatus, memo: String, termsAndConditions: String): RequestForQuotation!
+  createRfq(vendorId: ID, snapshotVendorName: String, date: String!, dueDate: String, memo: String, termsAndConditions: String): RequestForQuotation!
+  createRfqFromRequisitions(vendorId: ID, snapshotVendorName: String, date: String!, dueDate: String, memo: String, termsAndConditions: String, requisitionItemIds: [ID!]!): RequestForQuotation!
+  importRfqItemsFromRequisition(rfqId: ID!, items: [ImportRfqItemInput!]!): RequestForQuotation!
+  updateRfq(id: ID!, vendorId: ID, snapshotVendorName: String, date: String, dueDate: String, status: RfqStatus, memo: String, termsAndConditions: String): RequestForQuotation!
   deleteRfq(id: ID!): Boolean!
   createRfqSection(rfqId: ID!, name: String!): RfqSection!
   updateRfqSection(id: ID!, name: String!): RfqSection!
@@ -2214,4 +2215,12 @@ type RfqItem {
   targetUnitCostMinor: Float!
   quotedUnitCostMinor: Float!
   sortOrder: Int!
+}
+
+input ImportRfqItemInput {
+  requisitionItemId: ID!
+  variantId: ID
+  description: String
+  qtyRequested: Float!
+  targetUnitCostMinor: Float!
 }

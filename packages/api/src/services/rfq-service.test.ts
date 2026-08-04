@@ -170,4 +170,76 @@ describe("RFQ & PR Procurement Sandbox Workflow", () => {
     const updatedPr = await reqService.getRequisition(pr.id);
     expect(updatedPr.status).toBe("fully_ordered");
   });
+
+  test("Adhoc / Walk-in vendor name creation and update", async () => {
+    const userId = await seedUser();
+
+    const rfq = await rfqService.createRfq({
+      date: "2026-08-04",
+      snapshotVendorName: "Tokopedia Official Store",
+      createdByUserId: userId,
+    });
+
+    expect(rfq.vendorId).toBeNull();
+    expect(rfq.snapshotVendorName).toBe("Tokopedia Official Store");
+
+    const updated = await rfqService.updateRfq(rfq.id, {
+      snapshotVendorName: "Walk-in Store Glodok",
+    });
+
+    expect(updated.vendorId).toBeNull();
+    expect(updated.snapshotVendorName).toBe("Walk-in Store Glodok");
+  });
+
+  test("importRfqItemsFromRequisition adds PR items with custom estimated costs to existing draft RFQ", async () => {
+    const userId = await seedUser();
+
+    const pr = await reqService.createRequisition({
+      name: "Office Hardware",
+      createdByUserId: userId,
+    });
+    const prItem1 = await reqService.createItem({
+      requisitionId: pr.id,
+      description: "Monitor Arm Dual",
+      qtyRequested: 3,
+      estimatedUnitCostMinor: 450000,
+    });
+    const prItem2 = await reqService.createItem({
+      requisitionId: pr.id,
+      description: "Ergonomic Chair",
+      qtyRequested: 2,
+      estimatedUnitCostMinor: 1200000,
+    });
+
+    const rfq = await rfqService.createRfq({
+      date: "2026-08-04",
+      snapshotVendorName: "Local Hardware Depot",
+      createdByUserId: userId,
+    });
+
+    const updatedRfq = await rfqService.importRfqItemsFromRequisition({
+      rfqId: rfq.id,
+      items: [
+        {
+          requisitionItemId: prItem1.id,
+          description: prItem1.description,
+          qtyRequested: 3,
+          targetUnitCostMinor: 400000, // overridden estimate cost
+        },
+        {
+          requisitionItemId: prItem2.id,
+          description: prItem2.description,
+          qtyRequested: 2,
+          targetUnitCostMinor: 1100000, // overridden estimate cost
+        },
+      ],
+    });
+
+    const items = await rfqService.listItems(updatedRfq.id);
+    expect(items).toHaveLength(2);
+    expect(items[0]!.description).toBe("Monitor Arm Dual");
+    expect(items[0]!.targetUnitCostMinor).toBe(400000);
+    expect(items[1]!.description).toBe("Ergonomic Chair");
+    expect(items[1]!.targetUnitCostMinor).toBe(1100000);
+  });
 });

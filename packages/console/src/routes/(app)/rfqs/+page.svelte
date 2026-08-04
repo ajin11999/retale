@@ -52,6 +52,7 @@
   const CreateRfq = graphql(`
     mutation ConsoleCreateRfq(
       $vendorId: ID
+      $snapshotVendorName: String
       $date: String!
       $dueDate: String
       $memo: String
@@ -59,32 +60,11 @@
     ) {
       createRfq(
         vendorId: $vendorId
+        snapshotVendorName: $snapshotVendorName
         date: $date
         dueDate: $dueDate
         memo: $memo
         termsAndConditions: $termsAndConditions
-      ) {
-        id
-      }
-    }
-  `);
-
-  const CreateRfqFromRequisitions = graphql(`
-    mutation ConsoleCreateRfqFromRequisitions(
-      $vendorId: ID
-      $date: String!
-      $dueDate: String
-      $memo: String
-      $termsAndConditions: String
-      $requisitionItemIds: [ID!]!
-    ) {
-      createRfqFromRequisitions(
-        vendorId: $vendorId
-        date: $date
-        dueDate: $dueDate
-        memo: $memo
-        termsAndConditions: $termsAndConditions
-        requisitionItemIds: $requisitionItemIds
       ) {
         id
       }
@@ -96,14 +76,9 @@
 
   const rfqs = $derived($RfqList.data?.rfqs ?? []);
   const vendors = $derived($RfqList.data?.vendors ?? []);
-  const requisitions = $derived(
-    ($RfqList.data?.requisitions ?? []).filter(
-      (r) => r.status === "open" || r.status === "partially_ordered" || r.status === "draft"
-    )
-  );
 
   const vendorOptions = $derived([
-    { value: "", label: "— Ad-hoc / Unspecified vendor —" },
+    { value: "", label: "— Ad-hoc / Walk-in vendor —" },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -151,84 +126,52 @@
   const fmtDate = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 
-  // ---- New RFQ modal/form state ----
+  // ---- New RFQ form state ----
   interface NewRfqDraft {
-    mode: "blank" | "requisitions";
     vendorId: string;
+    adHocName: string;
     date: string;
     dueDate: string;
     memo: string;
     termsAndConditions: string;
-    selectedReqItemIds: string[];
   }
 
   let draft = $state<NewRfqDraft | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  function startNew(mode: "blank" | "requisitions" = "blank") {
+  function startNew() {
     draft = {
-      mode,
       vendorId: "",
+      adHocName: "",
       date: new Date().toISOString().slice(0, 10),
       dueDate: "",
       memo: "",
       termsAndConditions: "",
-      selectedReqItemIds: [],
     };
-  }
-
-  function toggleReqItem(id: string) {
-    if (!draft) return;
-    if (draft.selectedReqItemIds.includes(id)) {
-      draft.selectedReqItemIds = draft.selectedReqItemIds.filter((i) => i !== id);
-    } else {
-      draft.selectedReqItemIds = [...draft.selectedReqItemIds, id];
-    }
   }
 
   async function createRfq() {
     const d = draft;
     if (!d || !d.date) return;
 
-    if (d.mode === "requisitions" && d.selectedReqItemIds.length === 0) {
-      error = "Please select at least one requisition item.";
-      return;
-    }
-
     busy = true;
     error = null;
     try {
-      if (d.mode === "requisitions") {
-        const res = await CreateRfqFromRequisitions.mutate({
-          vendorId: d.vendorId || null,
-          date: d.date,
-          dueDate: d.dueDate || null,
-          memo: d.memo.trim() || null,
-          termsAndConditions: d.termsAndConditions.trim() || null,
-          requisitionItemIds: d.selectedReqItemIds,
-        });
-        if (res.errors?.length) {
-          error = res.errors[0].message;
-          return;
-        }
-        const id = res.data?.createRfqFromRequisitions.id;
-        if (id) await goto(`/rfqs/${id}`);
-      } else {
-        const res = await CreateRfq.mutate({
-          vendorId: d.vendorId || null,
-          date: d.date,
-          dueDate: d.dueDate || null,
-          memo: d.memo.trim() || null,
-          termsAndConditions: d.termsAndConditions.trim() || null,
-        });
-        if (res.errors?.length) {
-          error = res.errors[0].message;
-          return;
-        }
-        const id = res.data?.createRfq.id;
-        if (id) await goto(`/rfqs/${id}`);
+      const res = await CreateRfq.mutate({
+        vendorId: d.vendorId || null,
+        snapshotVendorName: d.vendorId ? null : d.adHocName.trim() || null,
+        date: d.date,
+        dueDate: d.dueDate || null,
+        memo: d.memo.trim() || null,
+        termsAndConditions: d.termsAndConditions.trim() || null,
+      });
+      if (res.errors?.length) {
+        error = res.errors[0].message;
+        return;
       }
+      const id = res.data?.createRfq.id;
+      if (id) await goto(`/rfqs/${id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -259,14 +202,9 @@
           </button>
         {/each}
       </div>
-      <div class="flex items-center gap-2">
-        <Button size="sm" variant="outline" disabled={busy || !canCreate} onclick={() => startNew("requisitions")}>
-          From Requisition
-        </Button>
-        <Button size="sm" disabled={busy || !canCreate} onclick={() => startNew("blank")}>
-          New RFQ
-        </Button>
-      </div>
+      <Button size="sm" disabled={busy || !canCreate} onclick={startNew}>
+        New RFQ
+      </Button>
     </div>
   </div>
 
@@ -276,35 +214,23 @@
 
   {#if draft}
     <div class="space-y-4 rounded-lg border bg-card p-5">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold">
-          {draft.mode === "requisitions" ? "Create RFQ from Purchase Requisitions" : "Create New RFQ"}
-        </h2>
-        <div class="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={draft.mode === "blank" ? "default" : "outline"}
-            onclick={() => (draft!.mode = "blank")}
-          >
-            Blank
-          </Button>
-          <Button
-            size="sm"
-            variant={draft.mode === "requisitions" ? "default" : "outline"}
-            onclick={() => (draft!.mode = "requisitions")}
-          >
-            From Requisitions
-          </Button>
-        </div>
-      </div>
+      <h2 class="text-sm font-semibold">Create New RFQ</h2>
 
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-4 gap-4">
         <label class="space-y-1">
           <span class="text-sm font-medium">Vendor</span>
           <Combobox
             options={vendorOptions}
             bind:value={draft.vendorId}
             placeholder="Search vendor…"
+          />
+        </label>
+        <label class="space-y-1">
+          <span class="text-sm font-medium">Ad-hoc / Walk-in Vendor</span>
+          <Input
+            bind:value={draft.adHocName}
+            placeholder="Used when no vendor picked"
+            disabled={draft.vendorId !== ""}
           />
         </label>
         <label class="space-y-1">
@@ -335,35 +261,6 @@
           />
         </label>
       </div>
-
-      {#if draft.mode === "requisitions"}
-        <div class="space-y-2 border-t pt-3">
-          <h3 class="text-xs font-semibold uppercase text-muted-foreground">Select Requisition Lines to Include</h3>
-          {#if requisitions.length === 0}
-            <p class="text-xs text-muted-foreground">No open requisitions found.</p>
-          {:else}
-            <div class="max-h-48 overflow-y-auto rounded border bg-background p-2 space-y-2">
-              {#each requisitions as req}
-                <div class="text-xs font-medium text-muted-foreground px-1">{req.name}</div>
-                {#each req.items as item}
-                  {@const remaining = item.qtyRequested - item.qtyOrdered}
-                  {#if remaining > 0}
-                    <label class="flex items-center gap-2 px-2 py-1 hover:bg-muted/40 rounded cursor-pointer text-xs">
-                      <input
-                        type="checkbox"
-                        checked={draft.selectedReqItemIds.includes(item.id)}
-                        onchange={() => toggleReqItem(item.id)}
-                      />
-                      <span class="flex-1 font-medium">{item.description ?? "Variant Item"}</span>
-                      <span class="text-muted-foreground font-mono">{remaining} requested</span>
-                    </label>
-                  {/if}
-                {/each}
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
 
       <div class="flex justify-end gap-2 pt-2 border-t">
         <Button
