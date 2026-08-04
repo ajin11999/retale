@@ -43,6 +43,11 @@
 
   graphql(`
     query RfqPrintRefData($vendorId: ID) {
+      businessSettings {
+        name
+        logoUrl
+        updatedAt
+      }
       vendors {
         id
         name
@@ -71,6 +76,7 @@
   const RefData = $derived(data.RfqPrintRefData);
 
   const rfq = $derived($RfqDetail.data?.rfq);
+  const businessSettings = $derived($RefData.data?.businessSettings);
 
   $effect(() => {
     if (rfq?.vendorId) {
@@ -413,8 +419,25 @@
       
       <!-- Document Header -->
       <div class="flex items-start justify-between border-b pb-4">
-        <div class="space-y-1">
+        <div class="space-y-2">
           <h1 class="text-3xl font-extrabold tracking-tight">REQUEST FOR QUOTATION</h1>
+          
+          <!-- Business Logo & Name under RFQ heading text -->
+          <div class="flex items-center gap-3 py-1">
+            {#if businessSettings?.logoUrl}
+              <img
+                src={`/settings/logo?v=${encodeURIComponent(businessSettings.updatedAt ?? "")}`}
+                alt={businessSettings.name ?? "Business Logo"}
+                class="h-10 w-auto max-w-[180px] object-contain"
+              />
+            {:else}
+              <img src="/logo.png" alt="Retale" class="h-7 w-auto object-contain" />
+            {/if}
+            {#if businessSettings?.name}
+              <span class="text-sm font-semibold text-muted-foreground">{businessSettings.name}</span>
+            {/if}
+          </div>
+
           {#if showVendor && rfq.snapshotVendorName}
             <p class="text-base font-semibold text-foreground">
               Vendor: <span class="text-primary font-bold">{rfq.snapshotVendorName}</span>
