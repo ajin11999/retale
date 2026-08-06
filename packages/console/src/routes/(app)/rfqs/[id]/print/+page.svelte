@@ -127,8 +127,8 @@
   };
 
   // Resolve item display line:
-  // If vendor is chosen: match vendor variant code as the item name (or SKU fallback)
-  // If no vendor chosen: use product name
+  // If vendor code is specified: use vendor variant code
+  // Fallback to product name if there is no vendor code specified
   const lineDisplay = (item: (typeof items)[number]) => {
     if (item.variantId) {
       const info = getVariantInfo(item.variantId);
@@ -140,12 +140,6 @@
           return {
             name: mappedCode.trim(),
             barcode: info?.barcode ?? null,
-          };
-        }
-        if (info?.sku) {
-          return {
-            name: info.sku,
-            barcode: info.barcode,
           };
         }
       }

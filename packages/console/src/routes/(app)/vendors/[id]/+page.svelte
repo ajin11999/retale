@@ -179,6 +179,10 @@
           sku
           label
           unit
+          product {
+            id
+            name
+          }
         }
       }
       products(includeArchived: false) {
@@ -1004,7 +1008,9 @@
                 <tr class="border-b last:border-0">
                   <td class="py-1.5">
                     {#if c.variant}
-                      <span class="font-mono text-xs">{c.variant.sku}</span>
+                      <span class="font-medium text-foreground">
+                        {c.variant.product?.name ?? c.variant.sku}
+                      </span>
                       {#if c.variant.label}
                         <span class="ml-1 text-xs text-muted-foreground">
                           {c.variant.label}
