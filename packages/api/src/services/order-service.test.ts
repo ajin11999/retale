@@ -1502,3 +1502,31 @@ describe("listOrdersForReturn", () => {
     expect(ids).not.toContain(cancelledSale.id);
   });
 });
+
+describe("createPosOrder idempotency", () => {
+  test("submitting createPosOrder with the same clientOrderId returns the original order without creating a duplicate", async () => {
+    const sessionId = await seedSession("P1");
+    const v = await seedVariant({ priceMinor: 2000, stockQty: 100 });
+    const clientOrderId = "test-client-order-id-12345";
+
+    const firstCall = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: v, qty: 1 }],
+      payments: [{ amountMinor: 2000 }],
+      clientOrderId,
+      createdByUserId: userId,
+    });
+
+    const secondCall = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId: v, qty: 1 }],
+      payments: [{ amountMinor: 2000 }],
+      clientOrderId,
+      createdByUserId: userId,
+    });
+
+    expect(secondCall.id).toBe(firstCall.id);
+    expect(secondCall.displayNumber).toBe(firstCall.displayNumber);
+  });
+});
+

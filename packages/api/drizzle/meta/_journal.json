@@ -337,6 +337,13 @@
       "when": 1785210352410,
       "tag": "0047_nostalgic_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1786005199070,
+      "tag": "0048_tough_sumo",
+      "breakpoints": true
     }
   ]
 }

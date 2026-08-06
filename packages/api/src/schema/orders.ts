@@ -146,6 +146,7 @@ export const typeDefs = /* GraphQL */ `
       customerId: ID
       items: [PosOrderItemInput!]!
       payments: [PosOrderPaymentInput!]!
+      clientOrderId: String
     ): Order!
 
     "Open an empty Console customer sale (stateful, root-only)."
@@ -293,6 +294,7 @@ export const resolvers = {
         customerId?: string | null;
         items: orders.PosOrderItemInput[];
         payments: orders.PosOrderPaymentInput[];
+        clientOrderId?: string | null;
       },
       ctx: GraphQLContext,
     ) => {
@@ -306,6 +308,7 @@ export const resolvers = {
           customerId: args.customerId ?? null,
           items: args.items,
           payments: args.payments,
+          clientOrderId: args.clientOrderId ?? null,
           createdByUserId: viewer.userId,
         });
       } catch (e) {

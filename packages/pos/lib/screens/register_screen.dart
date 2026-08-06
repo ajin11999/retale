@@ -100,6 +100,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (posId != null) CartStore.instance.save(posId, _register);
   }
 
+  bool _isOpeningCheckout = false;
+  DateTime? _lastF9PressTime;
+
   /// Global key handler for the register. Only acts while the register is the
   /// frontmost route, so F9 doesn't re-fire behind an open dialog or sheet.
   bool _handleKey(KeyEvent event) {
@@ -108,6 +111,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return false;
     }
     if (ModalRoute.of(context)?.isCurrent != true) return false;
+    final now = DateTime.now();
+    if (_lastF9PressTime != null &&
+        now.difference(_lastF9PressTime!) < const Duration(milliseconds: 500)) {
+      return true; // absorb rapid duplicate F9 keypresses (keyboard bounce/ghosting)
+    }
+    _lastF9PressTime = now;
+    if (_isOpeningCheckout) return true;
     if (!_register.active.isEmpty) _checkout();
     return true;
   }
@@ -533,57 +543,64 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _checkout() async {
-    final cart = _register.active;
-    // Snapshot the lines and total now: a completed sale clears the cart right
-    // after, but the receipt (offered below) still needs them.
-    final lines = cart.lines
-        .map((l) => ReceiptLine(
-              name: l.displayName,
-              qty: l.qty,
-              unitPriceMinor: l.unitPriceMinor,
-              lineTotalMinor: l.lineTotalMinor,
-              unit: l.variant.unit,
-            ))
-        .toList();
-    final totalMinor = cart.totalMinor;
-    final outcome = await showDialog<_CheckoutOutcome>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _CheckoutDialog(cart: cart, session: widget.session),
-    );
-    if (outcome == null) return; // cancelled
-    // A completed sale, not a discard: close the tab silently (no confirm).
-    _register.closeCart(_register.activeIndex);
-    _searchController.clear();
-    setState(() => _query = '');
-    if (outcome.result.status == SubmitStatus.confirmed) {
-      final sale = _CompletedSale(
-        displayNumber: outcome.result.displayNumber,
-        lines: lines,
-        totalMinor: totalMinor,
-        paidMinor: outcome.paidMinor,
-        onAccountMinor: outcome.onAccountMinor,
-        customer: outcome.customer,
-        createdAt: DateTime.now(),
+    if (_isOpeningCheckout) return;
+    _isOpeningCheckout = true;
+    try {
+      final cart = _register.active;
+      if (cart.isEmpty) return;
+      // Snapshot the lines and total now: a completed sale clears the cart right
+      // after, but the receipt (offered below) still needs them.
+      final lines = cart.lines
+          .map((l) => ReceiptLine(
+                name: l.displayName,
+                qty: l.qty,
+                unitPriceMinor: l.unitPriceMinor,
+                lineTotalMinor: l.lineTotalMinor,
+                unit: l.variant.unit,
+              ))
+          .toList();
+      final totalMinor = cart.totalMinor;
+      final outcome = await showDialog<_CheckoutOutcome>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _CheckoutDialog(cart: cart, session: widget.session),
       );
-      setState(() => _lastSale = sale);
-      _announceSale(sale);
-    } else {
-      // Offline: the sale is queued and will sync once reconnected, but the
-      // receipt is assembled and rendered entirely on-device, so it can still
-      // be printed now. The server-assigned number isn't known yet (null →
-      // "recorded" on the receipt); it'll appear once the queue flushes.
-      final sale = _CompletedSale(
-        displayNumber: null,
-        lines: lines,
-        totalMinor: totalMinor,
-        paidMinor: outcome.paidMinor,
-        onAccountMinor: outcome.onAccountMinor,
-        customer: outcome.customer,
-        createdAt: DateTime.now(),
-      );
-      setState(() => _lastSale = sale);
-      _announceSale(sale, queued: true);
+      if (outcome == null) return; // cancelled
+      // A completed sale, not a discard: close the tab silently (no confirm).
+      _register.closeCart(_register.activeIndex);
+      _searchController.clear();
+      setState(() => _query = '');
+      if (outcome.result.status == SubmitStatus.confirmed) {
+        final sale = _CompletedSale(
+          displayNumber: outcome.result.displayNumber,
+          lines: lines,
+          totalMinor: totalMinor,
+          paidMinor: outcome.paidMinor,
+          onAccountMinor: outcome.onAccountMinor,
+          customer: outcome.customer,
+          createdAt: DateTime.now(),
+        );
+        setState(() => _lastSale = sale);
+        _announceSale(sale);
+      } else {
+        // Offline: the sale is queued and will sync once reconnected, but the
+        // receipt is assembled and rendered entirely on-device, so it can still
+        // be printed now. The server-assigned number isn't known yet (null →
+        // "recorded" on the receipt); it'll appear once the queue flushes.
+        final sale = _CompletedSale(
+          displayNumber: null,
+          lines: lines,
+          totalMinor: totalMinor,
+          paidMinor: outcome.paidMinor,
+          onAccountMinor: outcome.onAccountMinor,
+          customer: outcome.customer,
+          createdAt: DateTime.now(),
+        );
+        setState(() => _lastSale = sale);
+        _announceSale(sale, queued: true);
+      }
+    } finally {
+      _isOpeningCheckout = false;
     }
   }
 
@@ -1172,6 +1189,8 @@ class _CheckoutDialog extends StatefulWidget {
 
 class _CheckoutDialogState extends State<_CheckoutDialog> {
   final _tendered = TextEditingController();
+  late final String _clientOrderId =
+      DateTime.now().microsecondsSinceEpoch.toString();
   Customer? _customer;
   bool _busy = false;
   String? _error;
@@ -1200,6 +1219,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
   }
 
   Future<void> _submit({required bool onAccount}) async {
+    if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -1220,6 +1240,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
         // A queued on-account order the server later rejects (e.g. credit
         // limit) is silently dropped at flush — never queue a debt record.
         queueWhenOffline: !onAccount,
+        clientOrderId: _clientOrderId,
       );
       if (mounted) {
         Navigator.pop(

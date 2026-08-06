@@ -69,6 +69,8 @@ class SyncService extends ChangeNotifier {
     }
   }
 
+  final _inFlightLocalIds = <String>{};
+
   /// Submit a sale. Tries the API first; on a network failure the order is
   /// queued durably and [SubmitStatus.queued] is returned.
   ///
@@ -82,13 +84,25 @@ class SyncService extends ChangeNotifier {
     required List<Map<String, dynamic>> payments,
     required num totalMinor,
     bool queueWhenOffline = true,
+    String? clientOrderId,
   }) async {
+    final orderId = (clientOrderId != null && clientOrderId.isNotEmpty)
+        ? clientOrderId
+        : DateTime.now().microsecondsSinceEpoch.toString();
+
+    if (_inFlightLocalIds.contains(orderId)) {
+      // Already submitting this exact client order ID over the network — skip duplicate call.
+      return SubmitResult(SubmitStatus.queued);
+    }
+
+    _inFlightLocalIds.add(orderId);
     try {
       final data = await _gql.mutate(Ops.createPosOrder, variables: {
         'posSessionId': posSessionId,
         'customerId': customerId,
         'items': items,
         'payments': payments,
+        'clientOrderId': orderId,
       });
       final order = data['createPosOrder'] as Map<String, dynamic>;
       return SubmitResult(
@@ -99,7 +113,7 @@ class SyncService extends ChangeNotifier {
       if (!e.isNetworkError) rethrow; // a real validation error must surface.
       if (!queueWhenOffline) rethrow;
       await _queue.enqueue(QueuedOrder(
-        localId: DateTime.now().microsecondsSinceEpoch.toString(),
+        localId: orderId,
         posSessionId: posSessionId,
         customerId: customerId,
         items: items,
@@ -110,6 +124,8 @@ class SyncService extends ChangeNotifier {
       _scheduleRetries();
       notifyListeners();
       return SubmitResult(SubmitStatus.queued);
+    } finally {
+      _inFlightLocalIds.remove(orderId);
     }
   }
 
@@ -121,12 +137,15 @@ class SyncService extends ChangeNotifier {
     var flushed = 0;
     try {
       for (final order in _queue.all) {
+        if (_inFlightLocalIds.contains(order.localId)) continue;
+        _inFlightLocalIds.add(order.localId);
         try {
           await _gql.mutate(Ops.createPosOrder, variables: {
             'posSessionId': order.posSessionId,
             'customerId': order.customerId,
             'items': order.items,
             'payments': order.payments,
+            'clientOrderId': order.localId,
           });
           await _queue.remove(order);
           flushed++;
@@ -135,6 +154,8 @@ class SyncService extends ChangeNotifier {
           // Server rejected it (e.g. session closed): drop it so the queue
           // is not stuck. A real app would surface this for manual review.
           await _queue.remove(order);
+        } finally {
+          _inFlightLocalIds.remove(order.localId);
         }
       }
     } finally {

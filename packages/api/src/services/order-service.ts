@@ -670,6 +670,7 @@ export async function createPosOrder(input: {
   customerId?: string | null;
   items: PosOrderItemInput[];
   payments: PosOrderPaymentInput[];
+  clientOrderId?: string | null;
   createdByUserId: string;
 }): Promise<Order> {
   if (!input.items.length) throw new OrderError("EMPTY_ORDER");
@@ -683,9 +684,17 @@ export async function createPosOrder(input: {
   }
   paid = roundMoney(paid); // clear drift from summing multiple payments
 
-
-
   return db.transaction(async (tx) => {
+    if (input.clientOrderId) {
+      const existing = await tx.query.orders.findFirst({
+        where: and(
+          eq(orders.posSessionId, input.posSessionId),
+          eq(orders.idempotencyKey, input.clientOrderId),
+        ),
+      });
+      if (existing) return existing;
+    }
+
     const session = await tx.query.posSessions.findFirst({
       where: eq(posSessions.id, input.posSessionId),
     });
@@ -734,6 +743,7 @@ export async function createPosOrder(input: {
       customerId,
       snapshotCustomerName: customer?.name ?? null,
       posSessionId: input.posSessionId,
+      idempotencyKey: input.clientOrderId ?? null,
       totalMinor: total,
       closedAt: now,
       closedByUserId: input.createdByUserId,

@@ -64,6 +64,8 @@ export const orders = mysqlTable(
     // once the POS session closes; this stamp guards against double-posting on
     // reopen→reclose / force-close. Console sales stamp it at their own close.
     attributionPostedAt: timestamp(),
+    // Optional client-assigned idempotency key / local ID to deduplicate double-submits over retried network calls.
+    idempotencyKey: varchar({ length: 64 }),
     createdByUserId: ulidRef().references(() => users.id),
     ...timestamps,
   },
@@ -72,6 +74,7 @@ export const orders = mysqlTable(
     index("orders_pos_session_id_idx").on(t.posSessionId),
     index("orders_closed_at_idx").on(t.closedAt),
     index("orders_return_of_order_id_idx").on(t.returnOfOrderId),
+    index("orders_idempotency_key_idx").on(t.idempotencyKey),
   ],
 );
 

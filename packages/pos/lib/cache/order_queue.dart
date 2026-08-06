@@ -88,6 +88,7 @@ class OrderQueue {
   }
 
   Future<void> enqueue(QueuedOrder order) async {
+    if (_orders.any((o) => o.localId == order.localId)) return;
     _orders.add(order);
     await _persist();
   }

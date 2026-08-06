@@ -198,13 +198,15 @@ class Ops {
       \$posSessionId: ID!,
       \$customerId: ID,
       \$items: [PosOrderItemInput!]!,
-      \$payments: [PosOrderPaymentInput!]!
+      \$payments: [PosOrderPaymentInput!]!,
+      \$clientOrderId: String
     ) {
       createPosOrder(
         posSessionId: \$posSessionId,
         customerId: \$customerId,
         items: \$items,
-        payments: \$payments
+        payments: \$payments,
+        clientOrderId: \$clientOrderId
       ) {
         id displayNumber status totalMinor closedAt
       }
