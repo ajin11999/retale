@@ -15,9 +15,9 @@ void main() {
           ],
         },
       ]);
-      expect(map['v1'], 'Cable Ties · CT-100 · 100mm');
-      expect(map['v2'], 'Cable Ties · CT-200');
-      expect(map['v3'], 'Cable Ties');
+      expect(map['v1']?.displayName, 'Cable Ties · CT-100 · 100mm');
+      expect(map['v2']?.displayName, 'Cable Ties · CT-200');
+      expect(map['v3']?.displayName, 'Cable Ties');
     });
   });
 

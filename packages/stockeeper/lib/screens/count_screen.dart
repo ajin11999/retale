@@ -69,9 +69,7 @@ class _CountScreenState extends State<CountScreen> {
     }
     if (next == _current) return;
 
-    if (_revertTo == null) {
-      _revertTo = _current;
-    }
+    _revertTo ??= _current;
 
     setState(() => _current = next);
 

@@ -131,10 +131,12 @@ class StockLevel {
   final int qtyDecimals;
   final num onHand;
 
-  /// Display name: `Product · label` (label only when present).
-  String get displayName =>
-      [productName, if (label != null && label!.isNotEmpty) label!]
-          .join(' · ');
+  /// Display name: `Product · sku · label` (sku and label only when present).
+  String get displayName => [
+        productName,
+        if (sku.isNotEmpty) sku,
+        if (label != null && label!.isNotEmpty) label!,
+      ].join(' · ');
 
   factory StockLevel.fromJson(Map<String, dynamic> j) => StockLevel(
         variantId: j['variantId'] as String,
@@ -176,6 +178,9 @@ class VariantInfo {
         if (sku != null && sku!.isNotEmpty) sku,
         if (label != null && label!.isNotEmpty) label,
       ].join(' · ');
+
+  @override
+  String toString() => displayName;
 }
 
 /// Builds `variantId -> VariantInfo` from the products query.

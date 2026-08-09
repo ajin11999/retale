@@ -155,17 +155,6 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
     setState(() => _lastScanHitId = item.variantId);
   }
 
-  void _revealRow(String variantId) {
-    final key = _checklistKeys[variantId]?.currentContext != null
-        ? _checklistKeys[variantId]
-        : _byProductKeys[variantId];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 300), alignment: 0.3);
-    }
-  }
-
   Future<void> _openCamera() async {
     final code = await showScanSheet(context);
     if (code != null && mounted) await _handleCode(code);
@@ -318,16 +307,9 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
             onChanged: done ? null : (_) => _setCount(item, done ? 0 : item.qty),
           ),
           title: Text(vInfo?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (vInfo?.sku?.isNotEmpty == true)
-                Text(vInfo!.sku!, style: const TextStyle(color: Colors.grey)),
-              Text(done
-                  ? 'Already received (${_fmt(item.qty)})'
-                  : '${_fmt(counted)} of ${_fmt(item.qty)} to receive'),
-            ],
-          ),
+          subtitle: Text(done
+              ? 'Already received (${_fmt(item.qty)})'
+              : '${_fmt(counted)} of ${_fmt(item.qty)} to receive'),
           trailing: done
               ? const Icon(Icons.done_all)
               : Row(
@@ -389,8 +371,6 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (vInfo?.sku?.isNotEmpty == true)
-                Text(vInfo!.sku!, style: const TextStyle(color: Colors.grey)),
               Text(done
                   ? 'Already received (${_fmt(item.qty)})'
                   : '${_fmt(counted)} of ${_fmt(item.qty)} counted'),

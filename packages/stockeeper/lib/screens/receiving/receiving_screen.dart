@@ -69,7 +69,7 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
 
   String _titleOf(ReceivingLine line) {
     final v = _variantOf(line);
-    return v?.productName ?? line.description ?? '(unnamed line)';
+    return v?.displayName ?? line.description ?? '(unnamed line)';
   }
 
   Future<void> _load() async {
@@ -240,18 +240,6 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
     );
   }
 
-  void _revealLine(String purchaseItemId) {
-    // Only the visible tab's key has a mounted context.
-    final key = _checklistKeys[purchaseItemId]?.currentContext != null
-        ? _checklistKeys[purchaseItemId]
-        : _byProductKeys[purchaseItemId];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 300), alignment: 0.3);
-    }
-  }
-
   Future<void> _openCamera() async {
     final code = await showScanSheet(context);
     if (code != null && mounted) await _handleCode(code);
@@ -379,17 +367,10 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                       : (_) => _save(line, full ? 0 : line.remaining),
                 ),
           title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_variantOf(line)?.sku?.isNotEmpty == true)
-                Text(_variantOf(line)!.sku!, style: const TextStyle(color: Colors.grey)),
-              Text(done
-                  ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
-                  : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
-                      'to receive · ordered ${_fmt(line.qtyOrdered)}'),
-            ],
-          ),
+          subtitle: Text(done
+              ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
+              : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
+                  'to receive · ordered ${_fmt(line.qtyOrdered)}'),
           trailing: done
               ? const Icon(Icons.done_all)
               : Row(
@@ -449,8 +430,6 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (_variantOf(line)?.sku?.isNotEmpty == true)
-                Text(_variantOf(line)!.sku!, style: const TextStyle(color: Colors.grey)),
               Text(done
                   ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
                   : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '

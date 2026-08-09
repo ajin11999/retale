@@ -220,17 +220,6 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     );
   }
 
-  void _revealRow(String variantId) {
-    final key = _checklistKeys[variantId]?.currentContext != null
-        ? _checklistKeys[variantId]
-        : _byProductKeys[variantId];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 300), alignment: 0.3);
-    }
-  }
-
   Future<void> _openCamera() async {
     final code = await showScanSheet(context);
     if (code != null && mounted) await _handleCode(code);
@@ -491,16 +480,9 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
                 confirmed ? _clearCount(row) : _setCount(row, row.onHand),
           ),
           title: Text(row.displayName, style: const TextStyle(fontSize: 15)),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (row.sku.isNotEmpty)
-                Text(row.sku, style: const TextStyle(color: Colors.grey)),
-              Text(counted == null
-                  ? 'system ${_fmt(row.onHand)} · not counted'
-                  : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
-            ],
-          ),
+          subtitle: Text(counted == null
+              ? 'system ${_fmt(row.onHand)} · not counted'
+              : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -561,8 +543,6 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (row.sku.isNotEmpty)
-                Text(row.sku, style: const TextStyle(color: Colors.grey)),
               Text(counted == null
                   ? 'system ${_fmt(row.onHand)} · not counted'
                   : 'counted ${_fmt(counted)} of ${_fmt(row.onHand)}'),
@@ -648,7 +628,7 @@ class _ReviewSheet extends StatelessWidget {
                   return ListTile(
                     dense: true,
                     title: Text(row.displayName, style: const TextStyle(fontSize: 14)),
-                    subtitle: row.sku.isNotEmpty ? Text(row.sku, style: const TextStyle(color: Colors.grey, fontSize: 12)) : null,
+                    subtitle: null,
                     trailing: Text(
                       delta == 0
                           ? '${fmt(qty)} ✓'
