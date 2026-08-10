@@ -56,11 +56,22 @@ class Ops {
   static const openPurchases = '''
     query OpenPurchases {
       purchases(status: open) {
-        id snapshotVendorName date
+        id snapshotVendorName date status
         items { id variantId description qtyOrdered qtyDelivered unitCostMinor }
       }
     }
   ''';
+
+  /// All purchase orders for PO reconciliation search.
+  static const allPurchases = '''
+    query AllPurchases {
+      purchases {
+        id snapshotVendorName date status
+        items { id variantId description qtyOrdered qtyDelivered unitCostMinor }
+      }
+    }
+  ''';
+
 
   /// The open draft check for a purchase, or null — the resume path.
   static const openReceivingCheck = '''

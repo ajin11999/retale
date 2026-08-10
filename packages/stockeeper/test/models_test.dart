@@ -54,11 +54,12 @@ void main() {
   });
 
   group('PurchaseSummary', () {
-    test('totals span all items', () {
+    test('totals span all items and status decodes correctly', () {
       final p = PurchaseSummary.fromJson({
         'id': 'pu1',
         'snapshotVendorName': 'Acme',
         'date': '2026-06-01',
+        'status': 'complete',
         'items': [
           {
             'id': 'i1',
@@ -78,6 +79,7 @@ void main() {
       });
       expect(p.totalOrdered, 6);
       expect(p.totalDelivered, 2);
+      expect(p.status, 'complete');
     });
   });
 }

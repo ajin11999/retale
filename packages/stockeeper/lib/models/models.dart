@@ -1,18 +1,20 @@
 /// Plain data models for the Stockeeper flows, decoded from GraphQL maps.
 library;
 
-/// One open purchase order in the receiving list.
+/// One purchase order in the receiving or reconcile list.
 class PurchaseSummary {
   PurchaseSummary({
     required this.id,
     required this.vendorName,
     required this.date,
     required this.items,
+    this.status = 'open',
   });
 
   final String id;
   final String vendorName;
   final String date;
+  final String status;
   final List<PurchaseItemSummary> items;
 
   num get totalOrdered =>
@@ -24,6 +26,7 @@ class PurchaseSummary {
         id: j['id'] as String,
         vendorName: j['snapshotVendorName'] as String,
         date: j['date'] as String,
+        status: (j['status'] as String?) ?? 'open',
         items: (j['items'] as List<dynamic>)
             .map((i) => PurchaseItemSummary.fromJson(i as Map<String, dynamic>))
             .toList(),

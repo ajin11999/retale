@@ -4,12 +4,13 @@ import '../auth/auth_service.dart';
 import '../models/models.dart';
 import 'location_picker_screen.dart';
 import 'receiving/po_list_screen.dart';
+import 'reconcile/po_reconcile_search_screen.dart';
 import 'reconcile/reconcile_screen.dart';
 import 'router_screen.dart';
 import 'transfers/transfer_list_screen.dart';
 
-/// Home: two big buttons mirroring the warehouse workflow — Receiving
-/// (count goods against an open PO) and Reconcile (count a location).
+/// Home: main operational buttons (Receiving goods/transfers & Reconcile location)
+/// plus a secondary section with separator for read-only simulation (Reconcile PO).
 class MenuScreen extends StatelessWidget {
   const MenuScreen({super.key});
 
@@ -52,6 +53,7 @@ class MenuScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Retale Stockeeper'),
@@ -63,44 +65,98 @@ class MenuScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (user != null) ...[
               Text('Hi, ${user.name}',
-                  style: Theme.of(context).textTheme.titleMedium),
+                  style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
             ],
-            Expanded(
-              child: _MenuButton(
-                icon: Icons.move_to_inbox,
-                title: 'Receive POs',
-                subtitle: 'Count incoming goods against a purchase order',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const PoListScreen(),
-                )),
-              ),
+            _MenuButton(
+              icon: Icons.move_to_inbox,
+              title: 'Receive POs',
+              subtitle: 'Count incoming goods against a purchase order',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const PoListScreen(),
+              )),
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _MenuButton(
-                icon: Icons.local_shipping,
-                title: 'Receive Transfers',
-                subtitle: 'Scan and receive an incoming stock transfer',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const TransferListScreen(),
-                )),
-              ),
+            const SizedBox(height: 14),
+            _MenuButton(
+              icon: Icons.local_shipping,
+              title: 'Receive Transfers',
+              subtitle: 'Scan and receive an incoming stock transfer',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const TransferListScreen(),
+              )),
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _MenuButton(
-                icon: Icons.fact_check,
-                title: 'Reconcile',
-                subtitle: 'Count what is physically at a location',
-                onTap: () => _openReconcile(context),
+            const SizedBox(height: 14),
+            _MenuButton(
+              icon: Icons.fact_check,
+              title: 'Reconcile',
+              subtitle: 'Count what is physically at a location',
+              onTap: () => _openReconcile(context),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Separator & Read-Only Simulation Section ───────────────────
+            Row(
+              children: [
+                const Expanded(child: Divider()),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'READ-ONLY SIMULATION',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+                const Expanded(child: Divider()),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Secondary / Read-only simulation menu item
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: theme.colorScheme.outlineVariant),
+              ),
+              child: ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.find_in_page_outlined,
+                    color: theme.colorScheme.onSecondaryContainer,
+                    size: 28,
+                  ),
+                ),
+                title: const Text(
+                  'Reconcile PO',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text(
+                  'Search POs to reconcile in state memory (No edit effect)',
+                  style: TextStyle(fontSize: 13),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const PoReconcileSearchScreen(),
+                )),
               ),
             ),
           ],
@@ -132,23 +188,23 @@ class _MenuButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 64, color: scheme.onPrimaryContainer),
-              const SizedBox(height: 16),
+              Icon(icon, size: 52, color: scheme.onPrimaryContainer),
+              const SizedBox(height: 12),
               Text(title,
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: scheme.onPrimaryContainer,
                   )),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(subtitle,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     color: scheme.onPrimaryContainer,
                   )),
             ],
