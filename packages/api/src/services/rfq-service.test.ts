@@ -242,4 +242,88 @@ describe("RFQ & PR Procurement Sandbox Workflow", () => {
     expect(items[1]!.description).toBe("Ergonomic Chair");
     expect(items[1]!.targetUnitCostMinor).toBe(1100000);
   });
+
+  test("RFQ Section management, item/section reordering, and PO section conversion", async () => {
+    const userId = await seedUser();
+    const vendorId = await seedVendor();
+
+    const rfq = await rfqService.createRfq({
+      date: "2026-08-10",
+      vendorId,
+      createdByUserId: userId,
+    });
+
+    // 1. Create Sections
+    const sec1 = await rfqService.createSection(rfq.id, "Electrical Component");
+    const sec2 = await rfqService.createSection(rfq.id, "Mechanical Hardware");
+
+    expect(sec1.name).toBe("Electrical Component");
+    expect(sec2.name).toBe("Mechanical Hardware");
+
+    // 2. Rename Section
+    const updatedSec1 = await rfqService.updateSection(sec1.id, "Electrical Parts");
+    expect(updatedSec1.name).toBe("Electrical Parts");
+
+    // 3. Create items in sections
+    const item1 = await rfqService.createItem({
+      rfqId: rfq.id,
+      sectionId: sec1.id,
+      description: "Wire Harness 12V",
+      qtyRequested: 10,
+      targetUnitCostMinor: 25000,
+    });
+
+    const item2 = await rfqService.createItem({
+      rfqId: rfq.id,
+      sectionId: sec2.id,
+      description: "M6 Hex Bolt Stainless",
+      qtyRequested: 50,
+      targetUnitCostMinor: 1500,
+    });
+
+    // 4. Reorder sections
+    const reorderedSections = await rfqService.reorderSections(rfq.id, [sec2.id, sec1.id]);
+    expect(reorderedSections[0]!.id).toBe(sec2.id);
+    expect(reorderedSections[1]!.id).toBe(sec1.id);
+
+    // 5. Reorder items
+    const reorderedItems = await rfqService.reorderItems(rfq.id, [item2.id, item1.id]);
+    expect(reorderedItems[0]!.id).toBe(item2.id);
+    expect(reorderedItems[1]!.id).toBe(item1.id);
+
+    // 6. Test Delete section (items lose sectionId FK set null)
+    const sec3 = await rfqService.createSection(rfq.id, "Temp Section");
+    const item3 = await rfqService.createItem({
+      rfqId: rfq.id,
+      sectionId: sec3.id,
+      description: "Temp Line Item",
+      qtyRequested: 1,
+    });
+    expect(item3.sectionId).toBe(sec3.id);
+
+    await rfqService.deleteSection(sec3.id);
+    const reloadedItem3 = await rfqService.listItems(rfq.id).then((l) => l.find((i) => i.id === item3.id));
+    expect(reloadedItem3?.sectionId).toBeNull();
+
+    // 7. Convert RFQ to PO and verify sections are carried over
+    const po = await rfqService.convertRfqToPurchase({
+      rfqId: rfq.id,
+      createdByUserId: userId,
+    });
+
+    expect(po.status).toBe("open");
+    expect(po.vendorId).toBe(vendorId);
+
+    // Check PO items have non-null sectionId matching created PO sections
+    const poItems = await db.query.purchaseItems.findMany({
+      where: (t, { eq }) => eq(t.purchaseId, po.id),
+    });
+    expect(poItems).toHaveLength(3);
+    const item1Po = poItems.find((i) => i.description === "Wire Harness 12V");
+    const item2Po = poItems.find((i) => i.description === "M6 Hex Bolt Stainless");
+    const item3Po = poItems.find((i) => i.description === "Temp Line Item");
+    expect(item1Po?.sectionId).not.toBeNull();
+    expect(item2Po?.sectionId).not.toBeNull();
+    expect(item3Po?.sectionId).toBeNull();
+  });
 });

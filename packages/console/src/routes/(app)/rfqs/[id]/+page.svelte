@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney } from "$lib/utils";
+  import { formatMoney, searchTokens, matchesTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -13,12 +13,21 @@
   import NumericInput from "$lib/components/ui/numeric-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { dndzone, type DndEvent } from "svelte-dnd-action";
+  import { flip } from "svelte/animate";
   import {
     Pencil,
     Printer,
     Trash2,
     ArrowRight,
     FileDown,
+    GripVertical,
+    Check,
+    X,
+    ChevronDown,
+    ChevronRight,
+    Search,
+    Filter,
   } from "@lucide/svelte";
   import type { PageData } from "./$types";
 
@@ -172,6 +181,14 @@
     }
   `);
 
+  const ReorderSections = graphql(`
+    mutation ConsoleReorderRfqSections($rfqId: ID!, $orderedIds: [ID!]!) {
+      reorderRfqSections(rfqId: $rfqId, orderedIds: $orderedIds) {
+        id
+      }
+    }
+  `);
+
   const CreateItem = graphql(`
     mutation ConsoleCreateRfqItem(
       $rfqId: ID!
@@ -229,6 +246,14 @@
   const DeleteItem = graphql(`
     mutation ConsoleDeleteItem($id: ID!) {
       deleteRfqItem(id: $id)
+    }
+  `);
+
+  const ReorderItems = graphql(`
+    mutation ConsoleReorderRfqItems($rfqId: ID!, $orderedIds: [ID!]!) {
+      reorderRfqItems(rfqId: $rfqId, orderedIds: $orderedIds) {
+        id
+      }
     }
   `);
 
@@ -324,6 +349,10 @@
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
   const refetch = () => {
+    itemOrder = null;
+    sectionOrder = null;
+    dndSectionOrder = null;
+    dndItemOrders = {};
     return (
       rfq &&
       RfqDetail.fetch({ variables: { id: rfq.id }, policy: "NetworkOnly" })
@@ -415,19 +444,19 @@
     importItemsMap = nextMap;
   }
 
-  function selectAllItems() {
+  function selectAllImportItems() {
     for (const k of Object.keys(importItemsMap)) {
       importItemsMap[k].selected = true;
     }
   }
 
-  function deselectAllItems() {
+  function deselectAllImportItems() {
     for (const k of Object.keys(importItemsMap)) {
       importItemsMap[k].selected = false;
     }
   }
 
-  function toggleSectionItems(sectionId: string | null, select: boolean) {
+  function toggleImportSectionItems(sectionId: string | null, select: boolean) {
     if (!selectedPr) return;
     const itemsInSection = selectedPr.items.filter((i: any) => (i.sectionId ?? null) === sectionId);
     for (const item of itemsInSection) {
@@ -544,8 +573,222 @@
     }
   }
 
-  // ---- Sections ----
+  // ---- Ordering & Section Grouping ----
+  const UNGROUPED = "";
+
+  type RfqItemType = NonNullable<typeof rfq>["items"][number];
+  type RfqSectionType = NonNullable<typeof rfq>["sections"][number];
+
+  function applyOrder<T extends { id: string }>(
+    rows: readonly T[],
+    order: string[] | null
+  ): T[] {
+    if (!order) return [...rows];
+    const pos = new Map(order.map((id, i) => [id, i]));
+    return [...rows].sort(
+      (a, b) => (pos.get(a.id) ?? Infinity) - (pos.get(b.id) ?? Infinity)
+    );
+  }
+
+  let sectionOrder = $state<string[] | null>(null);
+  let itemOrder = $state<string[] | null>(null);
+
+  const sections = $derived(applyOrder(rfq?.sections ?? [], sectionOrder));
+  const rawItems = $derived(applyOrder(rfq?.items ?? [], itemOrder));
+
+  interface Group {
+    id: string;
+    key: string;
+    name: string;
+    items: RfqItemType[];
+    targetSubtotal: number;
+    quotedSubtotal: number;
+  }
+
+  const groups = $derived.by<Group[]>(() => {
+    const bySection = new Map<string, RfqItemType[]>();
+    for (const i of rawItems) {
+      const k = i.sectionId ?? UNGROUPED;
+      const list = bySection.get(k) ?? [];
+      list.push(i);
+      bySection.set(k, list);
+    }
+    const out: Group[] = sections.map((s) => {
+      const its = bySection.get(s.id) ?? [];
+      return {
+        id: s.id,
+        key: s.id,
+        name: s.name,
+        items: its,
+        targetSubtotal: its.reduce((a, i) => a + i.qtyRequested * i.targetUnitCostMinor, 0),
+        quotedSubtotal: its.reduce((a, i) => a + i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor), 0),
+      };
+    });
+    const ung = bySection.get(UNGROUPED) ?? [];
+    if (ung.length || out.length === 0) {
+      out.push({
+        id: UNGROUPED,
+        key: UNGROUPED,
+        name: "General Items",
+        items: ung,
+        targetSubtotal: ung.reduce((a, i) => a + i.qtyRequested * i.targetUnitCostMinor, 0),
+        quotedSubtotal: ung.reduce((a, i) => a + i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor), 0),
+      });
+    }
+    return out;
+  });
+
+  let lineSearch = $state("");
+  let sectionFilter = $state("");
+  const queryTokens = $derived(searchTokens(lineSearch.trim()));
+  const filtering = $derived(queryTokens.length > 0 || !!sectionFilter);
+
+  const lineMatches = (i: RfqItemType) => {
+    const name = i.variantId ? (variantLabel(i.variantId) ?? "") : "";
+    return matchesTokens(queryTokens, name, i.description);
+  };
+
+  interface VisibleGroup extends Group {
+    visibleItems: RfqItemType[];
+  }
+
+  const visibleGroups = $derived.by<VisibleGroup[]>(() =>
+    groups
+      .filter((g) => !sectionFilter || g.key === sectionFilter)
+      .map((g) => ({ ...g, visibleItems: g.items.filter(lineMatches) }))
+      .filter((g) => !queryTokens.length || g.visibleItems.length > 0)
+  );
+
+  // Collapse state by group key
+  let collapsed = $state<Set<string>>(new Set());
+  const isOpen = (key: string) => queryTokens.length > 0 || !collapsed.has(key);
+  function toggleCollapse(key: string) {
+    const next = new Set(collapsed);
+    next.has(key) ? next.delete(key) : next.add(key);
+    collapsed = next;
+  }
+
+  // ---- Bulk Selection & Actions ----
+  let selected = $state<Set<string>>(new Set());
+  const selectedCount = $derived(selected.size);
+
+  $effect(() => {
+    const live = new Set(rawItems.map((i) => i.id));
+    if ([...selected].some((id) => !live.has(id)))
+      selected = new Set([...selected].filter((id) => live.has(id)));
+  });
+
+  function toggleSelect(id: string) {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    selected = next;
+  }
+
+  function toggleSelectAllInGroup(group: VisibleGroup) {
+    const groupIds = group.visibleItems.map((i) => i.id);
+    const allSelected = groupIds.every((id) => selected.has(id));
+    const next = new Set(selected);
+    if (allSelected) {
+      for (const id of groupIds) next.delete(id);
+    } else {
+      for (const id of groupIds) next.add(id);
+    }
+    selected = next;
+  }
+
+  function toggleSelectAll() {
+    const allIds = rawItems.map((i) => i.id);
+    const allSelected = allIds.every((id) => selected.has(id));
+    if (allSelected) {
+      selected = new Set();
+    } else {
+      selected = new Set(allIds);
+    }
+  }
+
+  async function bulkDeleteSelected() {
+    if (!selected.size) return;
+    if (!confirm(`Delete ${selected.size} selected line items?`)) return;
+    busy = true;
+    try {
+      for (const id of selected) {
+        await DeleteItem.mutate({ id });
+      }
+      selected = new Set();
+      await refetch();
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function bulkMoveSelectedToSection(targetSectionId: string) {
+    if (!selected.size) return;
+    busy = true;
+    try {
+      const secId = targetSectionId || null;
+      for (const id of selected) {
+        await UpdateItem.mutate({ id, sectionId: secId });
+      }
+      selected = new Set();
+      await refetch();
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ---- Drag & Drop Sorting ----
+  const flipDurationMs = 200;
+  let dndSectionOrder = $state.raw<any[] | null>(null);
+  let dndItemOrders = $state.raw<Record<string, any[]>>({});
+
+  function handleSectionConsider(e: CustomEvent<DndEvent>) {
+    dndSectionOrder = e.detail.items;
+  }
+
+  async function handleSectionFinalize(e: CustomEvent<DndEvent>) {
+    dndSectionOrder = e.detail.items;
+    if (rfq) {
+      const orderedIds = e.detail.items.map((x) => x.id).filter((id) => id !== UNGROUPED);
+      sectionOrder = orderedIds;
+      await ReorderSections.mutate({ rfqId: rfq.id, orderedIds });
+      await refetch();
+    }
+  }
+
+  function handleItemConsider(groupKey: string, e: CustomEvent<DndEvent>) {
+    dndItemOrders = { ...dndItemOrders, [groupKey]: e.detail.items };
+  }
+
+  let dndTimeout: any;
+  async function handleItemFinalize(groupKey: string, e: CustomEvent<DndEvent>) {
+    dndItemOrders = { ...dndItemOrders, [groupKey]: e.detail.items };
+
+    const movedItem = e.detail.items.find((i: any) => (i.sectionId || "") !== groupKey);
+    if (movedItem) {
+      const newSecId = groupKey === "" ? null : groupKey;
+      await UpdateItem.mutate({ id: movedItem.id, sectionId: newSecId });
+      movedItem.sectionId = newSecId;
+    }
+
+    clearTimeout(dndTimeout);
+    dndTimeout = setTimeout(async () => {
+      if (!rfq) return;
+      const allItemIds: string[] = [];
+      const currentSections = dndSectionOrder || visibleGroups;
+      for (const g of currentSections) {
+        const itemsForSec = dndItemOrders[g.key] || groups.find((x) => x.key === g.key)?.items || [];
+        allItemIds.push(...itemsForSec.map((x: any) => x.id));
+      }
+      itemOrder = allItemIds;
+      await ReorderItems.mutate({ rfqId: rfq.id, orderedIds: allItemIds });
+      await refetch();
+    }, 50);
+  }
+
+  // ---- Sections Management ----
   let newSectionName = $state<string | null>(null);
+  let editingSectionId = $state<string | null>(null);
+  let editingSectionName = $state("");
 
   async function addSection() {
     const name = (newSectionName ?? "").trim();
@@ -557,6 +800,38 @@
         newSectionName = null;
         await refetch();
       }
+    } finally {
+      busy = false;
+    }
+  }
+
+  function startRenameSection(id: string, name: string) {
+    editingSectionId = id;
+    editingSectionName = name;
+  }
+
+  async function saveRenameSection() {
+    const id = editingSectionId;
+    const name = editingSectionName.trim();
+    if (!id || !name) return;
+    busy = true;
+    try {
+      const res = await UpdateSection.mutate({ id, name });
+      if (!res.errors?.length) {
+        editingSectionId = null;
+        await refetch();
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteSection(id: string) {
+    if (!confirm("Delete this section? Its items will move to General Items.")) return;
+    busy = true;
+    try {
+      const res = await DeleteSection.mutate({ id });
+      if (!res.errors?.length) await refetch();
     } finally {
       busy = false;
     }
@@ -587,7 +862,7 @@
     };
   }
 
-  function startEditItem(i: NonNullable<typeof rfq>["items"][number]) {
+  function startEditItem(i: RfqItemType) {
     itemDraft = {
       id: i.id,
       sectionId: i.sectionId ?? "",
@@ -655,10 +930,7 @@
   let cellEdit = $state<{ id: string; field: CellField } | null>(null);
   let cellNum = $state<number>(0);
 
-  function startCellEdit(
-    i: NonNullable<typeof rfq>["items"][number],
-    field: CellField
-  ) {
+  function startCellEdit(i: RfqItemType, field: CellField) {
     if (!isEditable) return;
     cellEdit = { id: i.id, field };
     cellNum =
@@ -684,13 +956,11 @@
   }
 
   // ---- Calculations ----
-  const items = $derived(rfq?.items ?? []);
-
   const totalTargetCost = $derived(
-    items.reduce((sum, i) => sum + i.qtyRequested * i.targetUnitCostMinor, 0)
+    rawItems.reduce((sum, i) => sum + i.qtyRequested * i.targetUnitCostMinor, 0)
   );
   const totalQuotedCost = $derived(
-    items.reduce((sum, i) => sum + i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor), 0)
+    rawItems.reduce((sum, i) => sum + i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor), 0)
   );
 
   const statusClass = (s: string) =>
@@ -705,7 +975,7 @@
       : "bg-red-100 text-red-700";
 
   // Split line text into Product Name and SKU for visual clarity
-  const lineParts = (i: (typeof items)[number]): { name: string; sku: string | null } => {
+  const lineParts = (i: RfqItemType): { name: string; sku: string | null } => {
     if (!i.variantId) return { name: i.description ?? "—", sku: null };
     const full = variantLabel(i.variantId);
     if (!full) return { name: "Unknown", sku: null };
@@ -770,7 +1040,7 @@
           <Button
             size="sm"
             class="bg-emerald-600 hover:bg-emerald-700 text-white"
-            disabled={busy || items.length === 0}
+            disabled={busy || rawItems.length === 0}
             onclick={convertToPO}
           >
             <ArrowRight class="mr-1.5 size-4" /> Award &amp; Convert to PO
@@ -923,10 +1193,36 @@
       </div>
     </div>
 
-    <!-- Items & Sections Table -->
+    <!-- Items & Sections Toolbar & Table -->
     <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Line Items ({items.length})</h2>
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center gap-3">
+          <h2 class="text-lg font-semibold">Line Items ({rawItems.length})</h2>
+          {#if rawItems.length > 0}
+            <div class="flex items-center gap-2">
+              <div class="relative w-48">
+                <Search class="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="Filter lines…"
+                  bind:value={lineSearch}
+                  class="h-8 pl-8 text-xs"
+                />
+              </div>
+
+              {#if sections.length > 0}
+                <Select bind:value={sectionFilter} class="h-8 text-xs w-40">
+                  <option value="">All Sections</option>
+                  {#each sections as s (s.id)}
+                    <option value={s.id}>{s.name}</option>
+                  {/each}
+                  <option value={UNGROUPED}>General Items</option>
+                </Select>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
         {#if isEditable}
           <div class="flex items-center gap-2">
             <Button
@@ -951,13 +1247,15 @@
       </div>
 
       {#if newSectionName !== null}
-        <div class="flex items-center gap-2 border p-3 rounded-lg bg-card">
+        <div class="flex items-center gap-2 border p-3 rounded-lg bg-card shadow-sm">
           <Input
-            placeholder="Section name…"
+            placeholder="Section name (e.g. Electrical Parts)…"
             bind:value={newSectionName}
-            class="max-w-xs"
+            class="max-w-xs h-8 text-xs"
+            autofocus
+            onkeydown={(e: any) => e.key === "Enter" && addSection()}
           />
-          <Button size="sm" onclick={addSection} disabled={busy}>Add</Button>
+          <Button size="sm" onclick={addSection} disabled={busy || !newSectionName.trim()}>Save Section</Button>
           <Button
             size="sm"
             variant="ghost"
@@ -967,10 +1265,27 @@
       {/if}
 
       {#if itemDraft}
-        <div class="border rounded-lg p-4 bg-card space-y-3">
-          <h3 class="text-sm font-semibold">
-            {itemDraft.id ? "Edit Line Item" : "Add Line Item"}
-          </h3>
+        <div class="border rounded-lg p-4 bg-card space-y-3 shadow-sm">
+          <div class="flex items-center justify-between border-b pb-2">
+            <h3 class="text-sm font-semibold">
+              {itemDraft.id ? "Edit Line Item" : "Add Line Item"}
+            </h3>
+            {#if sections.length > 0}
+              <div class="flex items-center gap-2 text-xs">
+                <span class="text-muted-foreground font-medium">Section:</span>
+                <select
+                  class="h-7 rounded border bg-background px-2 text-xs"
+                  bind:value={itemDraft.sectionId}
+                >
+                  <option value="">General Items (No Section)</option>
+                  {#each sections as sec (sec.id)}
+                    <option value={sec.id}>{sec.name}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
+          </div>
+
           <div class="grid grid-cols-4 gap-3">
             <label class="space-y-1 col-span-2">
               <span class="text-xs font-medium">Product / Variant</span>
@@ -990,6 +1305,7 @@
               />
             </label>
           </div>
+
           <div class="grid grid-cols-3 gap-3">
             <label class="space-y-1">
               <span class="text-xs font-medium">Qty Requested</span>
@@ -1004,7 +1320,8 @@
               <MoneyInput bind:value={itemDraft.quotedUnitCostMinor} />
             </label>
           </div>
-          <div class="flex justify-end gap-2 pt-2">
+
+          <div class="flex justify-end gap-2 pt-2 border-t">
             <Button
               size="sm"
               variant="ghost"
@@ -1015,134 +1332,329 @@
         </div>
       {/if}
 
-      <div class="overflow-hidden rounded-lg border bg-card">
-        <table class="w-full text-sm">
-          <thead class="border-b bg-muted/50 text-left text-muted-foreground">
-            <tr>
-              <th class="px-4 py-2 font-medium">Product / Description</th>
-              <th class="px-4 py-2 text-right font-medium">Qty Requested</th>
-              <th class="px-4 py-2 text-right font-medium">Target Cost</th>
-              <th class="px-4 py-2 text-right font-medium">Quoted Cost</th>
-              <th class="px-4 py-2 text-right font-medium">Target Total</th>
-              <th class="px-4 py-2 text-right font-medium">Quoted Total</th>
-              {#if isEditable}
-                <th class="w-16 px-4 py-2"></th>
-              {/if}
-            </tr>
-          </thead>
-          <tbody>
-            {#each items as i (i.id)}
-              {@const parts = lineParts(i)}
-              <tr class="border-b last:border-0 hover:bg-muted/40">
-                <td class="px-4 py-2">
-                  <span class="font-medium">{parts.name}</span>
-                  {#if parts.sku}
-                    <span class="ml-1.5 font-mono text-xs text-muted-foreground"
-                      >{parts.sku}</span
-                    >
+      <!-- Sticky Bulk Actions Bar -->
+      {#if isEditable && selectedCount > 0}
+        <div class="sticky top-2 z-40 flex items-center justify-between rounded-lg border bg-primary text-primary-foreground px-4 py-2.5 shadow-md">
+          <div class="flex items-center gap-3 text-xs font-medium">
+            <span><strong>{selectedCount}</strong> line item{selectedCount === 1 ? "" : "s"} selected</span>
+            <Button size="sm" variant="ghost" class="h-6 text-xs text-primary-foreground hover:bg-primary-foreground/20" onclick={toggleSelectAll}>
+              {selectedCount === rawItems.length ? "Deselect All" : "Select All"}
+            </Button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            {#if sections.length > 0}
+              <select
+                class="h-7 rounded border border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground text-xs px-2 cursor-pointer focus:outline-none"
+                onchange={(e: any) => {
+                  if (e.target.value !== undefined) {
+                    bulkMoveSelectedToSection(e.target.value);
+                    e.target.value = "";
+                  }
+                }}
+              >
+                <option value="" disabled selected class="bg-card text-foreground">Move selected to Section…</option>
+                <option value="" class="bg-card text-foreground">General Items (No Section)</option>
+                {#each sections as sec (sec.id)}
+                  <option value={sec.id} class="bg-card text-foreground">{sec.name}</option>
+                {/each}
+              </select>
+            {/if}
+
+            <Button
+              size="sm"
+              variant="destructive"
+              class="h-7 text-xs"
+              onclick={bulkDeleteSelected}
+            >
+              <Trash2 class="mr-1 size-3.5" /> Delete Selected
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              class="h-7 text-xs text-primary-foreground hover:bg-primary-foreground/20"
+              onclick={() => (selected = new Set())}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Grouped Sections Container with Drag & Drop -->
+      <div
+        use:dndzone={{
+          items: dndSectionOrder || visibleGroups,
+          dragDisabled: busy || !isEditable || filtering || editingSectionId !== null || cellEdit !== null,
+          flipDurationMs,
+          dropTargetStyle: {},
+        }}
+        onconsider={handleSectionConsider}
+        onfinalize={handleSectionFinalize}
+        class="space-y-4"
+      >
+        {#each dndSectionOrder || visibleGroups as g (g.id)}
+          {@const isSecOpen = isOpen(g.key)}
+          <div animate:flip={{ duration: flipDurationMs }} class="rounded-lg border bg-card overflow-hidden shadow-xs">
+            <!-- Section Header -->
+            {#if g.key !== UNGROUPED || sections.length > 0}
+              <div class="bg-muted/50 px-4 py-2.5 border-b flex items-center justify-between select-none">
+                <div class="flex items-center gap-2">
+                  {#if isEditable && !filtering}
+                    <GripVertical class="size-4 text-muted-foreground/60 cursor-grab active:cursor-grabbing hover:text-foreground transition-colors" />
                   {/if}
-                </td>
-                <td class="px-4 py-2 text-right tabular-nums">
-                  {#if cellEdit?.id === i.id && cellEdit?.field === "qty"}
-                    <NumericInput
-                      bind:value={cellNum}
-                      onblur={commitCell}
-                      class="h-7 w-20 text-right"
-                      autofocus
-                    />
-                  {:else if isEditable}
-                    <button
-                      type="button"
-                      class="rounded px-1.5 py-0.5 hover:bg-accent"
-                      onclick={() => startCellEdit(i, "qty")}
-                    >
-                      {i.qtyRequested}
-                    </button>
-                  {:else}
-                    {i.qtyRequested}
-                  {/if}
-                </td>
 
-                <td class="px-4 py-2 text-right tabular-nums">
-                  {#if cellEdit?.id === i.id && cellEdit?.field === "targetCost"}
-                    <MoneyInput
-                      bind:value={cellNum}
-                      onblur={commitCell}
-                      autofocus
-                    />
-                  {:else if isEditable}
-                    <button
-                      type="button"
-                      class="rounded px-1.5 py-0.5 hover:bg-accent"
-                      onclick={() => startCellEdit(i, "targetCost")}
-                    >
-                      {formatMoney(i.targetUnitCostMinor)}
-                    </button>
-                  {:else}
-                    {formatMoney(i.targetUnitCostMinor)}
-                  {/if}
-                </td>
+                  <button
+                    type="button"
+                    class="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                    onclick={() => toggleCollapse(g.key)}
+                  >
+                    {#if isSecOpen}
+                      <ChevronDown class="size-4" />
+                    {:else}
+                      <ChevronRight class="size-4" />
+                    {/if}
+                  </button>
 
-                <td class="px-4 py-2 text-right tabular-nums">
-                  {#if cellEdit?.id === i.id && cellEdit?.field === "quotedCost"}
-                    <MoneyInput
-                      bind:value={cellNum}
-                      onblur={commitCell}
-                      autofocus
-                    />
-                  {:else if isEditable}
-                    <button
-                      type="button"
-                      class="rounded px-1.5 py-0.5 hover:bg-accent font-semibold text-emerald-700"
-                      onclick={() => startCellEdit(i, "quotedCost")}
-                    >
-                      {formatMoney(i.quotedUnitCostMinor)}
-                    </button>
-                  {:else}
-                    <span class="font-semibold text-emerald-700">
-                      {formatMoney(i.quotedUnitCostMinor)}
-                    </span>
-                  {/if}
-                </td>
-
-                <td class="px-4 py-2 text-right tabular-nums font-mono">
-                  {formatMoney(i.qtyRequested * i.targetUnitCostMinor)}
-                </td>
-
-                <td class="px-4 py-2 text-right tabular-nums font-mono font-semibold text-emerald-700">
-                  {formatMoney(i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor))}
-                </td>
-
-                {#if isEditable}
-                  <td class="px-4 py-2 text-right">
-                    <div class="flex items-center justify-end gap-1">
-                      <IconButton
-                        icon={Pencil}
-                        label="Edit line"
-                        onclick={() => startEditItem(i)}
+                  {#if editingSectionId === g.id}
+                    <div class="flex items-center gap-1">
+                      <Input
+                        bind:value={editingSectionName}
+                        class="h-7 w-48 text-xs font-semibold"
+                        autofocus
+                        onkeydown={(e: any) => e.key === "Enter" && saveRenameSection()}
                       />
-                      <IconButton
-                        icon={Trash2}
-                        label="Delete line"
-                        variant="destructive"
-                        onclick={() => deleteItem(i.id)}
-                      />
+                      <IconButton icon={Check} label="Save" onclick={saveRenameSection} />
+                      <IconButton icon={X} label="Cancel" onclick={() => (editingSectionId = null)} />
                     </div>
-                  </td>
-                {/if}
-              </tr>
-            {:else}
-              <tr>
-                <td
-                  colspan={isEditable ? 7 : 6}
-                  class="px-4 py-10 text-center text-muted-foreground"
-                >
-                  No items in this RFQ.
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+                  {:else}
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        class="font-bold text-sm text-foreground hover:text-primary transition-colors text-left"
+                        onclick={() => isEditable && g.key !== UNGROUPED && startRenameSection(g.id, g.name)}
+                      >
+                        {g.name}
+                      </button>
+                      <Badge class="font-normal text-xs py-0 px-1.5 bg-background border">
+                        {g.items.length} line{g.items.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="flex items-center gap-4 text-xs">
+                  <div class="flex items-center gap-3 font-mono">
+                    <span class="text-muted-foreground">Target: <strong class="text-foreground">{formatMoney(g.targetSubtotal)}</strong></span>
+                    <span class="text-muted-foreground">Quoted: <strong class="text-emerald-700 font-semibold">{formatMoney(g.quotedSubtotal)}</strong></span>
+                  </div>
+
+                  {#if isEditable}
+                    <div class="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        class="h-7 text-xs px-2"
+                        onclick={() => startAddItem(g.key === UNGROUPED ? "" : g.key)}
+                      >
+                        + Add Line
+                      </Button>
+                      {#if g.key !== UNGROUPED}
+                        <IconButton
+                          icon={Pencil}
+                          label="Rename Section"
+                          onclick={() => startRenameSection(g.id, g.name)}
+                        />
+                        <IconButton
+                          icon={Trash2}
+                          label="Delete Section"
+                          variant="destructive"
+                          onclick={() => deleteSection(g.id)}
+                        />
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
+            <!-- Items Table inside Section -->
+            {#if isSecOpen}
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-muted/20 border-b text-left text-xs font-medium text-muted-foreground">
+                    <tr>
+                      {#if isEditable && !filtering}
+                        <th class="w-8 px-2 py-2"></th>
+                      {/if}
+                      {#if isEditable}
+                        <th class="w-8 px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            class="size-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                            checked={g.visibleItems.length > 0 && g.visibleItems.every((i: RfqItemType) => selected.has(i.id))}
+                            onchange={() => toggleSelectAllInGroup(g)}
+                          />
+                        </th>
+                      {/if}
+                      <th class="px-4 py-2 font-medium">Product / Description</th>
+                      <th class="px-4 py-2 text-right font-medium w-28">Qty Requested</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">Target Cost</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">Quoted Cost</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">Target Total</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">Quoted Total</th>
+                      {#if isEditable}
+                        <th class="w-16 px-4 py-2"></th>
+                      {/if}
+                    </tr>
+                  </thead>
+                  <tbody
+                    use:dndzone={{
+                      items: dndItemOrders[g.key] || g.visibleItems,
+                      dragDisabled: busy || !isEditable || filtering || cellEdit !== null,
+                      flipDurationMs,
+                      dropTargetStyle: {},
+                    }}
+                    onconsider={(e) => handleItemConsider(g.key, e)}
+                    onfinalize={(e) => handleItemFinalize(g.key, e)}
+                  >
+                    {#each dndItemOrders[g.key] || g.visibleItems as i (i.id)}
+                      {@const parts = lineParts(i)}
+                      <tr
+                        animate:flip={{ duration: flipDurationMs }}
+                        class="border-b last:border-0 hover:bg-muted/40 transition-colors {selected.has(i.id) ? 'bg-primary/5 hover:bg-primary/10' : ''}"
+                      >
+                        {#if isEditable && !filtering}
+                          <td class="px-2 py-2 text-center text-muted-foreground/60">
+                            <GripVertical class="size-4 cursor-grab active:cursor-grabbing hover:text-foreground inline-block" />
+                          </td>
+                        {/if}
+
+                        {#if isEditable}
+                          <td class="px-2 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              class="size-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                              checked={selected.has(i.id)}
+                              onchange={() => toggleSelect(i.id)}
+                            />
+                          </td>
+                        {/if}
+
+                        <td class="px-4 py-2">
+                          <span class="font-medium">{parts.name}</span>
+                          {#if parts.sku}
+                            <span class="ml-1.5 font-mono text-xs text-muted-foreground"
+                              >{parts.sku}</span
+                            >
+                          {/if}
+                        </td>
+                        <td class="px-4 py-2 text-right tabular-nums">
+                          {#if cellEdit?.id === i.id && cellEdit?.field === "qty"}
+                            <NumericInput
+                              bind:value={cellNum}
+                              onblur={commitCell}
+                              class="h-7 w-20 text-right"
+                              autofocus
+                            />
+                          {:else if isEditable}
+                            <button
+                              type="button"
+                              class="rounded px-1.5 py-0.5 hover:bg-accent"
+                              onclick={() => startCellEdit(i, "qty")}
+                            >
+                              {i.qtyRequested}
+                            </button>
+                          {:else}
+                            {i.qtyRequested}
+                          {/if}
+                        </td>
+
+                        <td class="px-4 py-2 text-right tabular-nums">
+                          {#if cellEdit?.id === i.id && cellEdit?.field === "targetCost"}
+                            <MoneyInput
+                              bind:value={cellNum}
+                              onblur={commitCell}
+                              autofocus
+                            />
+                          {:else if isEditable}
+                            <button
+                              type="button"
+                              class="rounded px-1.5 py-0.5 hover:bg-accent"
+                              onclick={() => startCellEdit(i, "targetCost")}
+                            >
+                              {formatMoney(i.targetUnitCostMinor)}
+                            </button>
+                          {:else}
+                            {formatMoney(i.targetUnitCostMinor)}
+                          {/if}
+                        </td>
+
+                        <td class="px-4 py-2 text-right tabular-nums">
+                          {#if cellEdit?.id === i.id && cellEdit?.field === "quotedCost"}
+                            <MoneyInput
+                              bind:value={cellNum}
+                              onblur={commitCell}
+                              autofocus
+                            />
+                          {:else if isEditable}
+                            <button
+                              type="button"
+                              class="rounded px-1.5 py-0.5 hover:bg-accent font-semibold text-emerald-700"
+                              onclick={() => startCellEdit(i, "quotedCost")}
+                            >
+                              {formatMoney(i.quotedUnitCostMinor)}
+                            </button>
+                          {:else}
+                            <span class="font-semibold text-emerald-700">
+                              {formatMoney(i.quotedUnitCostMinor)}
+                            </span>
+                          {/if}
+                        </td>
+
+                        <td class="px-4 py-2 text-right tabular-nums font-mono">
+                          {formatMoney(i.qtyRequested * i.targetUnitCostMinor)}
+                        </td>
+
+                        <td class="px-4 py-2 text-right tabular-nums font-mono font-semibold text-emerald-700">
+                          {formatMoney(i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor))}
+                        </td>
+
+                        {#if isEditable}
+                          <td class="px-4 py-2 text-right">
+                            <div class="flex items-center justify-end gap-1">
+                              <IconButton
+                                icon={Pencil}
+                                label="Edit line"
+                                onclick={() => startEditItem(i)}
+                              />
+                              <IconButton
+                                icon={Trash2}
+                                label="Delete line"
+                                variant="destructive"
+                                onclick={() => deleteItem(i.id)}
+                              />
+                            </div>
+                          </td>
+                        {/if}
+                      </tr>
+                    {:else}
+                      <tr>
+                        <td
+                          colspan={isEditable ? 9 : 6}
+                          class="px-4 py-6 text-center text-muted-foreground text-xs"
+                        >
+                          No line items in this section.
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
     </div>
   </div>
@@ -1226,8 +1738,8 @@
             </span>
           </div>
           <div class="flex items-center gap-2">
-            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={selectAllItems}>Select All</Button>
-            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={deselectAllItems}>Deselect All</Button>
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={selectAllImportItems}>Select All</Button>
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={deselectAllImportItems}>Deselect All</Button>
           </div>
         </div>
 
@@ -1262,7 +1774,7 @@
                     <button
                       type="button"
                       class="text-xs font-semibold text-primary hover:underline"
-                      onclick={() => toggleSectionItems(secId, !allSecSelected)}
+                      onclick={() => toggleImportSectionItems(secId, !allSecSelected)}
                     >
                       {allSecSelected ? "Deselect Section" : "Select Section"}
                     </button>

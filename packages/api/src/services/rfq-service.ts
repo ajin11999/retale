@@ -11,7 +11,7 @@ import {
   purchaseRequisitions,
   purchaseRequisitionItems,
 } from "../db/schema/requisitions.ts";
-import { purchases, purchaseItems } from "../db/schema/purchases.ts";
+import { purchases, purchaseItems, purchaseSections } from "../db/schema/purchases.ts";
 import { vendors } from "../db/schema/vendors.ts";
 
 export type RfqErrorCode =
@@ -530,7 +530,25 @@ export async function convertRfqToPurchase(input: {
       createdByUserId: input.createdByUserId,
     });
 
-    // 2. Create Purchase Items & Update PR qtyOrdered
+    // 2. Create Purchase Sections if RFQ has sections
+    const rfqSecList = await tx
+      .select()
+      .from(rfqSections)
+      .where(eq(rfqSections.rfqId, rfq.id))
+      .orderBy(asc(rfqSections.sortOrder));
+    const sectionMap = new Map<string, string>();
+    for (const sec of rfqSecList) {
+      const poSecId = ulid();
+      await tx.insert(purchaseSections).values({
+        id: poSecId,
+        purchaseId,
+        name: sec.name,
+        sortOrder: sec.sortOrder,
+      });
+      sectionMap.set(sec.id, poSecId);
+    }
+
+    // 3. Create Purchase Items & Update PR qtyOrdered
     let sort = 0;
     for (const item of items) {
       const unitCostMinor =
@@ -538,10 +556,12 @@ export async function convertRfqToPurchase(input: {
           ? item.quotedUnitCostMinor
           : item.targetUnitCostMinor;
 
+      const targetSectionId = item.sectionId ? (sectionMap.get(item.sectionId) ?? null) : null;
+
       await tx.insert(purchaseItems).values({
         id: ulid(),
         purchaseId,
-        sectionId: null,
+        sectionId: targetSectionId,
         requisitionItemId: item.requisitionItemId ?? null,
         variantId: item.variantId ?? null,
         description: item.description,

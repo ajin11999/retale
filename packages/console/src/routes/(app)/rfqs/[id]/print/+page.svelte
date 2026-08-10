@@ -2,7 +2,7 @@
   import { graphql } from "$houdini";
   import { formatMoney } from "$lib/utils";
   import Button from "$lib/components/ui/button.svelte";
-  import { Printer, X, Eye, FileText, DollarSign, Barcode, User, Share2, Download } from "@lucide/svelte";
+  import { Printer, X, Eye, FileText, DollarSign, Barcode, User, Share2, Download, Folder } from "@lucide/svelte";
   import { PDFDocument } from "pdf-lib";
   import { domToCanvas } from "modern-screenshot";
   import type { PageData } from "./$types";
@@ -97,6 +97,7 @@
   // ---- Printing & Paper Options Toggles ----
   let paperSize = $state<"A4" | "Letter" | "Legal">("A4"); // Default paper size: A4
   let showVendor = $state(true); // Show vendor name toggle (default: true)
+  let showSections = $state(true); // Show section headers toggle (default: true)
   let showNote = $state(false);
   let showCosts = $state(false); // Target cost, subtotal, total (default: false)
   let showBarcode = $state(false); // Show barcode under product name (default: false)
@@ -104,8 +105,51 @@
   let sharing = $state(false);
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
+  const sections = $derived(rfq?.sections ?? []);
   const items = $derived(rfq?.items ?? []);
   const printedAt = `${new Date().toLocaleDateString("en-CA")} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+  const itemLineNumMap = $derived(
+    new Map(items.map((item, idx) => [item.id, idx + 1]))
+  );
+
+  const UNGROUPED = "";
+
+  interface SectionGroup {
+    id: string;
+    name: string;
+    items: typeof items;
+  }
+
+  const printGroups = $derived.by<SectionGroup[]>(() => {
+    if (!showSections || !sections.length) {
+      return [{ id: UNGROUPED, name: "", items }];
+    }
+    const bySec = new Map<string, typeof items>();
+    for (const item of items) {
+      const k = item.sectionId ?? UNGROUPED;
+      const list = bySec.get(k) ?? [];
+      list.push(item);
+      bySec.set(k, list);
+    }
+
+    const out: SectionGroup[] = [];
+    for (const sec of sections) {
+      const secItems = bySec.get(sec.id) ?? [];
+      if (secItems.length > 0) {
+        out.push({ id: sec.id, name: sec.name, items: secItems });
+      }
+    }
+    const ungItems = bySec.get(UNGROUPED) ?? [];
+    if (ungItems.length > 0) {
+      out.push({
+        id: UNGROUPED,
+        name: sections.length > 0 ? "General Items" : "",
+        items: ungItems,
+      });
+    }
+    return out;
+  });
 
   // Map variantId to variant details (name without SKU, sku, barcode)
   const getVariantInfo = (variantId: string | null | undefined) => {
@@ -329,6 +373,18 @@
         <span>Show Vendor Name</span>
       </label>
 
+      {#if sections.length > 0}
+        <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
+          <input
+            type="checkbox"
+            bind:checked={showSections}
+            class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
+          />
+          <Folder class="size-3.5 text-muted-foreground" />
+          <span>Show Sections</span>
+        </label>
+      {/if}
+
       <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
         <input
           type="checkbox"
@@ -461,7 +517,7 @@
       {/if}
 
       <!-- Striped Items Table (1.5x Bigger Table Text with Precision Right-Side Border Fix) -->
-      <div class="rounded-lg border border-slate-300 print:border-slate-400">
+      <div class="rounded-lg border border-slate-300 print:border-slate-400 overflow-hidden">
         <table class="w-full text-left print-table">
           <thead class="bg-muted/80 text-muted-foreground font-bold text-sm uppercase">
             <tr>
@@ -475,35 +531,49 @@
             </tr>
           </thead>
           <tbody>
-            {#each items as item, idx (item.id)}
-              {@const disp = lineDisplay(item)}
-              <tr class="odd:bg-white even:bg-slate-100/80 print:even:bg-slate-100 hover:bg-slate-200/50 print:hover:bg-transparent">
-                <!-- 1. Numbering -->
-                <td class="px-3.5 py-2 text-center font-mono text-base text-muted-foreground">{idx + 1}</td>
-                
-                <!-- 2. Product Name / Variant Code & Optional Barcode (break-words prevents overflow) -->
-                <td class="px-3.5 py-2 break-words max-w-md">
-                  <p class="font-bold text-[1.35rem] text-foreground leading-snug break-words">{disp.name}</p>
-                  {#if showBarcode && disp.barcode}
-                    <p class="text-sm text-muted-foreground font-mono mt-0.5 break-all" style="color: #6b7280;">
-                      Barcode: {disp.barcode}
-                    </p>
+            {#each printGroups as g (g.id)}
+              {#if g.name}
+                <tr class="section-header-row bg-slate-200/90 print:bg-slate-200">
+                  <td
+                    colspan={showCosts ? 5 : 3}
+                    class="px-3.5 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-800 border-y border-slate-300 print:border-slate-400"
+                  >
+                    {g.name}
+                  </td>
+                </tr>
+              {/if}
+
+              {#each g.items as item (item.id)}
+                {@const lineIdx = itemLineNumMap.get(item.id) ?? 1}
+                {@const disp = lineDisplay(item)}
+                <tr class="odd:bg-white even:bg-slate-100/80 print:even:bg-slate-100 hover:bg-slate-200/50 print:hover:bg-transparent">
+                  <!-- 1. Numbering -->
+                  <td class="px-3.5 py-2 text-center font-mono text-base text-muted-foreground">{lineIdx}</td>
+                  
+                  <!-- 2. Product Name / Variant Code & Optional Barcode (break-words prevents overflow) -->
+                  <td class="px-3.5 py-2 break-words max-w-md">
+                    <p class="font-bold text-[1.35rem] text-foreground leading-snug break-words">{disp.name}</p>
+                    {#if showBarcode && disp.barcode}
+                      <p class="text-sm text-muted-foreground font-mono mt-0.5 break-all" style="color: #6b7280;">
+                        Barcode: {disp.barcode}
+                      </p>
+                    {/if}
+                  </td>
+
+                  <!-- 3. Quantity (1.5x Bigger Text: 1.35rem) -->
+                  <td class="px-3.5 py-2 text-right tabular-nums font-mono font-bold text-[1.35rem]">{item.qtyRequested}</td>
+
+                  <!-- Optional Target Cost & Target Total -->
+                  {#if showCosts}
+                    <td class="px-3.5 py-2 text-right tabular-nums font-mono text-base">
+                      {formatMoney(item.targetUnitCostMinor)}
+                    </td>
+                    <td class="px-3.5 py-2 text-right tabular-nums font-mono font-bold text-[1.35rem]">
+                      {formatMoney(item.qtyRequested * item.targetUnitCostMinor)}
+                    </td>
                   {/if}
-                </td>
-
-                <!-- 3. Quantity (1.5x Bigger Text: 1.35rem) -->
-                <td class="px-3.5 py-2 text-right tabular-nums font-mono font-bold text-[1.35rem]">{item.qtyRequested}</td>
-
-                <!-- Optional Target Cost & Target Total -->
-                {#if showCosts}
-                  <td class="px-3.5 py-2 text-right tabular-nums font-mono text-base">
-                    {formatMoney(item.targetUnitCostMinor)}
-                  </td>
-                  <td class="px-3.5 py-2 text-right tabular-nums font-mono font-bold text-[1.35rem]">
-                    {formatMoney(item.qtyRequested * item.targetUnitCostMinor)}
-                  </td>
-                {/if}
-              </tr>
+                </tr>
+              {/each}
             {:else}
               <tr>
                 <td colspan={showCosts ? 5 : 3} class="px-4 py-8 text-center text-muted-foreground text-base">
@@ -565,6 +635,12 @@
   .print-table tbody tr:last-child td {
     border-bottom: none;
   }
+  tr.section-header-row td {
+    border-right: none !important;
+    border-top: 1px solid #cbd5e1 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    background-color: #e2e8f0 !important;
+  }
 
   @media print {
     @page {
@@ -591,7 +667,15 @@
     .print-table td:last-child {
       border-right: none !important;
     }
-    tr:nth-child(even) {
+    tr.section-header-row td {
+      border-right: none !important;
+      border-top: 1px solid #cbd5e1 !important;
+      border-bottom: 1px solid #cbd5e1 !important;
+      background-color: #e2e8f0 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    tr:nth-child(even):not(.section-header-row) {
       background-color: #f1f5f9 !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;

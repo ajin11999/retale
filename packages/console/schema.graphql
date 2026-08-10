@@ -418,7 +418,7 @@ type Mutation {
   """
   Create an atomic POS order — closed on create against an open POS session.
   """
-  createPosOrder(posSessionId: ID!, customerId: ID, items: [PosOrderItemInput!]!, payments: [PosOrderPaymentInput!]!): Order!
+  createPosOrder(posSessionId: ID!, customerId: ID, items: [PosOrderItemInput!]!, payments: [PosOrderPaymentInput!]!, clientOrderId: String): Order!
 
   """Open an empty Console customer sale (stateful, root-only)."""
   createCustomerSale(customerId: ID!, note: String): Order!
