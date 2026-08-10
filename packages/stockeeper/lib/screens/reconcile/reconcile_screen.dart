@@ -210,9 +210,16 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           for (final row in matches)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, row),
-              child: Text(
-                '${row.displayName}\nsystem ${_fmt(row.onHand)}',
-                style: const TextStyle(fontSize: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ProductTitleText.fromStockLevel(row, fontSize: 16, skuFontSize: 13),
+                  const SizedBox(height: 4),
+                  Text(
+                    'system ${_fmt(row.onHand)}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ],
               ),
             ),
         ],
@@ -479,7 +486,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
             onChanged: (_) =>
                 confirmed ? _clearCount(row) : _setCount(row, row.onHand),
           ),
-          title: Text(row.displayName, style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromStockLevel(row),
           subtitle: Text(counted == null
               ? 'system ${_fmt(row.onHand)} · not counted'
               : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
@@ -539,7 +546,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           selected: _lastScanHitId == row.variantId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(row.displayName, style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromStockLevel(row),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -569,6 +576,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
       builder: (_) => CountScreen(
         target: CountTarget(
           title: row.displayName,
+          titleWidget: ProductTitleText.fromStockLevel(row, fontSize: 18, skuFontSize: 14),
           expected: row.onHand,
           initial: _counted[row.variantId] ?? 0,
           allowOverage: true,
@@ -627,7 +635,7 @@ class _ReviewSheet extends StatelessWidget {
                           : Colors.red.shade700;
                   return ListTile(
                     dense: true,
-                    title: Text(row.displayName, style: const TextStyle(fontSize: 14)),
+                    title: ProductTitleText.fromStockLevel(row, fontSize: 14, skuFontSize: 11),
                     subtitle: null,
                     trailing: Text(
                       delta == 0

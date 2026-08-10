@@ -306,7 +306,8 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
             value: done ? true : (partial ? null : false),
             onChanged: done ? null : (_) => _setCount(item, done ? 0 : item.qty),
           ),
-          title: Text(vInfo?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(vInfo,
+              fallbackDescription: item.variantId),
           subtitle: Text(done
               ? 'Already received (${_fmt(item.qty)})'
               : '${_fmt(counted)} of ${_fmt(item.qty)} to receive'),
@@ -367,7 +368,8 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
           selected: _lastScanHitId == item.variantId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(vInfo?.displayName ?? item.variantId, style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(vInfo,
+              fallbackDescription: item.variantId),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -396,6 +398,8 @@ class _TransferReceiveScreenState extends State<TransferReceiveScreen> {
       builder: (_) => CountScreen(
         target: CountTarget(
           title: vInfo?.displayName ?? item.variantId,
+          titleWidget: ProductTitleText.fromVariantInfo(vInfo,
+              fallbackDescription: item.variantId, fontSize: 18, skuFontSize: 14),
           expected: item.qty,
           initial: _counts[item.variantId] ?? 0,
           allowOverage: false,

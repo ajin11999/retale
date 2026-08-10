@@ -7,6 +7,7 @@ import '../widgets/common.dart';
 class CountTarget {
   CountTarget({
     required this.title,
+    this.titleWidget,
     required this.expected,
     required this.initial,
     required this.allowOverage,
@@ -15,6 +16,7 @@ class CountTarget {
   });
 
   final String title;
+  final Widget? titleWidget;
   final num expected;
   final num initial;
 
@@ -123,7 +125,7 @@ class _CountScreenState extends State<CountScreen> {
     final progress =
         t.expected <= 0 ? 0.0 : (_current / t.expected).clamp(0.0, 1.0);
     return Scaffold(
-      appBar: AppBar(title: Text(t.title, maxLines: 2)),
+      appBar: AppBar(title: t.titleWidget ?? Text(t.title, maxLines: 2)),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),

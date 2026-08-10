@@ -229,10 +229,17 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
           for (final line in matches)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, line),
-              child: Text(
-                '${_titleOf(line)}\n'
-                '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} counted',
-                style: const TextStyle(fontSize: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ProductTitleText.fromVariantInfo(_variantOf(line),
+                      fallbackDescription: line.description, fontSize: 16, skuFontSize: 13),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} counted',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ],
               ),
             ),
         ],
@@ -366,7 +373,8 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                       ? null
                       : (_) => _save(line, full ? 0 : line.remaining),
                 ),
-          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(_variantOf(line),
+              fallbackDescription: line.description),
           subtitle: Text(done
               ? 'Already received (ordered ${_fmt(line.qtyOrdered)})'
               : '${_fmt(line.qtyInCheck)} of ${_fmt(line.remaining)} '
@@ -426,7 +434,8 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
           selected: _lastScanHitId == line.purchaseItemId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(_variantOf(line),
+              fallbackDescription: line.description),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -452,10 +461,13 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
   }
 
   Future<void> _openCounter(ReceivingLine line) async {
+    final v = _variantOf(line);
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => CountScreen(
         target: CountTarget(
           title: _titleOf(line),
+          titleWidget: ProductTitleText.fromVariantInfo(v,
+              fallbackDescription: line.description, fontSize: 18, skuFontSize: 14),
           expected: line.remaining,
           initial: line.qtyInCheck,
           allowOverage: false,

@@ -191,10 +191,17 @@ class _PoReconcileScreenState extends State<PoReconcileScreen> {
           for (final line in matches)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, line),
-              child: Text(
-                '${_titleOf(line)}\n'
-                'Simulated count: ${_fmt(_counted[line.purchaseItemId] ?? 0)} of ${_fmt(_targetExpected(line))}',
-                style: const TextStyle(fontSize: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ProductTitleText.fromVariantInfo(_variantOf(line),
+                      fallbackDescription: line.description, fontSize: 16, skuFontSize: 13),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Simulated count: ${_fmt(_counted[line.purchaseItemId] ?? 0)} of ${_fmt(_targetExpected(line))}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ],
               ),
             ),
         ],
@@ -263,8 +270,8 @@ class _PoReconcileScreenState extends State<PoReconcileScreen> {
 
                     return ListTile(
                       dense: true,
-                      title: Text(_titleOf(line),
-                          style: const TextStyle(fontSize: 14)),
+                      title: ProductTitleText.fromVariantInfo(_variantOf(line),
+                          fallbackDescription: line.description, fontSize: 14, skuFontSize: 11),
                       subtitle: Text(
                         'Ordered: ${_fmt(line.qtyOrdered)} · Delivered: ${_fmt(line.qtyDelivered)}',
                         style: const TextStyle(fontSize: 12),
@@ -481,7 +488,8 @@ class _PoReconcileScreenState extends State<PoReconcileScreen> {
               }
             },
           ),
-          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(_variantOf(line),
+              fallbackDescription: line.description),
           subtitle: Text(
             counted == null
                 ? 'Expected: ${_fmt(expected)} · Ordered: ${_fmt(line.qtyOrdered)}'
@@ -550,7 +558,8 @@ class _PoReconcileScreenState extends State<PoReconcileScreen> {
           selected: _lastScanHitId == line.purchaseItemId,
           selectedTileColor:
               Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          title: Text(_titleOf(line), style: const TextStyle(fontSize: 15)),
+          title: ProductTitleText.fromVariantInfo(_variantOf(line),
+              fallbackDescription: line.description),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -579,10 +588,21 @@ class _PoReconcileScreenState extends State<PoReconcileScreen> {
 
   Future<void> _openCounter(ReceivingLine line) async {
     final expected = _targetExpected(line);
+    final v = _variantOf(line);
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => CountScreen(
         target: CountTarget(
           title: '${_titleOf(line)} (Simulation)',
+          titleWidget: Row(
+            children: [
+              Expanded(
+                child: ProductTitleText.fromVariantInfo(v,
+                    fallbackDescription: line.description, fontSize: 18, skuFontSize: 14),
+              ),
+              const SizedBox(width: 6),
+              const Text('(Simulation)', style: TextStyle(fontSize: 14, color: Colors.grey)),
+            ],
+          ),
           expected: expected,
           initial: _counted[line.purchaseItemId] ?? 0,
           allowOverage: true,
