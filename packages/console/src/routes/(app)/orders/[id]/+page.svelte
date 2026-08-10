@@ -710,6 +710,13 @@
   const computed = $derived(
     visibleItems.reduce((acc, i) => acc + i.lineTotalMinor, 0),
   );
+  const computedCost = $derived(
+    visibleItems.reduce((acc, i) => acc + i.snapshotCostMinor * i.qty, 0),
+  );
+  const computedMargin = $derived(computed - computedCost);
+  const computedMarginPct = $derived(
+    computed > 0 ? (computedMargin / computed) * 100 : null,
+  );
   const paid = $derived(
     (order?.payments ?? []).reduce((acc, p) => acc + p.amountMinor, 0),
   );
@@ -849,6 +856,35 @@
         {/if}
       </div>
       <Badge class={statusBadge(order.status)}>{statusLabel(order.status)}</Badge>
+    </div>
+
+    <!-- Summary metrics -->
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="rounded-lg border bg-card p-3">
+        <span class="text-xs font-medium text-muted-foreground">Total Revenue</span>
+        <div class="text-lg font-semibold">{formatMoney(order.totalMinor)}</div>
+      </div>
+      <div class="rounded-lg border bg-card p-3">
+        <span class="text-xs font-medium text-muted-foreground">Total Cost</span>
+        <div class="text-lg font-semibold">{formatMoney(computedCost)}</div>
+      </div>
+      <div class="rounded-lg border bg-card p-3">
+        <span class="text-xs font-medium text-muted-foreground">Margin</span>
+        <div class="flex items-center gap-1.5">
+          <span class="text-lg font-semibold">{formatMoney(computedMargin)}</span>
+          {#if computedMarginPct != null}
+            <Badge class={marginBadgeClass(computedMarginPct)}>
+              {computedMarginPct.toFixed(1)}%
+            </Badge>
+          {/if}
+        </div>
+      </div>
+      <div class="rounded-lg border bg-card p-3">
+        <span class="text-xs font-medium text-muted-foreground">Paid / Outstanding</span>
+        <div class="text-lg font-semibold {computed - paid > 0 ? 'text-amber-700' : 'text-emerald-700'}">
+          {formatMoney(paid)} / {formatMoney(computed - paid)}
+        </div>
+      </div>
     </div>
 
     {#if order.cancellationReason}
@@ -1054,6 +1090,33 @@
               </td>
             </tr>
           {/if}
+          <tr>
+            <td
+              colspan={isOpen ? 6 : 5}
+              class="px-4 py-2 text-right font-medium text-muted-foreground"
+            >
+              Total cost
+            </td>
+            <td class="px-4 py-2 text-right font-medium text-muted-foreground">
+              {formatMoney(computedCost)}
+            </td>
+          </tr>
+          <tr>
+            <td
+              colspan={isOpen ? 6 : 5}
+              class="px-4 py-2 text-right font-medium"
+            >
+              Margin
+            </td>
+            <td class="px-4 py-2 text-right font-medium">
+              <span>{formatMoney(computedMargin)}</span>
+              {#if computedMarginPct != null}
+                <Badge class="{marginBadgeClass(computedMarginPct)} ml-1">
+                  {computedMarginPct.toFixed(1)}%
+                </Badge>
+              {/if}
+            </td>
+          </tr>
           <tr>
             <td
               colspan={isOpen ? 6 : 5}
