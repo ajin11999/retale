@@ -243,11 +243,12 @@ export async function verifyChallengeCode(input: {
   if (!tf?.confirmedAt) throw new TwoFactorError("CHALLENGE_INVALID");
 
   // A 6-digit input is a TOTP code; anything else is treated as recovery.
+  const digitsOnly = input.code.replace(/[\s-]/g, "");
   let ok = false;
-  if (/^\d{6}$/.test(input.code.trim())) {
+  if (/^\d{6}$/.test(digitsOnly)) {
     const result = verifyTotp({
       secret: openSecret(tf.secretEncrypted),
-      code: input.code,
+      code: digitsOnly,
       lastUsedStep: tf.lastUsedStep,
     });
     if (result.ok) {

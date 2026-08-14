@@ -10,6 +10,7 @@ const ME = /* GraphQL */ `
       username
       name
       isRoot
+      twoFactorEnabled
       permissions
     }
   }
@@ -20,6 +21,7 @@ export interface Viewer {
   username: string;
   name: string;
   isRoot: boolean;
+  twoFactorEnabled: boolean;
   permissions: string[];
 }
 

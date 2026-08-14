@@ -80,7 +80,7 @@ export function verifyTotp(opts: {
   lastUsedStep?: number | null;
   now?: number;
 }): { ok: boolean; step?: number } {
-  const code = opts.code.trim();
+  const code = opts.code.replace(/[\s-]/g, "").trim();
   if (!/^\d{6}$/.test(code)) return { ok: false };
   const current = currentTimeStep(opts.now);
   for (const step of [current - 1, current, current + 1]) {
@@ -96,7 +96,9 @@ export function otpauthUrl(opts: {
   account: string;
   issuer: string;
 }): string {
-  const label = encodeURIComponent(`${opts.issuer}:${opts.account}`);
+  const label = opts.issuer
+    ? `${encodeURIComponent(opts.issuer)}:${encodeURIComponent(opts.account)}`
+    : encodeURIComponent(opts.account);
   const params = new URLSearchParams({
     secret: opts.secret,
     issuer: opts.issuer,

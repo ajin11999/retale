@@ -70,7 +70,7 @@
       qrDataUrl = null;
       return;
     }
-    QRCode.toDataURL(url, { width: 220, margin: 1 })
+    QRCode.toDataURL(url, { width: 220, margin: 2, errorCorrectionLevel: "M" })
       .then((d) => (qrDataUrl = d))
       .catch(() => (qrDataUrl = null));
   });
@@ -103,11 +103,12 @@
   }
 
   async function confirmSetup() {
-    if (!pending || !confirmCode.trim()) return;
+    const code = confirmCode.replace(/[\s-]/g, "").trim();
+    if (!pending || !code) return;
     busy = true;
     error = null;
     try {
-      const res = await ConfirmTwoFactor.mutate({ code: confirmCode.trim() });
+      const res = await ConfirmTwoFactor.mutate({ code });
       if (res.errors?.length) {
         error = res.errors[0].message;
         return;
@@ -227,6 +228,15 @@
           <Badge class="bg-muted text-muted-foreground">disabled</Badge>
         {/if}
       </div>
+
+      {#if me.isRoot && !me.twoFactorEnabled && !pending}
+        <div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p class="font-medium">2FA enrollment required for root accounts</p>
+          <p class="mt-0.5 text-xs text-amber-800">
+            As a root administrator, two-factor authentication must be enabled before store operations can be performed.
+          </p>
+        </div>
+      {/if}
 
       {#if pending}
         <!-- Enrolment in progress -->

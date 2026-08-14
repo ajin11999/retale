@@ -39,6 +39,17 @@ describe("verifyTotp", () => {
     expect(verifyTotp({ secret, code: totpCode(secret, step + 1), now }).ok).toBe(true);
   });
 
+  test("accepts codes with whitespace or dashes", () => {
+    const secret = generateTotpSecret();
+    const now = Date.now();
+    const step = currentTimeStep(now);
+    const code = totpCode(secret, step);
+    const formatted = `${code.slice(0, 3)} ${code.slice(3)}`;
+    expect(verifyTotp({ secret, code: formatted, now }).ok).toBe(true);
+    const dashed = `${code.slice(0, 3)}-${code.slice(3)}`;
+    expect(verifyTotp({ secret, code: dashed, now }).ok).toBe(true);
+  });
+
   test("rejects a code from a replayed (already-used) step", () => {
     const secret = generateTotpSecret();
     const now = Date.now();
@@ -60,11 +71,22 @@ describe("verifyTotp", () => {
 });
 
 describe("otpauthUrl", () => {
-  test("carries the secret, issuer, and algorithm", () => {
+  test("carries the secret, issuer, and algorithm with standard label", () => {
     const url = otpauthUrl({ secret: "ABC234", account: "bob", issuer: "Retale" });
-    expect(url.startsWith("otpauth://totp/")).toBe(true);
+    expect(url.startsWith("otpauth://totp/Retale:bob?")).toBe(true);
     expect(url).toContain("secret=ABC234");
     expect(url).toContain("issuer=Retale");
     expect(url).toContain("algorithm=SHA1");
+    expect(url).toContain("digits=6");
+    expect(url).toContain("period=30");
+  });
+
+  test("encodes special characters in issuer and account but preserves colon", () => {
+    const url = otpauthUrl({
+      secret: "ABC234",
+      account: "alice@example.com",
+      issuer: "Retale Store",
+    });
+    expect(url.startsWith("otpauth://totp/Retale%20Store:alice%40example.com?")).toBe(true);
   });
 });
