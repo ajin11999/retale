@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
+import '../i18n/i18n_service.dart';
 import '../models/money.dart';
 import '../receipt/receipt.dart';
 import '../receipt/receipt_service.dart';
@@ -72,7 +73,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Orders')),
+      appBar: AppBar(title: Text(tr('history.orders'))),
       body: LayoutBuilder(
         builder: (context, constraints) {
           _wide = constraints.maxWidth > _wideBreakpoint;
@@ -81,10 +82,12 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: SegmentedButton<_Scope>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
-                        value: _Scope.thisShift, label: Text('This shift')),
-                    ButtonSegment(value: _Scope.all, label: Text('All orders')),
+                        value: _Scope.thisShift,
+                        label: Text(tr('history.thisShift'))),
+                    ButtonSegment(
+                        value: _Scope.all, label: Text(tr('history.allOrders'))),
                   ],
                   selected: {_scope},
                   onSelectionChanged: (s) => _setScope(s.first),
@@ -100,8 +103,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               const VerticalDivider(width: 1),
               Expanded(
                 child: _selectedOrderId == null
-                    ? const Center(
-                        child: Text('Select an order to view details'))
+                    ? Center(
+                        child: Text(tr('history.selectOrderPrompt')))
                     : _OrderDetailPanel(
                         // Recreate the panel (and its fetch) per order.
                         key: ValueKey(_selectedOrderId),
@@ -133,8 +136,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         if (orders.isEmpty) {
           return Center(
             child: Text(_scope == _Scope.thisShift
-                ? 'No orders on this shift yet'
-                : 'No orders yet'),
+                ? tr('history.noOrdersThisShift')
+                : tr('history.noOrders')),
           );
         }
         return RefreshIndicator(
@@ -203,7 +206,7 @@ class _OrderDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Order')),
+      appBar: AppBar(title: Text(tr('history.order'))),
       body: _OrderDetailPanel(
         orderId: orderId,
         posSessionId: posSessionId,
@@ -374,7 +377,7 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.print_outlined),
-                            label: const Text('Print'),
+                            label: Text(tr('receipt.print')),
                             onPressed: () => _printReceipt(o),
                           ),
                         ),
@@ -382,7 +385,7 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.chat_outlined),
-                            label: const Text('WhatsApp'),
+                            label: Text(tr('receipt.sendWhatsApp')),
                             onPressed: () => _sendReceipt(o),
                           ),
                         ),
@@ -392,7 +395,7 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
                         icon: const Icon(Icons.assignment_return),
-                        label: const Text('Return items'),
+                        label: Text(tr('history.refund')),
                         onPressed: () => _startReturn(o),
                       ),
                     ],

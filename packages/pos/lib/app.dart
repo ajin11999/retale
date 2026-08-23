@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'i18n/i18n_service.dart';
 import 'screens/router_screen.dart';
 
 /// Global handles so non-widget code (the auth layer, on session expiry) can
@@ -14,24 +15,29 @@ class PosApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Retale POS',
-      navigatorKey: navigatorKey,
-      scaffoldMessengerKey: scaffoldMessengerKey,
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-        visualDensity: VisualDensity.compact,
-      ),
-      builder: (context, child) {
-        final media = MediaQuery.of(context);
-        return MediaQuery(
-          data: media.copyWith(textScaler: const TextScaler.linear(0.9)),
-          child: child!,
+    return ListenableBuilder(
+      listenable: I18nService.instance,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Retale POS',
+          navigatorKey: navigatorKey,
+          scaffoldMessengerKey: scaffoldMessengerKey,
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+            useMaterial3: true,
+            visualDensity: VisualDensity.compact,
+          ),
+          builder: (context, child) {
+            final media = MediaQuery.of(context);
+            return MediaQuery(
+              data: media.copyWith(textScaler: const TextScaler.linear(0.9)),
+              child: child!,
+            );
+          },
+          home: const RouterScreen(),
         );
       },
-      home: const RouterScreen(),
     );
   }
 }

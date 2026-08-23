@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
+import '../i18n/i18n_service.dart';
+import '../widgets/language_selector_button.dart';
 import 'router_screen.dart';
 
 /// First-run screen: bind this device to a Retale API endpoint.
@@ -28,7 +30,7 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
   Future<void> _save() async {
     final url = _controller.text.trim();
     if (url.isEmpty || !url.startsWith('http')) {
-      setState(() => _error = 'Enter a full URL, e.g. http://192.168.1.10:3000');
+      setState(() => _error = tr('setup.enterApiUrl'));
       return;
     }
     setState(() {
@@ -51,50 +53,59 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Image.asset('assets/logo.png', height: 56),
-              const SizedBox(height: 12),
-              const Text('Retale POS',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text('Connect this register to your server',
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _controller,
-                autocorrect: false,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'API base URL',
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => _save(),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!,
-                    style: const TextStyle(color: Colors.red)),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _busy ? null : _save,
-                child: _busy
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Connect'),
-              ),
-            ],
+      body: Stack(
+        children: [
+          Positioned(
+            top: 16,
+            right: 16,
+            child: const LanguageSelectorButton(),
           ),
-        ),
+          Center(
+            child: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Image.asset('assets/logo.png', height: 56),
+                  const SizedBox(height: 12),
+                  const Text('Retale POS',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(tr('setup.title'),
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _controller,
+                    autocorrect: false,
+                    keyboardType: TextInputType.url,
+                    decoration: InputDecoration(
+                      labelText: tr('setup.apiUrl'),
+                      border: const OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _save(),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_error!,
+                        style: const TextStyle(color: Colors.red)),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _busy ? null : _save,
+                    child: _busy
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(tr('setup.saveAndConnect')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

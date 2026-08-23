@@ -7,6 +7,7 @@ import 'cache/order_queue.dart';
 import 'cache/product_cache.dart';
 import 'config/app_config.dart';
 import 'graphql/graphql_service.dart';
+import 'i18n/i18n_service.dart';
 import 'screens/router_screen.dart';
 import 'sync/connectivity.dart';
 import 'sync/sync_service.dart';
@@ -15,6 +16,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Restore persisted state before the first frame.
+  await I18nService.instance.init();
   await AppConfig.instance.load();
   await TokenStore.instance.load();
   await ProductCache.instance.load();

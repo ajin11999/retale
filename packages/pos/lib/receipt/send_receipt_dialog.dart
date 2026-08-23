@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../i18n/i18n_service.dart';
 import 'receipt.dart';
 import 'receipt_service.dart';
 import 'share_launcher.dart' show ShareResult;
@@ -54,8 +55,7 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
         message: widget.receipt.toMessage(),
       );
       if (!ok) {
-        setState(() => _error =
-            'Enter a valid phone number, or check that WhatsApp is installed.');
+        setState(() => _error = tr('receipt.invalidPhoneOrNoApp'));
         return;
       }
       if (mounted) Navigator.pop(context);
@@ -80,11 +80,9 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
         case ShareResult.dismissed:
           break; // user backed out — leave the sheet open, no error
         case ShareResult.unsupported:
-          setState(() => _error =
-              "This device can't share files. Use Print, or Open WhatsApp to "
-              'send the text.');
+          setState(() => _error = tr('receipt.unsupportedShare'));
         case ShareResult.failed:
-          setState(() => _error = "Couldn't share the receipt PDF.");
+          setState(() => _error = tr('receipt.shareFailed'));
       }
     } finally {
       if (mounted) setState(() => _sharing = false);
@@ -101,10 +99,10 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Align(
+          Align(
             alignment: Alignment.centerLeft,
-            child: Text('Send receipt',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            child: Text(tr('receipt.sendReceipt'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ),
           const SizedBox(height: 12),
           ConstrainedBox(
@@ -129,10 +127,10 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
             controller: _phone,
             autofocus: true,
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'WhatsApp number',
-              helperText: 'Include the country code, e.g. 628123456789',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: tr('receipt.whatsAppNumber'),
+              helperText: tr('receipt.phoneHelper'),
+              border: const OutlineInputBorder(),
             ),
           ),
           if (_error != null) ...[
@@ -142,7 +140,7 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
           const SizedBox(height: 12),
           FilledButton.icon(
             icon: const Icon(Icons.send),
-            label: const Text('Open WhatsApp'),
+            label: Text(tr('receipt.openWhatsApp')),
             onPressed: (_busy || _sharing) ? null : _send,
           ),
           const SizedBox(height: 8),
@@ -154,13 +152,12 @@ class _SendReceiptSheetState extends State<_SendReceiptSheet> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.picture_as_pdf_outlined),
-            label: Text(_sharing ? 'Preparing PDF…' : 'Send as PDF'),
+            label: Text(_sharing ? tr('receipt.preparingPdf') : tr('receipt.sendAsPdf')),
             onPressed: (_busy || _sharing) ? null : _sharePdf,
           ),
           const SizedBox(height: 4),
           Text(
-            'Text uses the number above. “Send as PDF” opens your share sheet — '
-            'pick WhatsApp to attach the receipt.',
+            tr('receipt.sendAsPdfHelper'),
             style: TextStyle(fontSize: 11, color: scheme.outline),
           ),
         ],

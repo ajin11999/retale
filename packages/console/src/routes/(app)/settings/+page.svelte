@@ -5,6 +5,8 @@
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import LanguagePreference from "$lib/components/ui/language-preference.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -185,15 +187,17 @@
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
 </script>
 
-<svelte:head><title>Business settings · Retale Console</title></svelte:head>
+<svelte:head><title>{t("settings.title")} · Retale Console</title></svelte:head>
 
 <div class="max-w-2xl space-y-4">
   <div>
-    <h1 class="text-xl font-semibold">Business settings</h1>
+    <h1 class="text-xl font-semibold">{t("settings.title")}</h1>
     <p class="text-sm text-muted-foreground">
-      Used on purchase orders and receipts.
+      {t("settings.subtitle")}
     </p>
   </div>
+
+  <LanguagePreference />
 
   {#if error}
     <p class="text-sm text-destructive">{error}</p>
@@ -203,7 +207,7 @@
   {/if}
 
   {#if $View.fetching && !settings}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $View.errors?.length}
     <p class="text-sm text-destructive">{$View.errors[0].message}</p>
   {:else if !settings}
@@ -223,24 +227,24 @@
     </a>
 
     <section class="space-y-3 rounded-lg border bg-card p-4">
-      <h2 class="text-sm font-semibold">Identity</h2>
+      <h2 class="text-sm font-semibold">{t("settings.identity")}</h2>
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Business name</span>
+        <span class="text-sm font-medium">{t("settings.businessName")}</span>
         <Input bind:value={name} disabled={!canManage} />
       </label>
       <div class="grid grid-cols-2 gap-3">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Phone</span>
+          <span class="text-sm font-medium">{t("settings.phone")}</span>
           <Input bind:value={phone} disabled={!canManage} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Email</span>
+          <span class="text-sm font-medium">{t("settings.email")}</span>
           <Input bind:value={email} disabled={!canManage} />
         </label>
       </div>
 
       <div class="space-y-2">
-        <span class="text-sm font-medium">Logo</span>
+        <span class="text-sm font-medium">{t("settings.logo")}</span>
         <p class="text-xs text-muted-foreground">
           Shown on purchase orders. PNG, JPG, or SVG; transparent PNG or SVG
           looks best.
@@ -273,7 +277,7 @@
                 variant="outline"
                 size="sm"
                 disabled={!canManage || logoBusy}
-                onclick={removeLogo}>Remove logo</Button
+                onclick={removeLogo}>{t("settings.clearLogo")}</Button
               >
             {/if}
           </div>
@@ -283,14 +287,14 @@
 
     <section class="space-y-3 rounded-lg border bg-card p-4">
       <div>
-        <h2 class="text-sm font-semibold">Purchase order template</h2>
+        <h2 class="text-sm font-semibold">{t("settings.poTemplate")}</h2>
         <p class="text-xs text-muted-foreground">
           Wrapped around the auto-generated PO line items in WhatsApp / email
           messages.
         </p>
       </div>
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Greeting</span>
+        <span class="text-sm font-medium">{t("settings.poGreeting")}</span>
         <Textarea
           bind:value={poGreeting}
           disabled={!canManage}
@@ -299,7 +303,7 @@
         />
       </label>
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Footer</span>
+        <span class="text-sm font-medium">{t("settings.poFooter")}</span>
         <Textarea
           bind:value={poFooter}
           disabled={!canManage}
@@ -311,14 +315,14 @@
 
     <section class="space-y-3 rounded-lg border bg-card p-4">
       <div>
-        <h2 class="text-sm font-semibold">Customer receipt template</h2>
+        <h2 class="text-sm font-semibold">{t("settings.receiptTemplate")}</h2>
         <p class="text-xs text-muted-foreground">
           Wrapped around the auto-generated receipt line items when sending a sale
           to a customer over WhatsApp / email.
         </p>
       </div>
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Greeting</span>
+        <span class="text-sm font-medium">{t("settings.receiptGreeting")}</span>
         <Textarea
           bind:value={receiptGreeting}
           disabled={!canManage}
@@ -327,7 +331,7 @@
         />
       </label>
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Footer</span>
+        <span class="text-sm font-medium">{t("settings.receiptFooter")}</span>
         <Textarea
           bind:value={receiptFooter}
           disabled={!canManage}
@@ -344,7 +348,7 @@
       <Button
         size="sm"
         disabled={busy || !canManage || !name.trim()}
-        onclick={save}>Save changes</Button
+        onclick={save}>{t("settings.saveChanges")}</Button
       >
     </div>
 

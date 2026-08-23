@@ -4,6 +4,8 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import LanguagePreference from "$lib/components/ui/language-preference.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -177,15 +179,17 @@
   }
 </script>
 
-<svelte:head><title>Account · Retale Console</title></svelte:head>
+<svelte:head><title>{t("account.title")} · Retale Console</title></svelte:head>
 
 <div class="max-w-2xl space-y-6">
   <div>
-    <h1 class="text-xl font-semibold">Account</h1>
+    <h1 class="text-xl font-semibold">{t("account.title")}</h1>
     <p class="text-sm text-muted-foreground">
-      Manage your sign-in and security settings.
+      {t("account.subtitle")}
     </p>
   </div>
+
+  <LanguagePreference />
 
   {#if error}
     <p class="text-sm text-destructive">{error}</p>
@@ -195,24 +199,24 @@
   {/if}
 
   {#if $AccountMe.fetching && !me}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !me}
     <p class="text-sm text-destructive">Not signed in.</p>
   {:else}
     <!-- Identity -->
     <section class="rounded-lg border bg-card p-4">
-      <h2 class="mb-2 text-sm font-semibold">Profile</h2>
+      <h2 class="mb-2 text-sm font-semibold">{t("account.profile")}</h2>
       <dl class="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-        <dt class="text-muted-foreground">Name</dt>
+        <dt class="text-muted-foreground">{t("account.name")}</dt>
         <dd>{me.name}</dd>
-        <dt class="text-muted-foreground">Username</dt>
+        <dt class="text-muted-foreground">{t("account.username")}</dt>
         <dd class="font-mono text-xs">{me.username}</dd>
-        <dt class="text-muted-foreground">Role</dt>
+        <dt class="text-muted-foreground">{t("account.role")}</dt>
         <dd>
           {#if me.isRoot}
             <Badge class="bg-primary/10 text-primary">root</Badge>
           {:else}
-            <span class="text-muted-foreground">Standard</span>
+            <span class="text-muted-foreground">{t("account.standard")}</span>
           {/if}
         </dd>
       </dl>

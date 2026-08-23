@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
 import '../graphql/graphql_service.dart';
+import '../i18n/i18n_service.dart';
 import 'router_screen.dart';
 
 /// Completes a 2FA login with a TOTP code or a one-time recovery code.
@@ -27,7 +28,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
 
   Future<void> _verify() async {
     if (_code.text.trim().isEmpty) {
-      setState(() => _error = 'Enter your authentication code');
+      setState(() => _error = tr('auth.enterValidOtp'));
       return;
     }
     setState(() {
@@ -48,7 +49,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Two-factor verification')),
+      appBar: AppBar(title: Text(tr('auth.twoFactorTitle'))),
       body: Center(
         child: SizedBox(
           width: 320,
@@ -56,17 +57,16 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Enter the 6-digit code from your authenticator '
-                  'app, or a recovery code.'),
+              Text(tr('auth.twoFactorSubtitle')),
               const SizedBox(height: 16),
               TextField(
                 controller: _code,
                 autofocus: true,
                 keyboardType: TextInputType.text,
                 onSubmitted: (_) => _verify(),
-                decoration: const InputDecoration(
-                  labelText: 'Authentication code',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: tr('auth.twoFactorTitle'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               if (_error != null) ...[
@@ -81,7 +81,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
                         height: 18,
                         width: 18,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Verify'),
+                    : Text(tr('auth.verify')),
               ),
             ],
           ),

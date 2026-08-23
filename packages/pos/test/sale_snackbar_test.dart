@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:retale_pos/screens/register_screen.dart';
 
 void main() {
   testWidgets('sale snackbar duration is 10 seconds', (tester) async {

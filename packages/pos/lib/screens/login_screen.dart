@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../auth/auth_service.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
+import '../i18n/i18n_service.dart';
+import '../widgets/language_selector_button.dart';
 import 'router_screen.dart';
 import 'two_factor_screen.dart';
 
@@ -29,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     if (_username.text.isEmpty || _password.text.isEmpty) {
-      setState(() => _error = 'Enter a username and password');
+      setState(() => _error = tr('auth.enterCredentials'));
       return;
     }
     setState(() {
@@ -63,60 +65,69 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 320,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Image.asset('assets/logo.png', height: 56),
-              const SizedBox(height: 12),
-              const Text('Sign in',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _username,
-                autocorrect: false,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Username',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _password,
-                obscureText: true,
-                onSubmitted: (_) => _login(),
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!, style: const TextStyle(color: Colors.red)),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _busy ? null : _login,
-                child: _busy
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Log in'),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _busy ? null : _changeEndpoint,
-                child: const Text('Change server'),
-              ),
-            ],
+      body: Stack(
+        children: [
+          Positioned(
+            top: 16,
+            right: 16,
+            child: const LanguageSelectorButton(),
           ),
-        ),
+          Center(
+            child: SizedBox(
+              width: 320,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Image.asset('assets/logo.png', height: 56),
+                  const SizedBox(height: 12),
+                  Text(tr('auth.signIn'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _username,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.next,
+                    decoration: InputDecoration(
+                      labelText: tr('auth.username'),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _password,
+                    obscureText: true,
+                    onSubmitted: (_) => _login(),
+                    decoration: InputDecoration(
+                      labelText: tr('auth.password'),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _busy ? null : _login,
+                    child: _busy
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(tr('auth.logIn')),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: _busy ? null : _changeEndpoint,
+                    child: Text(tr('auth.changeServer')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

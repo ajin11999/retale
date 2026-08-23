@@ -7,7 +7,9 @@ import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
 import '../models/money.dart';
 import '../models/pos.dart';
+import '../i18n/i18n_service.dart';
 import '../widgets/common.dart';
+import '../widgets/language_selector_button.dart';
 import 'register_screen.dart';
 import 'router_screen.dart';
 
@@ -150,7 +152,12 @@ class _OpenSessionScreenState extends State<OpenSessionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Open shift')),
+      appBar: AppBar(
+        title: Text(tr('session.title')),
+        actions: const [
+          LanguageSelectorButton(iconOnly: true),
+        ],
+      ),
       body: Center(
         child: SizedBox(
           width: 320,
@@ -158,15 +165,15 @@ class _OpenSessionScreenState extends State<OpenSessionScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Count the cash in the drawer to start the shift.'),
+              Text(tr('session.enterOpeningCash')),
               const SizedBox(height: 16),
               TextField(
                 controller: _cash,
                 keyboardType: TextInputType.number,
                 inputFormatters: [ThousandsSeparatorInputFormatter()],
-                decoration: const InputDecoration(
-                  labelText: 'Opening cash float',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: tr('session.openingCash'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               if (_error != null) ...[
@@ -181,7 +188,7 @@ class _OpenSessionScreenState extends State<OpenSessionScreen> {
                         height: 18,
                         width: 18,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Open shift'),
+                    : Text(tr('session.openShift')),
               ),
             ],
           ),

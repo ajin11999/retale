@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
+import '../i18n/i18n_service.dart';
 import '../models/pos.dart';
 import '../widgets/common.dart';
 import 'router_screen.dart';
@@ -39,7 +40,7 @@ class _PosSelectionScreenState extends State<PosSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose this register')),
+      appBar: AppBar(title: Text(tr('posSelect.title'))),
       body: FutureBuilder<List<PointOfSale>>(
         future: _future,
         builder: (context, snapshot) {
@@ -54,9 +55,8 @@ class _PosSelectionScreenState extends State<PosSelectionScreen> {
           }
           final list = snapshot.data!;
           if (list.isEmpty) {
-            return const Center(
-                child: Text('No points of sale exist yet. '
-                    'Create one in the console first.'));
+            return Center(
+                child: Text(tr('posSelect.noPosAvailable')));
           }
           return ListView.separated(
             itemCount: list.length,

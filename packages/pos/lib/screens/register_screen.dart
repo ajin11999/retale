@@ -10,6 +10,7 @@ import '../cache/session_store.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
+import '../i18n/i18n_service.dart';
 import '../models/cart.dart';
 import '../models/customer.dart';
 import '../models/money.dart';
@@ -21,6 +22,7 @@ import '../receipt/send_receipt_dialog.dart';
 import '../sync/connectivity.dart';
 import '../sync/sync_service.dart';
 import '../widgets/common.dart';
+import '../widgets/language_selector_button.dart';
 import 'order_history_screen.dart';
 import 'router_screen.dart';
 
@@ -317,15 +319,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
           padding: const EdgeInsets.all(10),
           child: Image.asset('assets/logo.png'),
         ),
-        title: Text('Register · ${AppConfig.instance.posId ?? ''}'),
+        title: Text('${tr('register.title')} · ${AppConfig.instance.posId ?? ''}'),
         actions: [
+          const LanguageSelectorButton(iconOnly: true),
           IconButton(
-            tooltip: 'Refresh catalog',
+            tooltip: tr('register.refreshCatalog'),
             icon: const Icon(Icons.sync),
             onPressed: _catalogLoading ? null : _refreshCatalog,
           ),
           IconButton(
-            tooltip: 'This shift’s orders',
+            tooltip: tr('register.shiftOrders'),
             icon: const Icon(Icons.receipt_long),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
@@ -334,12 +337,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
           PopupMenuButton<String>(
             onSelected: (v) {
+              if (v == 'language') LanguageSelectorButton.showLanguageDialog(context);
               if (v == 'close') _closeShift();
               if (v == 'logout') _logout();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'close', child: Text('Close shift')),
-              PopupMenuItem(value: 'logout', child: Text('Log out')),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'language',
+                child: Row(
+                  children: [
+                    const Icon(Icons.language, size: 18),
+                    const SizedBox(width: 8),
+                    Text('${tr('common.language')} (${I18nService.instance.currentLocaleName})'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(value: 'close', child: Text(tr('register.closeShift'))),
+              PopupMenuItem(value: 'logout', child: Text(tr('register.logout'))),
             ],
           ),
         ],
