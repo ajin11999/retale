@@ -482,7 +482,7 @@
                 class="h-10 w-auto max-w-[180px] object-contain"
               />
             {:else}
-              <img src="/logo.png" alt="Retale" class="h-7 w-auto object-contain" />
+              <img src="/logo.svg" alt="Retale" class="h-7 w-auto object-contain" />
             {/if}
           </div>
 

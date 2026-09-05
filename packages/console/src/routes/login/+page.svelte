@@ -32,7 +32,7 @@
 <div class="flex min-h-screen items-center justify-center px-4">
   <div class="w-full max-w-sm rounded-lg border bg-card p-6 shadow-sm">
     <div class="mb-5 flex items-center gap-2.5">
-      <img src="/logo.png" alt="Retale" class="h-8 w-auto" />
+      <img src="/logo.svg" alt="Retale" class="h-8 w-auto" />
     </div>
 
     {#if twoFactor}

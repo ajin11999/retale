@@ -170,7 +170,7 @@
       href="/"
       class="flex h-14 items-center gap-2.5 border-b px-4 font-semibold tracking-tight transition-colors hover:text-primary"
     >
-      <img src="/logo.png" alt="Retale" class="h-6 w-auto" />
+      <img src="/logo.svg" alt="Retale" class="h-6 w-auto" />
       <span class="font-bold text-base">Retale</span>
       <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary uppercase tracking-wider">Console</span>
     </a>
