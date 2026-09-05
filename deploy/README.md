@@ -40,7 +40,7 @@ part of this stack.
    ```
 
    The api container applies DB migrations on every start (look for
-   `✓ migrations applied` in `docker compose -p retale-prod logs api`).
+    `✓ migrations applied` in `docker compose -f docker-compose.prod.yml --env-file .env.prod logs api`).
 
 5. Create the first (root) user. There is no sign-up screen and the GraphQL
    playground is disabled in production, so call the `bootstrap` mutation once
@@ -63,9 +63,9 @@ part of this stack.
    (console browsers and POS web devices). Without it, browsers show cert
    warnings and the POS PWA service worker will not register (no offline mode):
 
-   ```
-   docker compose -f docker-compose.prod.yml cp caddy:/data/caddy/pki/authorities/local/root.crt retale-root.crt
-   ```
+    ```
+    docker compose -f docker-compose.prod.yml --env-file .env.prod cp caddy:/data/caddy/pki/authorities/local/root.crt retale-root.crt
+    ```
 
    It **must** land in the *Trusted Root Certification Authorities* store. Do
    **not** use the import wizard's "Automatically select the certificate store"
@@ -101,6 +101,14 @@ part of this stack.
 
 ## Day-to-day
 
+> [!CAUTION]
+> Every `docker compose` command against this stack needs **both** `-f
+> docker-compose.prod.yml` **and** `--env-file .env.prod`. Without the env
+> file, secrets silently interpolate to empty/wrong values and the api
+> crash-loops with `Access denied` (the compose file now fails fast with
+> `missing … — pass --env-file .env.prod` instead of deploying a broken
+> stack — but only for commands that parse it, so keep the flags everywhere).
+
 These update paths are independent — run only the one(s) whose code actually
 changed. The Flutter POS/workshop bundles are built on the host, **not** by
 `up -d --build`, so an api/console deploy never rebuilds them, and a POS- or
@@ -112,16 +120,18 @@ workshop-only change needs neither `up -d --build` nor the *other* app's build.
   touch the POS or workshop web bundles.
 - **Update POS web** (only when `packages/pos` changed):
   `bun run build:pos-web`, then
-  `docker compose -f docker-compose.prod.yml up -d --build caddy` (bakes the
-  new static files into the image).
+  `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build caddy`
+  (bakes the new static files into the image).
 - **Update workshop web** (only when `packages/workshop` changed):
   `bun run build:workshop-web`, then the same `up -d --build caddy`. You do **not**
   need this if only the api/console/POS changed.
 - **Update Stockeeper APK** (only when `packages/stockeeper` changed):
   `bun run build:stockeeper-apk`, then sideload the new APK onto staff Android devices.
-- **Logs:** `docker compose -p retale-prod logs -f api` (or `console`, `caddy`).
-- **Stop:** `docker compose -p retale-prod down` — data persists in named
-  volumes (`dbdata`, `uploads`, `caddy-data`). Never `down -v` in production.
+- **Logs:** `docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api`
+  (or `console`, `caddy`).
+- **Stop:** `docker compose -f docker-compose.prod.yml --env-file .env.prod down` —
+  data persists in named volumes (`dbdata`, `uploads`, `caddy-data`). Never
+  `down -v` in production.
 - **Backups:** see the next section — the database has no cloud copy, so
   schedule `bun run backup` on the host.
 

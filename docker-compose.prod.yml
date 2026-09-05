@@ -6,7 +6,7 @@
 #   - .env.prod filled in (copy from .env.prod.example, generate real secrets)
 #   - POS + workshop web built on the host: `bun run build:pos-web` and
 #     `bun run build:workshop-web` (copied into caddy below; after
-#     rebuilding either, run `docker compose -f docker-compose.prod.yml up -d --build caddy`)
+#     rebuilding either, run `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build caddy`)
 # See deploy/README.md for client cert trust and operations.
 #
 # Explicit project name so this stack never collides with the dev
@@ -20,8 +20,11 @@ services:
     environment:
       MARIADB_DATABASE: retale
       MARIADB_USER: retale
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      # The :? guards fail fast (before any container is touched) when compose
+      # runs without --env-file .env.prod — otherwise the dev .env (or nothing)
+      # silently interpolates to empty/wrong secrets and the api crash-loops.
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?missing MARIADB_PASSWORD — pass --env-file .env.prod to compose}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?missing MARIADB_ROOT_PASSWORD — pass --env-file .env.prod to compose}
     volumes:
       - dbdata:/var/lib/mysql
     healthcheck:
@@ -37,8 +40,8 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: mysql://retale:${MARIADB_PASSWORD}@mariadb:3306/retale
-      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
-      TWO_FACTOR_ENC_KEY: ${TWO_FACTOR_ENC_KEY}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?missing JWT_SIGNING_KEY — pass --env-file .env.prod to compose}
+      TWO_FACTOR_ENC_KEY: ${TWO_FACTOR_ENC_KEY:?missing TWO_FACTOR_ENC_KEY — pass --env-file .env.prod to compose}
       # Optional — enables catalog snapshot publishing to Vercel Blob (needs
       # outbound internet). Empty disables it.
       BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}

@@ -114,8 +114,8 @@ anywhere: `docker-compose.dist.yml` and a filled-in `.env.prod`.
    docker compose -f docker-compose.dist.yml --env-file .env.prod up -d
    ```
 
-   The api applies DB migrations at startup — watch for `✓ migrations applied`
-   in `docker compose -p retale-prod logs api`.
+    The api applies DB migrations at startup — watch for `✓ migrations applied`
+    in `docker compose -f docker-compose.dist.yml --env-file .env.prod logs api`.
 
 5. **Bootstrap the first user** and **install the Caddy CA certificate on every
    client** exactly as in [`deploy/README.md`](./README.md) §5–§7. Those steps
@@ -167,10 +167,11 @@ docker compose -f docker-compose.dist.yml --env-file .env.prod up -d
 
 - **Upgrade:** set the new `RETALE_TAG` in `.env.prod`, then
   `docker compose -f docker-compose.dist.yml --env-file .env.prod pull` and
-  `... up -d`. Migrations apply automatically on api start.
-- **Logs / stop:** `docker compose -p retale-prod logs -f api`;
-  `docker compose -p retale-prod down` (data persists in named volumes — never
-  `down -v` in production).
+  `docker compose -f docker-compose.dist.yml --env-file .env.prod up -d`.
+  Migrations apply automatically on api start.
+- **Logs / stop:** `docker compose -f docker-compose.dist.yml --env-file .env.prod logs -f api`;
+  `docker compose -f docker-compose.dist.yml --env-file .env.prod down` (data
+  persists in named volumes — never `down -v` in production).
 - **Backups:** the `bun run backup/restore` wrappers need the repo + Bun. On a
   repo-less host, dump the DB directly:
   `docker exec retale-prod-mariadb-1 sh -c 'mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction retale' | gzip > retale-db.sql.gz`
