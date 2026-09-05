@@ -1,6 +1,7 @@
 import 'package:graphql_flutter/graphql_flutter.dart';
 
 import '../config/app_config.dart';
+import '../i18n/i18n_service.dart';
 
 /// Thrown when a GraphQL operation fails — network error or server `errors[]`.
 class GraphQLAppException implements Exception {
@@ -39,10 +40,12 @@ class GraphQLService {
   /// (Re)build the client against the current [AppConfig] endpoint.
   void rebuild() {
     final httpLink = HttpLink(AppConfig.instance.graphqlEndpoint);
-    final authLink = AuthLink(getToken: () async {
-      final token = await tokenProvider?.call();
-      return token == null ? null : 'Bearer $token';
-    });
+    final authLink = AuthLink(
+      getToken: () async {
+        final token = await tokenProvider?.call();
+        return token == null ? null : 'Bearer $token';
+      },
+    );
     _client = GraphQLClient(
       link: authLink.concat(httpLink),
       cache: GraphQLCache(store: InMemoryStore()),
@@ -58,11 +61,13 @@ class GraphQLService {
     String document, {
     Map<String, dynamic> variables = const {},
   }) async {
-    final result = await client.query(QueryOptions(
-      document: gql(document),
-      variables: variables,
-      fetchPolicy: FetchPolicy.networkOnly,
-    ));
+    final result = await client.query(
+      QueryOptions(
+        document: gql(document),
+        variables: variables,
+        fetchPolicy: FetchPolicy.networkOnly,
+      ),
+    );
     return _unwrap(result);
   }
 
@@ -71,10 +76,9 @@ class GraphQLService {
     String document, {
     Map<String, dynamic> variables = const {},
   }) async {
-    final result = await client.mutate(MutationOptions(
-      document: gql(document),
-      variables: variables,
-    ));
+    final result = await client.mutate(
+      MutationOptions(document: gql(document), variables: variables),
+    );
     return _unwrap(result);
   }
 
@@ -83,13 +87,13 @@ class GraphQLService {
       final ex = result.exception!;
       if (ex.linkException != null) {
         throw GraphQLAppException(
-          'Cannot reach the server. Check the connection.',
+          tr('common.cannotReachServer'),
           isNetworkError: true,
         );
       }
       final errors = ex.graphqlErrors;
       String? code;
-      var msg = 'Unknown server error';
+      var msg = tr('common.unknownServerError');
       if (errors.isNotEmpty) {
         final raw = errors.first.extensions?['code'];
         if (raw is String) code = raw;

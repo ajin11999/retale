@@ -22,6 +22,7 @@
   } from "@lucide/svelte";
   import type { PageData } from "./$types";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   let { data } = $props<{ data: PageData }>();
   const RequisitionDetail = $derived(data.RequisitionDetail);
@@ -293,7 +294,7 @@
   }
 
   async function deleteSection(id: string) {
-    if (!confirm("Remove this section? Items will be moved to unsectioned.")) return;
+    if (!confirm(t("requisitions.confirmDeleteSection"))) return;
     await DeleteSection.mutate({ id });
     await refetch();
   }
@@ -357,7 +358,7 @@
 
   async function deleteSelectedItems() {
     if (selectedItemIds.size === 0) return;
-    if (!confirm(`Delete ${selectedItemIds.size} selected items?`)) return;
+    if (!confirm(t("requisitions.confirmDeleteItems", { count: selectedItemIds.size }))) return;
     for (const id of selectedItemIds) {
       await DeleteRequisitionItem.mutate({ id });
     }
@@ -550,7 +551,7 @@
   });
 
   // --- Drag and Drop ---
-  const unsectionedGroup = { id: "unsectioned", name: "Items" };
+  const unsectionedGroup = $derived({ id: "unsectioned", name: t("common.items") });
   const dndSections = $derived(sectionOrder || [unsectionedGroup, ...sections]);
 
   function handleSectionConsider(e: CustomEvent<DndEvent>) {
@@ -665,16 +666,16 @@
 />
 
 <svelte:head>
-  <title>{requisition?.name || "Loading..."} · Purchase Requisition</title>
+  <title>{requisition?.name || t("common.loading")} · {t("requisitions.title")}</title>
 </svelte:head>
 
 {#if !requisition}
-  <div class="p-8 text-center text-muted-foreground">Loading requisition...</div>
+  <div class="p-8 text-center text-muted-foreground">{t("common.loading")}</div>
 {:else}
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <a href="/requisitions" class="text-sm text-muted-foreground hover:underline">Requisitions</a>
+        <a href="/requisitions" class="text-sm text-muted-foreground hover:underline">{t("requisitions.title")}</a>
         <span class="text-muted-foreground">/</span>
 
         {#if editingRequisitionName}
@@ -694,7 +695,7 @@
       </div>
       <div class="flex items-center gap-2 print:hidden">
         <Button variant="outline" size="sm" onclick={() => window.print()}>
-          <Printer class="mr-1.5 h-4 w-4" /> Print
+          <Printer class="mr-1.5 h-4 w-4" /> {t("common.print")}
         </Button>
       </div>
     </div>
@@ -702,29 +703,29 @@
     <div class="space-y-4 max-w-5xl">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2">
-          <h2 class="text-lg font-semibold">Requested Items</h2>
+          <h2 class="text-lg font-semibold">{t("requisitions.requestedItems")}</h2>
           <Badge class="font-normal text-xs bg-secondary text-secondary-foreground">
-            {requisition.items.length} line{requisition.items.length === 1 ? '' : 's'}
+            {t("requisitions.lines", { count: requisition.items.length })}
           </Badge>
         </div>
 
         <div class="flex items-center gap-2 print:hidden">
-          <Input type="search" placeholder="Search items..." bind:value={search} class="w-56 h-9" />
+          <Input type="search" placeholder={t("requisitions.searchItems")} bind:value={search} class="w-56 h-9" />
           {#if newSectionName !== null}
             <div class="flex items-center gap-2">
-              <Input placeholder="Section name..." bind:value={newSectionName} class="w-40 h-9 text-sm" onkeydown={(e: any) => e.key === 'Enter' && addSection()} autofocus />
-              <Button size="sm" onclick={addSection}>Save</Button>
-              <Button size="sm" variant="ghost" onclick={() => newSectionName = null}>Cancel</Button>
+              <Input placeholder={t("requisitions.sectionName")} bind:value={newSectionName} class="w-40 h-9 text-sm" onkeydown={(e: any) => e.key === 'Enter' && addSection()} autofocus />
+              <Button size="sm" onclick={addSection}>{t("common.save")}</Button>
+              <Button size="sm" variant="ghost" onclick={() => newSectionName = null}>{t("common.cancel")}</Button>
             </div>
           {:else}
             <Button variant="outline" size="sm" onclick={() => newSectionName = ""}>
-              Add section
+              {t("requisitions.addSection")}
             </Button>
             <Button variant="outline" size="sm" onclick={openBulk}>
-              <Layers class="mr-1.5 h-4 w-4" /> Add multiple
+              <Layers class="mr-1.5 h-4 w-4" /> {t("requisitions.addMultiple")}
             </Button>
             <Button variant="default" size="sm" onclick={() => openAddItem("")}>
-              <Plus class="mr-1 h-4 w-4" /> Add line
+              <Plus class="mr-1 h-4 w-4" /> {t("requisitions.addLine")}
             </Button>
           {/if}
         </div>
@@ -732,7 +733,7 @@
 
       {#if selectedItemIds.size > 0}
         <div class="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-wrap items-center gap-2.5 rounded-xl border border-primary/30 bg-card/95 px-4 py-2.5 shadow-2xl backdrop-blur-sm print:hidden" transition:fly={{ y: 12, duration: 150 }}>
-          <span class="text-xs font-semibold text-foreground">{selectedItemIds.size} item{selectedItemIds.size === 1 ? '' : 's'} selected</span>
+          <span class="text-xs font-semibold text-foreground">{t("requisitions.itemsSelected", { count: selectedItemIds.size })}</span>
 
           <div class="h-4 w-px bg-border"></div>
 
@@ -741,46 +742,46 @@
              e.currentTarget.value = "";
              if (val) moveSelectedToSection(val === "unsectioned" ? null : val);
           }}>
-             <option value="" disabled selected>Move to section...</option>
+             <option value="" disabled selected>{t("requisitions.moveToSection")}</option>
              {#each sections as sec}
                 <option value={sec.id}>{sec.name}</option>
              {/each}
-             <option value="unsectioned">— No section —</option>
+             <option value="unsectioned">{t("requisitions.noSection")}</option>
           </select>
 
-          <Button variant="destructive" size="sm" class="h-8 text-xs" onclick={deleteSelectedItems}>Delete selected</Button>
-          <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => selectedItemIds.clear()}>Clear</Button>
+          <Button variant="destructive" size="sm" class="h-8 text-xs" onclick={deleteSelectedItems}>{t("requisitions.deleteSelected")}</Button>
+          <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => selectedItemIds.clear()}>{t("common.clear")}</Button>
         </div>
       {/if}
 
       {#snippet lineForm()}
         <div class="m-3 p-4 bg-muted/20 border border-dashed rounded-lg space-y-4">
           <div class="flex items-center justify-between">
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Add Line Item</h3>
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("requisitions.addLineItem")}</h3>
             <span class="text-xs text-muted-foreground">
-              Press <kbd class="rounded border bg-background px-1 font-mono text-[10px]">Ctrl</kbd>+<kbd class="rounded border bg-background px-1 font-mono text-[10px]">Enter</kbd> to save
+              {t("requisitions.ctrlEnterToSave")}
             </span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
             <div class="md:col-span-5 space-y-1">
-              <label class="text-xs font-medium text-muted-foreground" for="variant-select">Product Variant</label>
-              <Combobox id="variant-select" options={variantOptions} bind:value={newItemVariantId} placeholder="Search variant or SKU..." />
+              <label class="text-xs font-medium text-muted-foreground" for="variant-select">{t("requisitions.productVariant")}</label>
+              <Combobox id="variant-select" options={variantOptions} bind:value={newItemVariantId} placeholder={t("requisitions.searchVariant")} />
             </div>
             {#if !newItemVariantId}
               <div class="md:col-span-4 space-y-1">
-                <label class="text-xs font-medium text-muted-foreground" for="desc-input">Non-Stock Description</label>
-                <Input id="desc-input" placeholder="Custom item name/spec..." bind:value={newItemDescription} />
+                <label class="text-xs font-medium text-muted-foreground" for="desc-input">{t("requisitions.nonStockDescription")}</label>
+                <Input id="desc-input" placeholder={t("requisitions.customItemName")} bind:value={newItemDescription} />
               </div>
             {/if}
             <div class="{newItemVariantId ? 'md:col-span-3' : 'md:col-span-2'} space-y-1">
-              <label class="text-xs font-medium text-muted-foreground" for="qty-input">Requested Qty</label>
+              <label class="text-xs font-medium text-muted-foreground" for="qty-input">{t("requisitions.requestedQty")}</label>
               <Input id="qty-input" type="number" bind:value={newItemQty} min="1" />
             </div>
             <div class="md:col-span-4 space-y-1">
-              <label class="text-xs font-medium text-muted-foreground" for="sec-select">Target Section</label>
+              <label class="text-xs font-medium text-muted-foreground" for="sec-select">{t("requisitions.targetSection")}</label>
               <select id="sec-select" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" bind:value={newItemSection}>
-                <option value="">No Section</option>
+                <option value="">{t("requisitions.noSection")}</option>
                 {#each requisition.sections as sec}
                   <option value={sec.id}>{sec.name}</option>
                 {/each}
@@ -791,14 +792,14 @@
           {#if duplicateWarning}
             <div class="flex items-center gap-2 text-xs font-medium text-amber-700 bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-md">
               <AlertTriangle class="h-4 w-4 shrink-0 text-amber-600" />
-              <span>This variant is already on the requisition!</span>
+              <span>{t("requisitions.alreadyOnRequisition")}</span>
             </div>
           {/if}
 
           <div class="flex justify-end gap-2 pt-1 border-t border-border/50">
-            <Button variant="ghost" size="sm" onclick={() => showAddItem = false}>Cancel</Button>
+            <Button variant="ghost" size="sm" onclick={() => showAddItem = false}>{t("common.cancel")}</Button>
             <Button size="sm" onclick={saveItem} disabled={adding}>
-              {adding ? "Saving..." : "Save Line Item"}
+              {adding ? t("common.saving") : t("requisitions.saveLineItem")}
             </Button>
           </div>
         </div>
@@ -825,7 +826,7 @@
                          <span class="font-semibold text-foreground cursor-pointer hover:text-primary transition-colors flex items-center gap-2" onclick={() => startRenameSection(section.id, section.name)}>
                            {section.name}
                            <Badge class="font-normal text-xs py-0 px-1.5 bg-background border">
-                             {groupedItems[section.id]?.length || 0} line{(groupedItems[section.id]?.length || 0) === 1 ? '' : 's'}
+                             {t("requisitions.lines", { count: groupedItems[section.id]?.length || 0 })}
                            </Badge>
                          </span>
                        {/if}
@@ -844,11 +845,11 @@
                       <tr>
                         <th class="w-8 py-2.5 pl-3 print:hidden"></th>
                         <th class="w-8 py-2.5 pr-2 print:hidden"></th>
-                        <th class="px-4 py-2.5 w-36">SKU</th>
-                        <th class="px-4 py-2.5">Product Name</th>
-                        <th class="px-4 py-2.5 text-right w-28">Requested</th>
-                        <th class="px-4 py-2.5 text-right w-24">Ordered</th>
-                        <th class="px-4 py-2.5 text-right w-28">Remaining</th>
+                        <th class="px-4 py-2.5 w-36">{t("common.sku")}</th>
+                        <th class="px-4 py-2.5">{t("requisitions.productName")}</th>
+                        <th class="px-4 py-2.5 text-right w-28">{t("requisitions.requested")}</th>
+                        <th class="px-4 py-2.5 text-right w-24">{t("requisitions.orderedQty")}</th>
+                        <th class="px-4 py-2.5 text-right w-28">{t("requisitions.remainingQty")}</th>
                         <th class="w-12 py-2.5 pr-3 text-right print:hidden"></th>
                       </tr>
                     </thead>
@@ -873,7 +874,7 @@
                                 class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               />
                             {:else if !item.variantId}
-                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 text-left hover:bg-muted text-foreground transition-colors" title="Click to edit description" onclick={() => startCellEdit(item, "desc")}>
+                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 text-left hover:bg-muted text-foreground transition-colors" title={t("purchaseDetail.editDescription")} onclick={() => startCellEdit(item, "desc")}>
                                 {item.variantName}
                               </button>
                             {:else}
@@ -890,7 +891,7 @@
                                 class="h-7 w-20 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ml-auto"
                               />
                             {:else}
-                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 hover:bg-muted font-medium tabular-nums transition-colors" title="Click to edit quantity" onclick={() => startCellEdit(item, "qty")}>
+                              <button type="button" class="-mx-1 rounded px-1.5 py-0.5 hover:bg-muted font-medium tabular-nums transition-colors" title={t("purchaseDetail.editQuantity")} onclick={() => startCellEdit(item, "qty")}>
                                 {item.qtyRequested}
                               </button>
                             {/if}
@@ -917,13 +918,13 @@
                         </tr>
                       {/each}
                       {#if groupedItems[section.id].length === 0}
-                        <tr><td colspan="8" class="px-4 py-6 text-center text-muted-foreground text-xs">No items in this section yet.</td></tr>
+                        <tr><td colspan="8" class="px-4 py-6 text-center text-muted-foreground text-xs">{t("requisitions.noItemsInSection")}</td></tr>
                       {/if}
                       {#if section.id !== "unsectioned" && !showAddItem}
                         <tr class="hover:bg-muted/20 border-t group">
                           <td colspan="8" class="p-0">
                             <button class="w-full text-left px-4 py-2 text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-1.5" onclick={() => openAddItem(section.id)}>
-                              <Plus class="h-3.5 w-3.5" /> Add line to {section.name}
+                              <Plus class="h-3.5 w-3.5" /> {t("requisitions.addLineToSection", { section: section.name })}
                             </button>
                           </td>
                         </tr>
@@ -956,12 +957,12 @@
       class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl overflow-hidden"
       role="dialog"
       aria-modal="true"
-      aria-label="Add multiple lines"
+      aria-label={t("requisitions.addMultipleLines")}
     >
       <div class="flex items-center justify-between border-b px-5 py-3.5">
         <div class="flex items-center gap-2">
           <Layers class="h-4 w-4 text-primary" />
-          <h2 class="text-base font-semibold">Add multiple lines</h2>
+          <h2 class="text-base font-semibold">{t("requisitions.addMultipleLines")}</h2>
         </div>
         <Button variant="ghost" size="icon" class="h-8 w-8" onclick={closeBulk}>
           <X class="h-4 w-4" />
@@ -970,24 +971,24 @@
 
       <div class="flex border-b bg-muted/20 px-5">
         <button class={tabClass("reorder")} onclick={() => (bulkTab = "reorder")}>
-          Reorder Suggestions
+          {t("requisitions.reorderSuggestions")}
         </button>
         <button class={tabClass("stock")} onclick={() => (bulkTab = "stock")}>
-          By Stock Catalog
+          {t("requisitions.byStockCatalog")}
         </button>
       </div>
 
       <div class="flex-1 overflow-auto px-5 py-4 space-y-3">
         {#if bulkTab === "reorder"}
           <p class="text-xs text-muted-foreground">
-            Open reorder suggestions from inventory low-stock alerts. Adding them appends them to this requisition and marks them converted.
+            {t("requisitions.reorderSubtitle")}
           </p>
 
           {#if $ReorderSuggestionsQuery.fetching && suggestions.length === 0}
-            <p class="py-12 text-center text-sm text-muted-foreground">Loading suggestions...</p>
+            <p class="py-12 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
           {:else if reorderRows.length === 0}
             <p class="py-12 text-center text-sm text-muted-foreground">
-              No open reorder suggestions. Run a scan on the Reorder screen to generate them.
+              {t("requisitions.noOpenSuggestions")}
             </p>
           {:else}
             <div class="rounded-lg border overflow-hidden">
@@ -995,11 +996,11 @@
                 <thead class="bg-muted/40 border-b text-left text-xs font-semibold text-muted-foreground">
                   <tr>
                     <th class="w-10 px-3 py-2.5 text-center"></th>
-                    <th class="px-4 py-2.5 font-semibold">Product</th>
-                    <th class="px-4 py-2.5 text-right font-semibold">Stock</th>
-                    <th class="px-4 py-2.5 text-right font-semibold">Reorder Point</th>
-                    <th class="px-4 py-2.5 font-semibold">Vendor</th>
-                    <th class="px-4 py-2.5 w-32 font-semibold">Order Qty</th>
+                    <th class="px-4 py-2.5 font-semibold">{t("common.product")}</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">{t("stock.onHand")}</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">{t("requisitions.reorderPoint")}</th>
+                    <th class="px-4 py-2.5 font-semibold">{t("vendors.vendor")}</th>
+                    <th class="px-4 py-2.5 w-32 font-semibold">{t("requisitions.orderQty")}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y">
@@ -1042,24 +1043,24 @@
             <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search by product name or SKU..."
+              placeholder={t("requisitions.searchProduct")}
               bind:value={stockSearch}
               class="pl-9"
             />
           </div>
 
           {#if stockVisible.length === 0}
-            <p class="py-12 text-center text-sm text-muted-foreground">No matching product variants found.</p>
+            <p class="py-12 text-center text-sm text-muted-foreground">{t("requisitions.noMatchingVariants")}</p>
           {:else}
             <div class="rounded-lg border overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="bg-muted/40 border-b text-left text-xs font-semibold text-muted-foreground">
                   <tr>
                     <th class="w-10 px-3 py-2.5 text-center"></th>
-                    <th class="px-4 py-2.5 font-semibold">SKU</th>
-                    <th class="px-4 py-2.5 font-semibold">Variant Name</th>
-                    <th class="px-4 py-2.5 text-right font-semibold">Stock</th>
-                    <th class="px-4 py-2.5 w-32 font-semibold text-right">Requested Qty</th>
+                    <th class="px-4 py-2.5 font-semibold">{t("common.sku")}</th>
+                    <th class="px-4 py-2.5 font-semibold">{t("requisitions.variantName")}</th>
+                    <th class="px-4 py-2.5 text-right font-semibold">{t("stock.onHand")}</th>
+                    <th class="px-4 py-2.5 w-32 font-semibold text-right">{t("requisitions.requestedQty")}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y">
@@ -1092,7 +1093,7 @@
             </div>
             {#if stockTruncated}
               <p class="text-center text-xs text-muted-foreground">
-                Showing top {STOCK_CAP} low-stock results — refine search for more.
+                {t("requisitions.showingTopLowStock", { count: STOCK_CAP })}
               </p>
             {/if}
           {/if}
@@ -1101,17 +1102,17 @@
 
       <div class="flex items-center justify-between border-t bg-muted/10 px-5 py-3">
         <span class="text-xs font-medium text-muted-foreground">
-          {bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount} item{(bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount) === 1 ? '' : 's'} selected
+          {t("requisitions.itemsSelected", { count: bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount })}
         </span>
         <div class="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onclick={closeBulk}>Cancel</Button>
+          <Button variant="ghost" size="sm" onclick={closeBulk}>{t("common.cancel")}</Button>
           {#if bulkTab === "reorder"}
             <Button
               size="sm"
               disabled={adding || reorderSelectedCount === 0}
               onclick={addReorderSelected}
             >
-              {adding ? "Adding..." : `Add ${reorderSelectedCount} to Requisition`}
+              {adding ? t("common.saving") : t("requisitions.addToRequisition", { count: reorderSelectedCount })}
             </Button>
           {:else}
             <Button
@@ -1119,7 +1120,7 @@
               disabled={adding || stockSelectedCount === 0}
               onclick={addStockSelected}
             >
-              {adding ? "Adding..." : `Add ${stockSelectedCount} to Requisition`}
+              {adding ? t("common.saving") : t("requisitions.addToRequisition", { count: stockSelectedCount })}
             </Button>
           {/if}
         </div>

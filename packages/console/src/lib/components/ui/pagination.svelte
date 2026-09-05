@@ -2,6 +2,7 @@
   import { ChevronLeft, ChevronRight } from "@lucide/svelte";
   import Button from "./button.svelte";
   import { cn } from "$lib/utils";
+  import { t } from "$lib/i18n";
   
   let {
     page = $bindable(1),
@@ -21,7 +22,7 @@
 {#if totalPages > 1}
   <div class={cn("flex items-center justify-between", className)}>
     <div class="text-sm text-muted-foreground">
-      Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, totalItems)} of {totalItems} entries
+      {t("common.showing", { from: (page - 1) * pageSize + 1, to: Math.min(page * pageSize, totalItems), total: totalItems })}
     </div>
     <div class="flex items-center space-x-4">
       <Button
@@ -31,11 +32,11 @@
         onclick={() => page -= 1}
       >
         <ChevronLeft class="h-4 w-4" />
-        <span class="sr-only">Previous page</span>
+        <span class="sr-only">{t("common.previousPage")}</span>
       </Button>
       
       <div class="text-sm font-medium">
-        Page {page} of {totalPages}
+        {t("common.page", { current: page, total: totalPages })}
       </div>
 
       <Button
@@ -45,7 +46,7 @@
         onclick={() => page += 1}
       >
         <ChevronRight class="h-4 w-4" />
-        <span class="sr-only">Next page</span>
+        <span class="sr-only">{t("common.nextPage")}</span>
       </Button>
     </div>
   </div>

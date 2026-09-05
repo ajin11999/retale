@@ -80,7 +80,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// it only swaps in the saved carts when nothing has been rung yet.
   Future<void> _restoreCarts() async {
     final posId = AppConfig.instance.posId;
-    final restored = posId == null ? null : await CartStore.instance.load(posId);
+    final restored =
+        posId == null ? null : await CartStore.instance.load(posId);
     if (!mounted) {
       restored?.dispose();
       return;
@@ -108,8 +109,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// Global key handler for the register. Only acts while the register is the
   /// frontmost route, so F9 doesn't re-fire behind an open dialog or sheet.
   bool _handleKey(KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.f9) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.f9) {
       return false;
     }
     if (ModalRoute.of(context)?.isCurrent != true) return false;
@@ -173,19 +173,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final n = cart.lines.length;
       final discard = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Close ${_register.labelFor(index)}?'),
-          content: Text(
-              'This cart has $n item${n == 1 ? '' : 's'}. Closing discards them.'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Keep')),
-            FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Discard')),
-          ],
-        ),
+        builder:
+            (ctx) => AlertDialog(
+              title: Text(
+                tr('register.closeCartTitle', {
+                  'name': _register.labelFor(index),
+                }),
+              ),
+              content: Text(tr('register.closeCartBody', {'count': n})),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(tr('register.keep')),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(tr('register.discard')),
+                ),
+              ],
+            ),
       );
       if (discard != true) return;
     }
@@ -198,26 +204,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final controller = TextEditingController(text: cart.label ?? '');
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Name cart'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          onSubmitted: (v) => Navigator.pop(ctx, v),
-          decoration: const InputDecoration(
-            hintText: 'e.g. John, Table 4, Wholesale',
-            border: OutlineInputBorder(),
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(tr('register.nameCartTitle')),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+              decoration: InputDecoration(
+                hintText: tr('register.cartNameHint'),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(tr('common.cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, controller.text),
+                child: Text(tr('common.save')),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text),
-              child: const Text('Save')),
-        ],
-      ),
     );
     if (name != null) cart.rename(name);
   }
@@ -240,49 +249,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final controller = TextEditingController(text: '0');
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Close shift'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (expected != null) ...[
-              Text(
-                'Drawer should hold ${Money.format(expected)}',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-            ],
-            const Text('Count the cash in the drawer to close the shift.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              inputFormatters: [ThousandsSeparatorInputFormatter()],
-              decoration: const InputDecoration(
-                labelText: 'Closing cash count',
-                border: OutlineInputBorder(),
-              ),
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(tr('register.closeShift')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (expected != null) ...[
+                  Text(
+                    tr('session.drawerShouldHold', {
+                      'amount': Money.format(expected),
+                    }),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Text(tr('session.countCashToClose')),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
+                  decoration: InputDecoration(
+                    labelText: tr('session.closingCashCount'),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Close shift')),
-        ],
-      ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(tr('common.cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(tr('register.closeShift')),
+              ),
+            ],
+          ),
     );
     if (confirmed != true) return;
     try {
-      await GraphQLService.instance.mutate(Ops.closeSession, variables: {
-        'id': widget.session.id,
-        'closingCashMinor': Money.parse(controller.text),
-      });
+      await GraphQLService.instance.mutate(
+        Ops.closeSession,
+        variables: {
+          'id': widget.session.id,
+          'closingCashMinor': Money.parse(controller.text),
+        },
+      );
       // The shift is closed server-side; drop the offline-resume cache so the
       // next launch can't reopen the register on a dead session.
       final posId = AppConfig.instance.posId;
@@ -300,8 +319,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -310,74 +330,92 @@ class _RegisterScreenState extends State<RegisterScreen> {
       // Ctrl+P reprints the last completed sale. Works on the Windows/Linux
       // desktop register; on web the browser may claim the shortcut first.
       bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.keyP, control: true): () =>
-            _printLastSale(),
+        const SingleActivator(LogicalKeyboardKey.keyP, control: true):
+            () => _printLastSale(),
       },
       child: Scaffold(
-      appBar: AppBar(
-        leading: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Image.asset('assets/logo.png'),
-        ),
-        title: Text('${tr('register.title')} · ${AppConfig.instance.posId ?? ''}'),
-        actions: [
-          const LanguageSelectorButton(iconOnly: true),
-          IconButton(
-            tooltip: tr('register.refreshCatalog'),
-            icon: const Icon(Icons.sync),
-            onPressed: _catalogLoading ? null : _refreshCatalog,
+        appBar: AppBar(
+          leading: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Image.asset('assets/logo.png'),
           ),
-          IconButton(
-            tooltip: tr('register.shiftOrders'),
-            icon: const Icon(Icons.receipt_long),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) =>
-                  OrderHistoryScreen(posSessionId: widget.session.id),
-            )),
+          title: Text(
+            '${tr('register.title')} · ${AppConfig.instance.posId ?? ''}',
           ),
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'language') LanguageSelectorButton.showLanguageDialog(context);
-              if (v == 'close') _closeShift();
-              if (v == 'logout') _logout();
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'language',
-                child: Row(
-                  children: [
-                    const Icon(Icons.language, size: 18),
-                    const SizedBox(width: 8),
-                    Text('${tr('common.language')} (${I18nService.instance.currentLocaleName})'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(value: 'close', child: Text(tr('register.closeShift'))),
-              PopupMenuItem(value: 'logout', child: Text(tr('register.logout'))),
-            ],
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
-          child: _StatusBar(connectivity: _connectivity, sync: _sync),
-        ),
-      ),
-      body: AnimatedBuilder(
-        animation: _register,
-        builder: (context, _) => Row(
-          children: [
-            _CartRail(
-              register: _register,
-              onRename: _renameCart,
-              onClose: _closeCart,
+          actions: [
+            const LanguageSelectorButton(iconOnly: true),
+            IconButton(
+              tooltip: tr('register.refreshCatalog'),
+              icon: const Icon(Icons.sync),
+              onPressed: _catalogLoading ? null : _refreshCatalog,
             ),
-            const VerticalDivider(width: 1),
-            Expanded(flex: 3, child: _buildCatalog()),
-            const VerticalDivider(width: 1),
-            Expanded(flex: 2, child: _buildCart()),
+            IconButton(
+              tooltip: tr('register.shiftOrders'),
+              icon: const Icon(Icons.receipt_long),
+              onPressed:
+                  () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => OrderHistoryScreen(
+                            posSessionId: widget.session.id,
+                          ),
+                    ),
+                  ),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'language')
+                  LanguageSelectorButton.showLanguageDialog(context);
+                if (v == 'close') _closeShift();
+                if (v == 'logout') _logout();
+              },
+              itemBuilder:
+                  (_) => [
+                    PopupMenuItem(
+                      value: 'language',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.language, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${tr('common.language')} (${I18nService.instance.currentLocaleName})',
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'close',
+                      child: Text(tr('register.closeShift')),
+                    ),
+                    PopupMenuItem(
+                      value: 'logout',
+                      child: Text(tr('register.logout')),
+                    ),
+                  ],
+            ),
           ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(28),
+            child: _StatusBar(connectivity: _connectivity, sync: _sync),
+          ),
         ),
-      ),
+        body: AnimatedBuilder(
+          animation: _register,
+          builder:
+              (context, _) => Row(
+                children: [
+                  _CartRail(
+                    register: _register,
+                    onRename: _renameCart,
+                    onClose: _closeCart,
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(flex: 3, child: _buildCatalog()),
+                  const VerticalDivider(width: 1),
+                  Expanded(flex: 2, child: _buildCart()),
+                ],
+              ),
+        ),
       ),
     );
   }
@@ -391,10 +429,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
             controller: _searchController,
             autofocus: true,
             onChanged: _onSearchChanged,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search name, SKU or scan a barcode',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: tr('register.searchHint'),
+              border: const OutlineInputBorder(),
             ),
           ),
         ),
@@ -416,13 +454,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
-        children: items
-            .map((p) => ActionChip(
-                  avatar: const Icon(Icons.add, size: 18),
-                  label: Text(p.publicDisplayName),
-                  onPressed: () => _pickOpenPrice(p),
-                ))
-            .toList(),
+        children:
+            items
+                .map(
+                  (p) => ActionChip(
+                    avatar: const Icon(Icons.add, size: 18),
+                    label: Text(p.publicDisplayName),
+                    onPressed: () => _pickOpenPrice(p),
+                  ),
+                )
+                .toList(),
       ),
     );
   }
@@ -434,31 +475,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
     num submit() => Money.parse(controller.text);
     final priceMinor = await showDialog<num>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(product.publicDisplayName),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [ThousandsSeparatorInputFormatter()],
-          onSubmitted: (_) => Navigator.pop(ctx, submit()),
-          decoration: const InputDecoration(
-            labelText: 'Price',
-            border: OutlineInputBorder(),
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(product.publicDisplayName),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
+              onSubmitted: (_) => Navigator.pop(ctx, submit()),
+              decoration: InputDecoration(
+                labelText: tr('register.price'),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(tr('common.cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, submit()),
+                child: Text(tr('register.add')),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, submit()),
-              child: const Text('Add')),
-        ],
-      ),
     );
     if (priceMinor != null && priceMinor > 0) {
-      _register.active.addOpenPrice(product, product.variants.first, priceMinor);
+      _register.active.addOpenPrice(
+        product,
+        product.variants.first,
+        priceMinor,
+      );
     }
   }
 
@@ -468,7 +516,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     final results = _cache.search(_query);
     if (results.isEmpty) {
-      return const Center(child: Text('No matching products'));
+      return Center(child: Text(tr('register.noMatchingProducts')));
     }
     return ListView.separated(
       itemCount: results.length,
@@ -476,9 +524,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       itemBuilder: (context, i) {
         final product = results[i];
         final first = product.variants.isEmpty ? null : product.variants.first;
-        final priceLabel = product.variants.length == 1 && first != null
-            ? Money.format(first.priceMinor)
-            : '${product.variants.length} variants';
+        final priceLabel =
+            product.variants.length == 1 && first != null
+                ? Money.format(first.priceMinor)
+                : tr('register.variantsCount', {
+                  'count': product.variants.length,
+                });
         return ListTile(
           title: Text(product.publicDisplayName),
           subtitle: Text(
@@ -489,8 +540,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               fontFamily: 'monospace',
             ),
           ),
-          trailing: Text(priceLabel,
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          trailing: Text(
+            priceLabel,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           onTap: () => _pickProduct(product),
         );
       },
@@ -504,26 +557,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Column(
       children: [
         Expanded(
-          child: cart.isEmpty
-              ? const Center(child: Text('Cart is empty'))
-              : ListView.builder(
-                  itemCount: cart.lines.length,
-                  itemBuilder: (context, i) =>
-                      _CartLineTile(cart: cart, line: cart.lines[i]),
-                ),
+          child:
+              cart.isEmpty
+                  ? Center(child: Text(tr('register.cartEmpty')))
+                  : ListView.builder(
+                    itemCount: cart.lines.length,
+                    itemBuilder:
+                        (context, i) =>
+                            _CartLineTile(cart: cart, line: cart.lines[i]),
+                  ),
         ),
         const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
           child: Row(
             children: [
-              const Text('Total', style: TextStyle(fontSize: 18)),
+              Text(tr('register.total'), style: const TextStyle(fontSize: 18)),
               const Spacer(),
-              Text(Money.format(cart.totalMinor),
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold)),
+              Text(
+                Money.format(cart.totalMinor),
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               IconButton(
-                tooltip: 'Margin breakdown',
+                tooltip: tr('register.marginBreakdown'),
                 icon: const Icon(Icons.insights_outlined),
                 onPressed: cart.isEmpty ? null : () => _showMargins(cart),
               ),
@@ -536,7 +595,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             width: double.infinity,
             child: FilledButton.icon(
               icon: const Icon(Icons.payments),
-              label: const Text('Charge · F9'),
+              label: Text(tr('register.charge')),
               onPressed: cart.isEmpty ? null : _checkout,
             ),
           ),
@@ -547,7 +606,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             width: double.infinity,
             child: OutlinedButton.icon(
               icon: const Icon(Icons.assignment_return),
-              label: const Text('Return'),
+              label: Text(tr('register.return')),
               onPressed: cart.isEmpty ? null : _startReturnFromCart,
             ),
           ),
@@ -564,15 +623,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (cart.isEmpty) return;
       // Snapshot the lines and total now: a completed sale clears the cart right
       // after, but the receipt (offered below) still needs them.
-      final lines = cart.lines
-          .map((l) => ReceiptLine(
-                name: l.displayName,
-                qty: l.qty,
-                unitPriceMinor: l.unitPriceMinor,
-                lineTotalMinor: l.lineTotalMinor,
-                unit: l.variant.unit,
-              ))
-          .toList();
+      final lines =
+          cart.lines
+              .map(
+                (l) => ReceiptLine(
+                  name: l.displayName,
+                  qty: l.qty,
+                  unitPriceMinor: l.unitPriceMinor,
+                  lineTotalMinor: l.lineTotalMinor,
+                  unit: l.variant.unit,
+                ),
+              )
+              .toList();
       final totalMinor = cart.totalMinor;
       final outcome = await showDialog<_CheckoutOutcome>(
         context: context,
@@ -636,28 +698,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
         variables: {'variantIds': demand.keys.toList(), 'limit': 50},
       );
       candidates =
-          (data['ordersForReturn'] as List<dynamic>).cast<Map<String, dynamic>>();
+          (data['ordersForReturn'] as List<dynamic>)
+              .cast<Map<String, dynamic>>();
     } on GraphQLAppException catch (e) {
-      _toast(e.isNetworkError
-          ? 'Returns need a connection — you appear to be offline'
-          : e.message);
+      _toast(
+        e.isNetworkError ? tr('register.returnNeedsConnection') : e.message,
+      );
       return;
     }
     if (!mounted) return;
     if (candidates.isEmpty) {
-      _toast('No past order contains these items');
+      _toast(tr('register.noReturnOrder'));
       return;
     }
-    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => ReturnOrderPicker(
-        candidates: candidates,
-        demand: demand,
-        posSessionId: widget.session.id,
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder:
+            (_) => ReturnOrderPicker(
+              candidates: candidates,
+              demand: demand,
+              posSessionId: widget.session.id,
+            ),
       ),
-    ));
+    );
     if (done == true && mounted) {
       _register.active.clear();
-      _toast('Return recorded');
+      _toast(tr('history.returnRecorded'));
     }
   }
 
@@ -669,21 +735,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// prints locally, it just hasn't synced to the server yet.
   void _announceSale(_CompletedSale sale, {bool queued = false}) {
     if (!mounted) return;
-    final label = queued
-        ? 'Sale queued — offline, will sync when reconnected'
-        : 'Sale completed · ${sale.displayNumber ?? 'recorded'}';
+    final label =
+        queued
+            ? tr('register.saleQueued')
+            : tr('register.saleCompleted', {
+              'number': sale.displayNumber ?? tr('register.recorded'),
+            });
     ScaffoldMessenger.of(context)
       // Replace any prior sale's lingering alert rather than queueing behind it.
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(label),
-        duration: const Duration(seconds: 10),
-        showCloseIcon: true,
-        action: SnackBarAction(
-          label: 'Receipt',
-          onPressed: () => _openReceiptActions(sale),
+      ..showSnackBar(
+        SnackBar(
+          content: Text(label),
+          duration: const Duration(seconds: 10),
+          showCloseIcon: true,
+          action: SnackBarAction(
+            label: tr('receipt.receipt'),
+            onPressed: () => _openReceiptActions(sale),
+          ),
         ),
-      ));
+      );
   }
 
   /// Fetch the store header and assemble a [Receipt] for [sale].
@@ -713,30 +784,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.print_outlined),
-              title: const Text('Print receipt'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _print(receipt);
-              },
+      builder:
+          (ctx) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.print_outlined),
+                  title: Text(tr('receipt.print')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _print(receipt);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.chat_outlined),
+                  title: Text(tr('receipt.sendWhatsApp')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    showSendReceiptDialog(
+                      context,
+                      receipt: receipt,
+                      phone: sale.customer?.phone,
+                    );
+                  },
+                ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.chat_outlined),
-              title: const Text('Send via WhatsApp'),
-              onTap: () {
-                Navigator.pop(ctx);
-                showSendReceiptDialog(context,
-                    receipt: receipt, phone: sale.customer?.phone);
-              },
-            ),
-          ],
-        ),
-      ),
+          ),
     );
   }
 
@@ -744,7 +819,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _printLastSale() async {
     final sale = _lastSale;
     if (sale == null) {
-      _toast('No recent sale to print');
+      _toast(tr('register.noRecentSale'));
       return;
     }
     final receipt = await _receiptFor(sale);
@@ -757,9 +832,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _print(Receipt receipt) async {
     try {
       final printed = await ReceiptService.instance.printReceipt(receipt);
-      if (!printed) _toast('Opened the receipt PDF — print it from there');
+      if (!printed) _toast(tr('register.openedPdf'));
     } catch (e) {
-      _toast('Could not print the receipt: $e');
+      _toast(tr('register.printFailed', {'error': '$e'}));
     }
   }
 
@@ -789,8 +864,8 @@ class _StatusBar extends StatelessWidget {
         final pending = sync.pendingCount;
         final color = online ? Colors.green.shade700 : Colors.orange.shade800;
         final parts = <String>[
-          online ? 'Online' : 'Offline',
-          if (pending > 0) '$pending queued',
+          online ? tr('register.onlineMode') : tr('register.offlineMode'),
+          if (pending > 0) tr('register.pendingQueued', {'count': pending}),
         ];
         return Container(
           width: double.infinity,
@@ -834,7 +909,7 @@ class _CartRail extends StatelessWidget {
         itemBuilder: (context, i) {
           if (i == register.count) {
             return IconButton(
-              tooltip: 'New cart',
+              tooltip: tr('register.newCart'),
               icon: const Icon(Icons.add),
               onPressed: register.addCart,
             );
@@ -848,31 +923,41 @@ class _CartRail extends StatelessWidget {
             child: Container(
               color: selected ? scheme.primaryContainer : null,
               padding: const EdgeInsets.only(
-                  top: 8, bottom: 12, left: 4, right: 4),
+                top: 8,
+                bottom: 12,
+                left: 4,
+                right: 4,
+              ),
               child: Column(
                 children: [
                   // The ⋮ menu lives only on the active cart — left-click works
                   // everywhere (touch, mouse), unlike right-click/long-press.
                   SizedBox(
                     height: 24,
-                    child: selected
-                        ? PopupMenuButton<String>(
-                            padding: EdgeInsets.zero,
-                            iconSize: 18,
-                            tooltip: '',
-                            icon: const Icon(Icons.more_vert),
-                            onSelected: (choice) {
-                              if (choice == 'rename') onRename(i);
-                              if (choice == 'close') onClose(i);
-                            },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                  value: 'rename', child: Text('Rename')),
-                              PopupMenuItem(
-                                  value: 'close', child: Text('Close')),
-                            ],
-                          )
-                        : null,
+                    child:
+                        selected
+                            ? PopupMenuButton<String>(
+                              padding: EdgeInsets.zero,
+                              iconSize: 18,
+                              tooltip: '',
+                              icon: const Icon(Icons.more_vert),
+                              onSelected: (choice) {
+                                if (choice == 'rename') onRename(i);
+                                if (choice == 'close') onClose(i);
+                              },
+                              itemBuilder:
+                                  (_) => [
+                                    PopupMenuItem(
+                                      value: 'rename',
+                                      child: Text(tr('register.rename')),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'close',
+                                      child: Text(tr('common.close')),
+                                    ),
+                                  ],
+                            )
+                            : null,
                   ),
                   Text(
                     register.labelFor(i),
@@ -880,13 +965,18 @@ class _CartRail extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal),
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
                   if (n > 0)
-                    Text('$n item${n == 1 ? '' : 's'}',
-                        style: TextStyle(
-                            fontSize: 10, color: scheme.onSurfaceVariant)),
+                    Text(
+                      tr('register.itemCount', {'count': n}),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -917,7 +1007,7 @@ class _CartLineTile extends StatelessWidget {
             const SizedBox(width: 4),
           ],
           Text(
-            '${Money.format(line.unitPriceMinor)} each'
+            '${Money.format(line.unitPriceMinor)} ${tr('register.each')}'
             '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}',
           ),
         ],
@@ -936,9 +1026,11 @@ class _CartLineTile extends StatelessWidget {
           ),
           SizedBox(
             width: 80,
-            child: Text(Money.format(line.lineTotalMinor),
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            child: Text(
+              Money.format(line.lineTotalMinor),
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -950,81 +1042,91 @@ class _CartLineTile extends StatelessWidget {
   /// drops the override, reverting to the base price. Prefilled with plain
   /// (non-grouped) numbers so they parse back cleanly.
   Future<void> _edit(BuildContext context) async {
-    final priceController =
-        TextEditingController(text: Money.format(line.unitPriceMinor));
+    final priceController = TextEditingController(
+      text: Money.format(line.unitPriceMinor),
+    );
     final qtyController = TextEditingController(text: '${line.qty}');
     final action = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(line.displayName),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: priceController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [ThousandsSeparatorInputFormatter()],
-              onSubmitted: (_) => Navigator.pop(ctx, 'save'),
-              decoration: const InputDecoration(
-                labelText: 'Unit price',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Live cost/margin preview so the price can be tuned to a target
-            // margin without leaving the dialog.
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: priceController,
-              builder: (ctx, value, _) {
-                final price = Money.parse(value.text);
-                final cost = line.unitCostForPrice(price);
-                final margin = price - cost;
-                final pct = price == 0
-                    ? '—'
-                    : '${(margin / price * 100).toStringAsFixed(0)}%';
-                final scheme = Theme.of(ctx).colorScheme;
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Cost ${Money.format(cost)}   ·   '
-                    'Margin ${Money.format(margin)} ($pct)',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          margin < 0 ? scheme.error : scheme.onSurfaceVariant,
-                    ),
+      builder:
+          (ctx) => AlertDialog(
+            title: Text(line.displayName),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: priceController,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
+                  onSubmitted: (_) => Navigator.pop(ctx, 'save'),
+                  decoration: InputDecoration(
+                    labelText: tr('register.unitPrice'),
+                    border: const OutlineInputBorder(),
                   ),
-                );
-              },
+                ),
+                const SizedBox(height: 8),
+                // Live cost/margin preview so the price can be tuned to a target
+                // margin without leaving the dialog.
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: priceController,
+                  builder: (ctx, value, _) {
+                    final price = Money.parse(value.text);
+                    final cost = line.unitCostForPrice(price);
+                    final margin = price - cost;
+                    final pct =
+                        price == 0
+                            ? '—'
+                            : '${(margin / price * 100).toStringAsFixed(0)}%';
+                    final scheme = Theme.of(ctx).colorScheme;
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${tr('register.costValue', {'value': Money.format(cost)})}'
+                        '   ·   '
+                        '${tr('register.marginValue', {'value': Money.format(margin)})}'
+                        ' ($pct)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                              margin < 0
+                                  ? scheme.error
+                                  : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: qtyController,
+                  keyboardType: TextInputType.number,
+                  onSubmitted: (_) => Navigator.pop(ctx, 'save'),
+                  decoration: InputDecoration(
+                    labelText: tr('register.quantity'),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: qtyController,
-              keyboardType: TextInputType.number,
-              onSubmitted: (_) => Navigator.pop(ctx, 'save'),
-              decoration: const InputDecoration(
-                labelText: 'Quantity',
-                border: OutlineInputBorder(),
+            actions: [
+              // Open-price lines have no base price to revert to, so no reset.
+              if (line.overridePriceMinor != null &&
+                  line.product.kind != 'open_price')
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'reset'),
+                  child: Text(tr('register.resetPrice')),
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: Text(tr('common.cancel')),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          // Open-price lines have no base price to revert to, so no reset.
-          if (line.overridePriceMinor != null &&
-              line.product.kind != 'open_price')
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, 'reset'),
-                child: const Text('Reset price')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, 'save'),
-              child: const Text('Save')),
-        ],
-      ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, 'save'),
+                child: Text(tr('common.save')),
+              ),
+            ],
+          ),
     );
     if (action == null) return;
     final qty = int.tryParse(qtyController.text.trim()) ?? line.qty;
@@ -1059,23 +1161,26 @@ class _VariantPicker extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(product.publicDisplayName,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+            child: Text(
+              product.publicDisplayName,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
           ),
-          ...product.variants.map((v) => ListTile(
-                title: Text(v.label ?? v.sku),
-                subtitle: Text(
-                  v.sku,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                    fontFamily: 'monospace',
-                  ),
+          ...product.variants.map(
+            (v) => ListTile(
+              title: Text(v.label ?? v.sku),
+              subtitle: Text(
+                v.sku,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                  fontFamily: 'monospace',
                 ),
-                trailing: Text(Money.format(v.priceMinor)),
-                onTap: () => Navigator.pop(context, v),
-              )),
+              ),
+              trailing: Text(Money.format(v.priceMinor)),
+              onTap: () => Navigator.pop(context, v),
+            ),
+          ),
         ],
       ),
     );
@@ -1099,13 +1204,14 @@ class _CartDetailSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Cart detail',
-                  style:
-                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: Text(
+                tr('register.cartDetail'),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
           Flexible(
@@ -1120,9 +1226,9 @@ class _CartDetailSheet extends StatelessWidget {
                   dense: true,
                   title: Text('${line.displayName}  ×${line.qty}'),
                   subtitle: Text(
-                    'Revenue ${Money.format(line.lineTotalMinor)}'
-                    '   ·   Cost ${Money.format(line.lineCostMinor)}\n'
-                    'Each ${Money.format(line.unitMarginMinor)} margin'
+                    '${tr('register.revenueValue', {'value': Money.format(line.lineTotalMinor)})}'
+                    '   ·   ${tr('register.costValue', {'value': Money.format(line.lineCostMinor)})}\n'
+                    '${tr('register.eachMarginValue', {'value': Money.format(line.unitMarginMinor)})}'
                     '   (${_pct(line.unitMarginFraction)})',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
@@ -1138,12 +1244,14 @@ class _CartDetailSheet extends StatelessWidget {
                           color: negative ? scheme.error : null,
                         ),
                       ),
-                      Text(_pct(line.marginFraction),
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: negative
-                                  ? scheme.error
-                                  : scheme.onSurfaceVariant)),
+                      Text(
+                        _pct(line.marginFraction),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                              negative ? scheme.error : scheme.onSurfaceVariant,
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -1155,16 +1263,23 @@ class _CartDetailSheet extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _summaryRow(context, 'Revenue', Money.format(cart.totalMinor)),
+                _summaryRow(
+                  context,
+                  tr('register.revenue'),
+                  Money.format(cart.totalMinor),
+                ),
                 const SizedBox(height: 4),
                 _summaryRow(
-                    context, 'Cost', Money.format(cart.totalCostMinor)),
+                  context,
+                  tr('register.cost'),
+                  Money.format(cart.totalCostMinor),
+                ),
                 const SizedBox(height: 8),
                 _summaryRow(
                   context,
-                  'Margin',
+                  tr('register.margin'),
                   '${Money.format(cart.totalMarginMinor)}'
-                      '   (${_pct(cart.marginFraction)})',
+                  '   (${_pct(cart.marginFraction)})',
                   emphasize: true,
                 ),
               ],
@@ -1175,11 +1290,16 @@ class _CartDetailSheet extends StatelessWidget {
     );
   }
 
-  Widget _summaryRow(BuildContext context, String label, String value,
-      {bool emphasize = false}) {
-    final style = emphasize
-        ? const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
-        : const TextStyle(fontSize: 15);
+  Widget _summaryRow(
+    BuildContext context,
+    String label,
+    String value, {
+    bool emphasize = false,
+  }) {
+    final style =
+        emphasize
+            ? const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+            : const TextStyle(fontSize: 15);
     return Row(
       children: [
         Text(label, style: style),
@@ -1270,10 +1390,9 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     } on GraphQLAppException catch (e) {
       setState(() {
         if (onAccount && e.isNetworkError) {
-          _error =
-              'On-account sales need a connection — retry once online, or take cash.';
+          _error = tr('register.onAccountNeedsConnection');
         } else if (e.message.contains('CREDIT_LIMIT_EXCEEDED')) {
-          _error = "This would exceed the customer's credit limit.";
+          _error = tr('register.creditLimitExceeded');
         } else {
           _error = e.message;
         }
@@ -1286,7 +1405,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Charge'),
+      title: Text(tr('register.chargeTitle')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1301,15 +1420,23 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      _customer?.name ?? 'Walk-in customer',
+                      _customer?.name ?? tr('register.walkInCustomer'),
                       style: TextStyle(
-                          color: _customer == null
-                              ? Theme.of(context).hintColor
-                              : null),
+                        color:
+                            _customer == null
+                                ? Theme.of(context).hintColor
+                                : null,
+                      ),
                     ),
                   ),
-                  Text(_customer == null ? 'Add' : 'Change',
-                      style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                  Text(
+                    _customer == null
+                        ? tr('register.add')
+                        : tr('register.change'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1318,20 +1445,26 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
             Padding(
               padding: const EdgeInsets.only(left: 28),
               child: Text(
-                'Balance ${Money.format(_customer!.balanceMinor)}'
-                '${_customer!.creditLimitMinor != null ? '  ·  Limit ${Money.format(_customer!.creditLimitMinor!)}' : ''}',
+                '${tr('register.balance', {'value': Money.format(_customer!.balanceMinor)})}'
+                '${_customer!.creditLimitMinor != null ? '  ·  ${tr('register.creditLimit', {'value': Money.format(_customer!.creditLimitMinor!)})}' : ''}',
                 style: TextStyle(
-                    fontSize: 12, color: Theme.of(context).hintColor),
+                  fontSize: 12,
+                  color: Theme.of(context).hintColor,
+                ),
               ),
             ),
           const Divider(),
           Row(
             children: [
-              const Text('Total due'),
+              Text(tr('register.totalDue')),
               const Spacer(),
-              Text(Money.format(widget.cart.totalMinor),
-                  style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(
+                Money.format(widget.cart.totalMinor),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1347,28 +1480,36 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
             onSubmitted: (_) {
               if (!_busy && _balanceMinor >= 0) _submit(onAccount: false);
             },
-            decoration: const InputDecoration(
-              labelText: 'Cash tendered',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: tr('register.cashTendered'),
+              border: const OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 8),
-          Builder(builder: (context) {
-            final balance = _balanceMinor;
-            final settled = balance >= 0;
-            final color = settled
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.error;
-            return Row(
-              children: [
-                Text(settled ? 'Change' : 'Still due'),
-                const Spacer(),
-                Text(Money.format(balance),
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, color: color)),
-              ],
-            );
-          }),
+          Builder(
+            builder: (context) {
+              final balance = _balanceMinor;
+              final settled = balance >= 0;
+              final color =
+                  settled
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.error;
+              return Row(
+                children: [
+                  Text(
+                    settled
+                        ? tr('register.changeLabel')
+                        : tr('register.stillDue'),
+                  ),
+                  const Spacer(),
+                  Text(
+                    Money.format(balance),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                  ),
+                ],
+              );
+            },
+          ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -1378,7 +1519,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
       actions: [
         TextButton(
           onPressed: _busy ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(tr('common.cancel')),
         ),
         // Under-tendered with a customer attached: the remainder can go on
         // their account (the server posts a sale_on_account ledger entry and
@@ -1386,23 +1527,32 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
         if (_customer != null && _balanceMinor < 0)
           FilledButton.tonal(
             onPressed: _busy ? null : () => _submit(onAccount: true),
-            child: _busy
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : Text('Put ${Money.format(-_balanceMinor)} on account'),
+            child:
+                _busy
+                    ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                    : Text(
+                      tr('register.putOnAccount', {
+                        'amount': Money.format(-_balanceMinor),
+                      }),
+                    ),
           ),
         FilledButton(
-          onPressed: _busy || _balanceMinor < 0
-              ? null
-              : () => _submit(onAccount: false),
-          child: _busy && _balanceMinor >= 0
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Complete sale'),
+          onPressed:
+              _busy || _balanceMinor < 0
+                  ? null
+                  : () => _submit(onAccount: false),
+          child:
+              _busy && _balanceMinor >= 0
+                  ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                  : Text(tr('register.completeSale')),
         ),
       ],
     );
@@ -1509,16 +1659,16 @@ class _CustomerPickerState extends State<_CustomerPicker> {
             controller: _controller,
             autofocus: true,
             onChanged: _onChanged,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search customer name or phone',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: tr('register.searchCustomerHint'),
+              border: const OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 8),
           ListTile(
             leading: const Icon(Icons.person_off_outlined),
-            title: const Text('Walk-in (no customer)'),
+            title: Text(tr('register.walkInNoCustomer')),
             onTap: () => Navigator.pop(context, _walkIn),
           ),
           const Divider(height: 1),
@@ -1536,9 +1686,11 @@ class _CustomerPickerState extends State<_CustomerPicker> {
                 final results = snapshot.data!;
                 if (results.isEmpty) {
                   return Center(
-                    child: Text(_query.isEmpty
-                        ? 'No customers yet'
-                        : 'No matching customers'),
+                    child: Text(
+                      _query.isEmpty
+                          ? tr('register.noCustomers')
+                          : tr('register.noMatchingCustomers'),
+                    ),
                   );
                 }
                 return ListView.separated(
@@ -1549,9 +1701,10 @@ class _CustomerPickerState extends State<_CustomerPicker> {
                     return ListTile(
                       title: Text(c.name),
                       subtitle: c.hasPhone ? Text(c.phone!) : null,
-                      trailing: c.hasPhone
-                          ? const Icon(Icons.chat_outlined, size: 18)
-                          : null,
+                      trailing:
+                          c.hasPhone
+                              ? const Icon(Icons.chat_outlined, size: 18)
+                              : null,
                       onTap: () => Navigator.pop(context, c),
                     );
                   },

@@ -5,6 +5,7 @@ import 'package:printing/printing.dart';
 import '../config/app_config.dart';
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
+import '../i18n/i18n_service.dart';
 import 'receipt.dart';
 import 'receipt_pdf.dart';
 import 'share_launcher.dart';
@@ -87,7 +88,8 @@ class ReceiptService {
     final digits = normalizePhone(phone);
     if (digits == null) return false;
     final uri = Uri.parse(
-        'https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
+      'https://wa.me/$digits?text=${Uri.encodeComponent(message)}',
+    );
     return openExternal(uri);
   }
 
@@ -101,16 +103,21 @@ class ReceiptService {
   /// shared, so the caller can fall back to printing.
   Future<ShareResult> shareReceiptPdf(Receipt receipt) async {
     final logo = await _logoImage(receipt.store);
-    final bytes = await buildReceiptPdf(receipt, PdfPageFormat.roll80, logo: logo);
-    final label = receipt.displayNumber == null
-        ? 'Receipt'
-        : 'Receipt ${receipt.displayNumber}';
+    final bytes = await buildReceiptPdf(
+      receipt,
+      PdfPageFormat.roll80,
+      logo: logo,
+    );
+    final label =
+        receipt.displayNumber == null
+            ? tr('receipt.receipt')
+            : tr('receipt.receiptNumber', {'number': receipt.displayNumber!});
     return shareReceiptFile(
       bytes: bytes,
       filename: '${label.replaceAll(' ', '-')}.pdf',
       mimeType: 'application/pdf',
       title: label,
-      text: '$label — see the attached PDF.',
+      text: tr('receipt.shareText', {'label': label}),
     );
   }
 
@@ -123,17 +130,21 @@ class ReceiptService {
   /// PDF so the cashier can still print it, and return false so the caller can
   /// tell the user what happened. Throws if the PDF itself can't be built.
   Future<bool> printReceipt(Receipt receipt) async {
-    final name = receipt.displayNumber == null
-        ? 'Receipt'
-        : 'Receipt ${receipt.displayNumber}';
+    final name =
+        receipt.displayNumber == null
+            ? tr('receipt.receipt')
+            : tr('receipt.receiptNumber', {'number': receipt.displayNumber!});
     final logo = await _logoImage(receipt.store);
     final printed = await Printing.layoutPdf(
       name: name,
       onLayout: (format) => buildReceiptPdf(receipt, format, logo: logo),
     );
     if (!printed) {
-      final bytes =
-          await buildReceiptPdf(receipt, PdfPageFormat.roll80, logo: logo);
+      final bytes = await buildReceiptPdf(
+        receipt,
+        PdfPageFormat.roll80,
+        logo: logo,
+      );
       await Printing.sharePdf(bytes: bytes, filename: '$name.pdf');
     }
     return printed;

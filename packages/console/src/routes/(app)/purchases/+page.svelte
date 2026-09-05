@@ -3,7 +3,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -56,7 +57,7 @@
 
   // Searchable vendor picker options; empty value = ad-hoc vendor.
   const vendorOptions = $derived([
-    { value: "", label: "— Ad-hoc vendor —" },
+    { value: "", label: t("purchases.adHocVendor") },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -120,7 +121,7 @@
     if (!d || !d.date) return;
     // A purchase needs either a vendor on file or an ad-hoc vendor name.
     if (!d.vendorId && !d.adHocName.trim()) {
-      error = "Pick a vendor or enter an ad-hoc vendor name.";
+      error = t("purchases.errorVendorRequired");
       return;
     }
     busy = true;
@@ -145,16 +146,16 @@
   }
 </script>
 
-<svelte:head><title>Purchases · Retale Console</title></svelte:head>
+<svelte:head><title>{t("purchases.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Purchases</h1>
+    <h1 class="text-xl font-semibold">{t("purchases.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="w-56">
         <Input
           type="search"
-          placeholder="Search vendor…"
+          placeholder={t("purchases.searchVendor")}
           bind:value={search}
         />
       </div>
@@ -164,12 +165,12 @@
             class="rounded px-3 py-1.5 text-sm font-medium capitalize transition-colors {statusFilter === s ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'}"
             onclick={() => statusFilter = s}
           >
-            {s === "all" ? "All" : s}
+            {t(`purchases.status.${s}`)}
           </button>
         {/each}
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={startNew}>
-        New purchase
+        {t("purchases.newPurchase")}
       </Button>
     </div>
   </div>
@@ -180,26 +181,26 @@
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">New purchase</h2>
+      <h2 class="text-sm font-semibold">{t("purchases.newPurchase")}</h2>
       <div class="grid grid-cols-3 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Vendor</span>
+          <span class="text-sm font-medium">{t("common.vendor")}</span>
           <Combobox
             options={vendorOptions}
             bind:value={draft.vendorId}
-            placeholder="Search vendor…"
+            placeholder={t("purchases.searchVendor")}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Ad-hoc vendor name</span>
+          <span class="text-sm font-medium">{t("purchases.adHocVendorName")}</span>
           <Input
             bind:value={draft.adHocName}
-            placeholder="Used when no vendor picked"
+            placeholder={t("purchases.vendorPlaceholder")}
             disabled={draft.vendorId !== ""}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Date</span>
+          <span class="text-sm font-medium">{t("common.date")}</span>
           <Input type="date" bind:value={draft.date} />
         </label>
       </div>
@@ -208,17 +209,17 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button size="sm" disabled={busy} onclick={createPurchase}>
-          Create &amp; edit
+          {t("purchases.createAndEdit")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $PurchaseList.fetching && purchases.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $PurchaseList.errors?.length}
     <p class="text-sm text-destructive">{$PurchaseList.errors[0].message}</p>
   {:else}
@@ -226,11 +227,11 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Vendor</th>
-            <th class="px-4 py-2 font-medium">Date</th>
-            <th class="px-4 py-2 text-right font-medium">Invoice total</th>
-            <th class="px-4 py-2 font-medium">Status</th>
-            <th class="px-4 py-2 font-medium">Sent</th>
+            <th class="px-4 py-2 font-medium">{t("common.vendor")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.date")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("purchases.invoiceTotal")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
+            <th class="px-4 py-2 font-medium">{t("purchases.sent")}</th>
           </tr>
         </thead>
         <tbody>
@@ -249,18 +250,18 @@
                 {formatMoney(p.totalInvoiceCost)}
               </td>
               <td class="px-4 py-2">
-                <Badge class={statusClass(p.status)}>{statusLabel(p.status)}</Badge>
+                <Badge class={statusClass(p.status)}>{t(`purchases.status.${p.status}`)}</Badge>
               </td>
               <td class="px-4 py-2">
                 {#if p.lastSentAt}
                   {fmtDate(p.lastSentAt)}
                   {#if p.hasUnsentChanges}
                     <Badge class="ml-1 bg-amber-100 text-amber-800">
-                      unsent edits
+                      {t("purchases.unsentEdits")}
                     </Badge>
                   {/if}
                 {:else}
-                  <span class="text-muted-foreground">Not sent</span>
+                  <span class="text-muted-foreground">{t("purchases.notSent")}</span>
                 {/if}
               </td>
             </tr>
@@ -269,8 +270,12 @@
             <tr>
               <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
                 {search.trim()
-                  ? "No purchases match."
-                  : `No purchases${statusFilter === "all" ? "" : ` (${statusFilter})`}.`}
+                  ? t("purchases.noPurchasesMatch")
+                  : (statusFilter === "all"
+                      ? t("purchases.noPurchases")
+                      : t("purchases.noPurchasesStatus", {
+                          status: t(`purchases.status.${statusFilter}`),
+                        }))}
               </td>
             </tr>
           {/if}
@@ -279,7 +284,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} purchase{rows.length === 1 ? "" : "s"}
+        {t("purchases.purchaseCount", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

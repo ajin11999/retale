@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { marked } from "marked";
   import { Pencil, SlidersHorizontal, Trash2 } from "@lucide/svelte";
-  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
+  import { formatMoney, treePathMap } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import type { Viewer } from "../../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
@@ -16,6 +16,7 @@
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -292,12 +293,12 @@
   // Combobox options: a leading "Uncategorized" row (empty value) so the
   // category can be cleared, then one row per category.
   const categoryOptions = $derived([
-    { value: "", label: "Uncategorized" },
+    { value: "", label: t("products.uncategorized") },
     ...categories.map((c) => ({ value: c.id, label: categoryPaths.get(c.id) ?? c.name })),
   ]);
   const interchangeGroups = $derived($ProductDetail.data?.interchangeGroups ?? []);
   const interchangeGroupOptions = $derived([
-    { value: "", label: "— None —" },
+    { value: "", label: t("products.none") },
     ...interchangeGroups.map((g) => ({ value: g.id, label: g.name })),
   ]);
   const locations = $derived($ProductDetail.data?.locations ?? []);
@@ -305,7 +306,7 @@
   // under different parents are distinguishable.
   const locationPaths = $derived(treePathMap(locations));
   const locationName = (id: string | null) =>
-    id ? (locationPaths.get(id) ?? "Unknown") : "Unlocated";
+    id ? (locationPaths.get(id) ?? t("products.unknown")) : t("products.unlocated");
 
   // ---- Viewer permissions --------------------------------------------------
   // The API gates product writes, with extra keys for tax / price / cost.
@@ -392,7 +393,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("products.saved", { label }) };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -404,7 +405,7 @@
 
   async function saveProduct() {
     if (!product) return;
-    await run("Product", () =>
+    await run(t("common.product"), () =>
       UpdateProduct.mutate({
         id: product.id,
         name: form.name,
@@ -428,7 +429,7 @@
 
   async function toggleArchived() {
     if (!product) return;
-    await run("Product", () =>
+    await run(t("common.product"), () =>
       SetArchived.mutate({ id: product.id, archived: product.archivedAt == null }),
     );
   }
@@ -483,7 +484,7 @@
     const d = variantDraft;
     if (!d || !product) return;
 
-    const ok = await run("Variant", async () => {
+    const ok = await run(t("products.variant"), async () => {
       if (d.id) {
         return UpdateVariant.mutate({
           id: d.id,
@@ -530,8 +531,8 @@
   }
 
   async function deleteVariant(id: string) {
-    if (!product || !confirm("Delete this variant?")) return;
-    const ok = await run("Variant", () => DeleteVariant.mutate({ id }));
+    if (!product || !confirm(t("products.confirmDeleteVariant"))) return;
+    const ok = await run(t("products.variant"), () => DeleteVariant.mutate({ id }));
     if (ok)
       await ProductDetail.fetch({
         variables: { id: product.id },
@@ -590,7 +591,7 @@
         policy: CachePolicy.NetworkOnly,
       });
       closeBulkVariantDialog();
-      feedback = { ok: true, text: `Bulk added ${labels.length} variant${labels.length === 1 ? '' : 's'}.` };
+      feedback = { ok: true, text: t("products.bulkVariantsAdded", { count: labels.length }) };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
       closeBulkVariantDialog();
@@ -655,7 +656,7 @@
     if (c.field === "sku") {
       const s = variantCellStr.trim();
       if (!s) {
-        feedback = { ok: false, text: "SKU can't be empty." };
+        feedback = { ok: false, text: t("products.skuEmpty") };
         return;
       }
       if (s === v.sku) {
@@ -719,7 +720,7 @@
   }
 
   const categoryName = (id: string | null | undefined) =>
-    id ? (categoryPaths.get(id) ?? "Unknown") : "Uncategorized";
+    id ? (categoryPaths.get(id) ?? t("products.unknown")) : t("products.uncategorized");
 
   // ---- Variant margin pill -------------------------------------------------
   // Gross margin = (price − cost) / price, ignoring tax. Computed live: when a
@@ -789,7 +790,7 @@
   async function saveStockAdjustment() {
     const d = stockDraft;
     if (!d || !product || !d.qtyDelta || !d.reason.trim()) return;
-    const ok = await run("Stock", () =>
+    const ok = await run(t("products.stock"), () =>
       AdjustStock.mutate({
         variantId: d.variantId,
         locationId: d.locationId || null,
@@ -914,11 +915,11 @@
     if (d.rows.some((r) => !Number.isInteger(r.qty) || r.qty < 1)) {
       feedback = {
         ok: false,
-        text: "Component quantities must be positive whole numbers.",
+        text: t("products.componentQtyError"),
       };
       return;
     }
-    const ok = await run("Bundle", () =>
+    const ok = await run(t("products.bundle"), () =>
       SetBundleComponents.mutate({
         bundleVariantId: d.variantId,
         components: d.rows.map((r) => ({
@@ -972,13 +973,13 @@
         });
         if (!res.ok) {
           const text = await res.text();
-          feedback = { ok: false, text: `Upload failed: ${text}` };
+          feedback = { ok: false, text: t("products.uploadFailed", { text }) };
           return;
         }
       }
       feedback = {
         ok: true,
-        text: `Uploaded ${files.length} image${files.length === 1 ? "" : "s"}.`,
+        text: t("products.uploadedImages", { count: files.length }),
       };
       await ProductDetail.fetch({
         variables: { id: product.id },
@@ -995,8 +996,8 @@
   }
 
   async function removeImage(id: string) {
-    if (!product || !confirm("Delete this image?")) return;
-    const ok = await run("Image", () => DeleteProductImage.mutate({ id }));
+    if (!product || !confirm(t("products.confirmDeleteImage"))) return;
+    const ok = await run(t("products.image"), () => DeleteProductImage.mutate({ id }));
     if (ok)
       await ProductDetail.fetch({
         variables: { id: product.id },
@@ -1009,7 +1010,7 @@
   // server's setProductCatalogSettings ignores omitted fields.
   async function toggleOnlineVisible() {
     if (!product) return;
-    const ok = await run("Catalog", () =>
+    const ok = await run(t("products.catalog"), () =>
       SetProductCatalogSettings.mutate({
         id: product.id,
         onlineVisible: !product.onlineVisible,
@@ -1020,7 +1021,7 @@
 
   async function setOnlinePriceMode(mode: string) {
     if (!product || mode === product.onlinePriceMode) return;
-    const ok = await run("Catalog", () =>
+    const ok = await run(t("products.catalog"), () =>
       SetProductCatalogSettings.mutate({
         id: product.id,
         onlinePriceMode: mode as never,
@@ -1031,7 +1032,7 @@
 
   async function setOnlineStockMode(mode: string) {
     if (!product || mode === product.onlineStockMode) return;
-    const ok = await run("Catalog", () =>
+    const ok = await run(t("products.catalog"), () =>
       SetProductCatalogSettings.mutate({
         id: product.id,
         onlineStockMode: mode as never,
@@ -1051,7 +1052,7 @@
     const target = idx + direction;
     if (idx < 0 || target < 0 || target >= ordered.length) return;
     [ordered[idx], ordered[target]] = [ordered[target], ordered[idx]];
-    const ok = await run("Image order", () =>
+    const ok = await run(t("products.imageOrder"), () =>
       ReorderProductImages.mutate({
         productId: product.id,
         orderedIds: ordered,
@@ -1066,24 +1067,24 @@
 </script>
 
 <svelte:head>
-  <title>{product ? product.name : "Product"} · Retale Console</title>
+  <title>{t("productDetail.pageTitle", { name: product ? product.name : t("common.product") })}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6">
   <a href="/products" class="text-sm text-muted-foreground hover:text-foreground"
-    >← Back to products</a
+    >{t("products.backToProductsList")}</a
   >
 
   {#if $ProductDetail.fetching && !product}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !product}
-    <p class="text-sm text-destructive">Product not found.</p>
+    <p class="text-sm text-destructive">{t("products.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">{product.name}</h1>
         <p class="text-sm text-muted-foreground">
-          {categoryName(product.categoryId)} · {statusLabel(product.kind)}
+          {categoryName(product.categoryId)} · {t(`products.kind.${product.kind}`)}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -1092,7 +1093,7 @@
             ? "bg-muted text-muted-foreground"
             : "bg-emerald-100 text-emerald-700"}
         >
-          {product.archivedAt ? "Archived" : "Active"}
+          {product.archivedAt ? t("common.archived") : t("common.active")}
         </Badge>
         <Button
           variant="outline"
@@ -1100,7 +1101,7 @@
           disabled={busy || !canArchive}
           onclick={toggleArchived}
         >
-          {product.archivedAt ? "Restore" : "Archive"}
+          {product.archivedAt ? t("products.restore") : t("products.archive")}
         </Button>
       </div>
     </div>
@@ -1115,17 +1116,17 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        You have read-only access to products — editing is disabled.
+        {t("products.readOnlyNotice")}
       </p>
     {/if}
 
     <!-- Product details -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Details</h2>
+      <h2 class="text-sm font-semibold">{t("products.details")}</h2>
 
       <div class="grid grid-cols-2 gap-4">
         <label class="relative space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={form.name} disabled={!canEdit} />
           <DuplicateHint
             query={form.name}
@@ -1135,33 +1136,33 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Public name</span>
+          <span class="text-sm font-medium">{t("products.publicName")}</span>
           <Input
             bind:value={form.publicName}
-            placeholder="Falls back to name"
+            placeholder={t("products.publicNameHint")}
             disabled={!canEdit}
           />
         </label>
       </div>
 
       <div class="space-y-1">
-        <span class="text-sm font-medium">Description</span>
+        <span class="text-sm font-medium">{t("common.description")}</span>
         <div class="grid grid-cols-2 gap-3">
           <Textarea
             bind:value={form.description}
             disabled={!canEdit}
-            placeholder="Markdown supported…"
+            placeholder={t("products.markdownHint")}
             class="h-48 resize-none"
           />
           <div
             class="md-preview h-48 overflow-auto rounded-md border bg-muted/30 px-3 py-2 text-sm"
-            aria-label="Description preview"
+            aria-label={t("products.descriptionPreview")}
           >
             {#if form.description.trim()}
               <!-- eslint-disable-next-line svelte/no-at-html-tags -->
               {@html descriptionHtml}
             {:else}
-              <span class="text-muted-foreground">Nothing to preview.</span>
+              <span class="text-muted-foreground">{t("products.nothingToPreview")}</span>
             {/if}
           </div>
         </div>
@@ -1169,44 +1170,44 @@
 
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Kind</span>
+          <span class="text-sm font-medium">{t("products.kind")}</span>
           <Select bind:value={form.kind} disabled={!canEdit}>
-            {#each KINDS as k (k)}<option value={k}>{statusLabel(k)}</option>{/each}
+            {#each KINDS as k (k)}<option value={k}>{t(`products.kind.${k}`)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Category</span>
+          <span class="text-sm font-medium">{t("common.category")}</span>
           <Combobox
             options={categoryOptions}
             bind:value={form.categoryId}
-            placeholder="Search category…"
+            placeholder={t("products.searchCategory")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Price mode</span>
+          <span class="text-sm font-medium">{t("products.priceMode")}</span>
           <Select bind:value={form.priceMode} disabled={!canEdit || !canEditTax}>
-            {#each PRICE_MODES as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
+            {#each PRICE_MODES as m (m)}<option value={m}>{t(`products.priceMode.${m}`)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Tax rate (basis points)</span>
+          <span class="text-sm font-medium">{t("products.taxRate")}</span>
           <NumericInput
             bind:value={form.taxRateBps}
             disabled={!canEdit || !canEditTax}
           />
           {#if canEdit && !canEditTax}
             <span class="text-xs text-muted-foreground"
-              >Requires the product.edit_tax permission.</span
+              >{t("products.requiresTaxPermission")}</span
             >
           {/if}
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min qty</span>
+          <span class="text-sm font-medium">{t("products.minQty")}</span>
           <NumericInput bind:value={form.minQty} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min margin (%)</span>
+          <span class="text-sm font-medium">{t("products.minMargin")}</span>
           <NumericInput
             step="0.1"
             value={bpsToPct(form.minMarginBps)}
@@ -1217,7 +1218,7 @@
         </label>
         {#if form.kind === "open_price"}
           <label class="space-y-1">
-            <span class="text-sm font-medium">Cost ratio (%)</span>
+            <span class="text-sm font-medium">{t("products.costRatio")}</span>
             <NumericInput
               step="0.1"
               value={bpsToPct(form.costRatioBps)}
@@ -1226,15 +1227,13 @@
               disabled={!canEdit}
             />
             <span class="text-xs text-muted-foreground"
-              >Assumed cost as % of the entered sale price.</span
+              >{t("products.costRatioHint")}</span
             >
           </label>
         {/if}
         {#if form.kind === "non_stock"}
           <p class="col-span-2 text-xs text-muted-foreground">
-            Cost-tracked, no stock — sells at a real price (overridable at the
-            register) with its cost auto-maintained from purchases/landed cost.
-            For resale-priced items like fasteners.
+            {t("products.nonStockHint")}
           </p>
         {/if}
       </div>
@@ -1245,12 +1244,12 @@
           bind:checked={form.replenishMonitored}
           disabled={!canEdit}
         />
-        <span class="text-sm font-medium">Monitored by the reorder forecast</span>
+        <span class="text-sm font-medium">{t("products.replenishMonitored")}</span>
       </label>
 
       <div class="flex justify-end pt-2">
         <Button disabled={busy || !canEdit} onclick={saveProduct}>
-          Save details
+          {t("products.saveDetails")}
         </Button>
       </div>
     </section>
@@ -1258,7 +1257,7 @@
     <!-- Online catalog -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Online catalog</h2>
+        <h2 class="text-sm font-semibold">{t("products.onlineCatalog")}</h2>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -1266,12 +1265,12 @@
             disabled={busy || !canManageCatalog}
             onchange={toggleOnlineVisible}
           />
-          Visible on the live catalog
+          {t("products.onlineVisible")}
         </label>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Price display</span>
+          <span class="text-sm font-medium">{t("products.priceDisplay")}</span>
           <Select
             value={product.onlinePriceMode}
             disabled={busy || !canManageCatalog}
@@ -1280,11 +1279,11 @@
                 (e.currentTarget as HTMLSelectElement).value,
               )}
           >
-            {#each PRICE_MODES_ONLINE as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
+            {#each PRICE_MODES_ONLINE as m (m)}<option value={m}>{t(`products.onlinePriceMode.${m}`)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Stock display</span>
+          <span class="text-sm font-medium">{t("products.stockDisplay")}</span>
           <Select
             value={product.onlineStockMode}
             disabled={busy || !canManageCatalog}
@@ -1293,18 +1292,17 @@
                 (e.currentTarget as HTMLSelectElement).value,
               )}
           >
-            {#each STOCK_MODES_ONLINE as m (m)}<option value={m}>{statusLabel(m)}</option>{/each}
+            {#each STOCK_MODES_ONLINE as m (m)}<option value={m}>{t(`products.onlineStockMode.${m}`)}</option>{/each}
           </Select>
         </label>
       </div>
       {#if !canManageCatalog}
         <p class="text-xs text-muted-foreground">
-          Requires the catalog.manage permission. Changes take effect on the
-          next publish.
+          {t("products.requiresCatalogPermission")}
         </p>
       {:else}
         <p class="text-xs text-muted-foreground">
-          Changes take effect on the next publish.
+          {t("products.catalogPublishNote")}
         </p>
       {/if}
     </section>
@@ -1313,7 +1311,7 @@
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold">
-          Images ({product.images.length})
+          {t("products.imagesCount", { count: product.images.length })}
         </h2>
         <div>
           <input
@@ -1329,15 +1327,14 @@
             disabled={uploading || !canEdit}
             onclick={pickImages}
           >
-            {uploading ? "Uploading…" : "Upload images"}
+            {uploading ? t("products.uploading") : t("products.uploadImages")}
           </Button>
         </div>
       </div>
 
       {#if product.images.length === 0}
         <p class="text-sm text-muted-foreground">
-          No images yet. The first image you upload becomes the catalog
-          thumbnail.
+          {t("products.noImages")}
         </p>
       {:else}
         <div class="grid grid-cols-4 gap-3">
@@ -1355,7 +1352,7 @@
                 <span
                   class="absolute left-1 top-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground"
                 >
-                  Primary
+                  {t("products.primary")}
                 </span>
               {/if}
               {#if canEdit}
@@ -1368,14 +1365,14 @@
                       class="rounded bg-background/90 px-1.5 py-0.5 text-xs shadow disabled:opacity-30"
                       disabled={busy || i === 0}
                       onclick={() => moveImage(img.id, -1)}
-                      aria-label="Move left">←</button
+                      aria-label={t("products.moveLeft")}>←</button
                     >
                     <button
                       type="button"
                       class="rounded bg-background/90 px-1.5 py-0.5 text-xs shadow disabled:opacity-30"
                       disabled={busy || i === product.images.length - 1}
                       onclick={() => moveImage(img.id, 1)}
-                      aria-label="Move right">→</button
+                      aria-label={t("products.moveRight")}>→</button
                     >
                   </div>
                   <button
@@ -1383,7 +1380,7 @@
                     class="rounded bg-background/90 px-1.5 py-0.5 text-xs text-destructive shadow"
                     disabled={busy}
                     onclick={() => removeImage(img.id)}
-                    aria-label="Delete">×</button
+                    aria-label={t("common.delete")}>×</button
                   >
                 </div>
               {/if}
@@ -1397,7 +1394,7 @@
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold">
-          Variants ({product.variants.length})
+          {t("products.variantsCount", { count: product.variants.length })}
         </h2>
         <div class="flex items-center gap-2">
           <Button
@@ -1406,7 +1403,7 @@
             disabled={busy || !canEdit}
             onclick={openBulkVariantDialog}
           >
-            Bulk add
+            {t("products.bulkAdd")}
           </Button>
           <Button
             variant="outline"
@@ -1414,7 +1411,7 @@
             disabled={busy || !canEdit}
             onclick={newVariant}
           >
-            Add variant
+            {t("products.addVariant")}
           </Button>
         </div>
       </div>
@@ -1422,13 +1419,13 @@
       <table class="w-full text-sm">
         <thead class="border-b text-left text-muted-foreground">
           <tr>
-            <th class="py-1.5 font-medium">SKU</th>
-            <th class="py-1.5 font-medium">Label</th>
-            <th class="py-1.5 font-medium">Unit</th>
-            <th class="py-1.5 text-right font-medium">Price</th>
-            <th class="py-1.5 text-right font-medium">Cost</th>
-            <th class="py-1.5 text-right font-medium">Margin</th>
-            <th class="py-1.5 text-right font-medium">Stock</th>
+            <th class="py-1.5 font-medium">{t("common.sku")}</th>
+            <th class="py-1.5 font-medium">{t("products.label")}</th>
+            <th class="py-1.5 font-medium">{t("products.unit")}</th>
+            <th class="py-1.5 text-right font-medium">{t("common.price")}</th>
+            <th class="py-1.5 text-right font-medium">{t("common.cost")}</th>
+            <th class="py-1.5 text-right font-medium">{t("products.margin")}</th>
+            <th class="py-1.5 text-right font-medium">{t("products.stock")}</th>
             <th></th>
           </tr>
         </thead>
@@ -1449,7 +1446,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 text-left hover:bg-accent"
-                    title="Edit SKU"
+                    title={t("products.editSku")}
                     onclick={() => startVariantCellEdit(v, "sku")}>{v.sku}</button
                   >
                 {:else}
@@ -1469,7 +1466,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 text-left hover:bg-accent"
-                    title="Edit label"
+                    title={t("products.editLabel")}
                     onclick={() => startVariantCellEdit(v, "label")}
                     >{v.label ?? "—"}</button
                   >
@@ -1491,7 +1488,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit price"
+                    title={t("products.editPrice")}
                     onclick={() => startVariantCellEdit(v, "price")}
                     >{formatMoney(v.priceMinor)}</button
                   >
@@ -1512,7 +1509,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit cost"
+                    title={t("products.editCost")}
                     onclick={() => startVariantCellEdit(v, "cost")}
                     >{formatMoney(v.costMinor)}</button
                   >
@@ -1525,7 +1522,7 @@
                   class="inline-block rounded-full px-2 py-0.5 text-xs font-medium tabular-nums {marginPillClass(
                     m,
                   )}"
-                  title="Gross margin (tax ignored)"
+                  title={t("products.marginTitle")}
                 >
                   {formatMarginBps(m)}
                 </span>
@@ -1535,14 +1532,14 @@
                 <span class="inline-flex items-center gap-0.5">
                 <IconButton
                   icon={Pencil}
-                  label="Edit variant"
+                  label={t("products.editVariant")}
                   variant="primary"
                   disabled={!canEdit}
                   onclick={() => editVariant(v)}
                 />
                 <IconButton
                   icon={Trash2}
-                  label="Delete variant"
+                  label={t("products.deleteVariant")}
                   variant="destructive"
                   disabled={!canEdit}
                   onclick={() => deleteVariant(v.id)}
@@ -1554,7 +1551,7 @@
           {#if product.variants.length === 0}
             <tr>
               <td colspan="8" class="py-6 text-center text-muted-foreground">
-                No variants yet.
+                {t("products.noVariants")}
               </td>
             </tr>
           {/if}
@@ -1564,75 +1561,75 @@
       {#if variantDraft}
         <div class="space-y-3 rounded-md border bg-background p-4">
           <h3 class="text-sm font-semibold">
-            {variantDraft.id ? "Edit variant" : "New variant"}
+            {variantDraft.id ? t("products.editVariant") : t("products.newVariant")}
           </h3>
           <div class="grid grid-cols-3 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">SKU</span>
+              <span class="text-xs font-medium">{t("common.sku")}</span>
               <Input
                 bind:value={variantDraft.sku}
-                placeholder={variantDraft.id ? "" : "Auto-generated"}
+                placeholder={variantDraft.id ? "" : t("products.autoGenerated")}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Barcode</span>
+              <span class="text-xs font-medium">{t("products.barcode")}</span>
               <Input bind:value={variantDraft.barcode} disabled={!canEdit} />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Label</span>
+              <span class="text-xs font-medium">{t("products.label")}</span>
               <Input bind:value={variantDraft.label} disabled={!canEdit} />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Unit</span>
+              <span class="text-xs font-medium">{t("products.unit")}</span>
               <Select bind:value={variantDraft.unit} disabled={!canEdit}>
-                {#each UNITS as u (u)}<option value={u}>{u}</option>{/each}
+                {#each UNITS as u (u)}<option value={u}>{u === "piece" ? t("products.unit.piece") : u}</option>{/each}
               </Select>
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Qty decimals</span>
+              <span class="text-xs font-medium">{t("products.qtyDecimals")}</span>
               <NumericInput
                 bind:value={variantDraft.qtyDecimals}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Sort order</span>
+              <span class="text-xs font-medium">{t("products.sortOrder")}</span>
               <NumericInput
                 bind:value={variantDraft.sortOrder}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Interchange group</span>
+              <span class="text-xs font-medium">{t("products.interchangeGroup")}</span>
               <Combobox
                 options={interchangeGroupOptions}
                 bind:value={variantDraft.interchangeGroupId}
-                placeholder="Search group…"
+                placeholder={t("products.searchGroup")}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Price (Rp)</span>
+              <span class="text-xs font-medium">{t("products.priceRp")}</span>
               <MoneyInput
                 bind:value={variantDraft.priceMinor}
                 disabled={!canEdit || (variantDraft.id != null && !canEditPrice)}
               />
               {#if variantDraft.id != null && canEdit && !canEditPrice}
                 <span class="text-xs text-muted-foreground"
-                  >Requires product.edit_price.</span
+                  >{t("products.requiresPricePermission")}</span
                 >
               {/if}
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Cost (Rp)</span>
+              <span class="text-xs font-medium">{t("products.costRp")}</span>
               <MoneyInput
                 bind:value={variantDraft.costMinor}
                 disabled={!canEdit || (variantDraft.id != null && !canEditCost)}
               />
               {#if variantDraft.id != null && canEdit && !canEditCost}
                 <span class="text-xs text-muted-foreground"
-                  >Requires product.edit_cost.</span
+                  >{t("products.requiresCostPermission")}</span
                 >
               {/if}
             </label>
@@ -1642,10 +1639,10 @@
               variant="ghost"
               size="sm"
               disabled={busy}
-              onclick={() => (variantDraft = null)}>Cancel</Button
+              onclick={() => (variantDraft = null)}>{t("common.cancel")}</Button
             >
             <Button size="sm" disabled={busy || !canEdit} onclick={saveVariant}>
-              {variantDraft.id ? "Save variant" : "Add variant"}
+              {variantDraft.id ? t("products.saveVariant") : t("products.addVariant")}
             </Button>
           </div>
         </div>
@@ -1658,9 +1655,9 @@
       >
         <div class="flex flex-col">
           <div class="border-b p-4">
-            <h3 class="text-lg font-semibold">Bulk add variants</h3>
+            <h3 class="text-lg font-semibold">{t("products.bulkAddVariants")}</h3>
             <p class="mt-1 text-sm text-muted-foreground">
-              Enter variant labels, one per line. They will be added with zero price/cost.
+              {t("products.bulkVariantsHint")}
             </p>
           </div>
           <div class="p-4">
@@ -1675,10 +1672,10 @@
             <Button
               variant="ghost"
               disabled={bulkVariantBusy}
-              onclick={closeBulkVariantDialog}>Cancel</Button
+              onclick={closeBulkVariantDialog}>{t("common.cancel")}</Button
             >
             <Button disabled={bulkVariantBusy} onclick={saveBulkVariants}>
-              {bulkVariantBusy ? "Saving…" : "Add variants"}
+              {bulkVariantBusy ? t("common.saving") : t("products.addVariants")}
             </Button>
           </div>
         </div>
@@ -1687,7 +1684,7 @@
 
     {#if product.kind === "bundle"}
       <section class="space-y-3 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">Bundle components</h2>
+        <h2 class="text-sm font-semibold">{t("products.bundleComponents")}</h2>
         {#each product.variants as v (v.id)}
           <div class="space-y-1">
             <div class="flex items-center justify-between">
@@ -1701,7 +1698,7 @@
               {#if bundleDraft?.variantId !== v.id}
                 <IconButton
                   icon={Pencil}
-                  label="Edit components"
+                  label={t("products.editComponents")}
                   variant="primary"
                   disabled={busy || !canEdit}
                   onclick={() => editBundle(v)}
@@ -1738,7 +1735,7 @@
                           <td class="w-10 py-1 text-right">
                             <IconButton
                               icon={Trash2}
-                              label="Remove component"
+                              label={t("products.removeComponent")}
                               variant="destructive"
                               onclick={() =>
                                 removeBundleComponent(row.componentVariantId)}
@@ -1749,13 +1746,13 @@
                     </tbody>
                   </table>
                 {:else}
-                  <p class="text-sm text-muted-foreground">No components.</p>
+                  <p class="text-sm text-muted-foreground">{t("products.noComponents")}</p>
                 {/if}
 
                 <div class="relative">
                   <Input
                     type="search"
-                    placeholder="Add component — search product or SKU…"
+                    placeholder={t("products.addComponentSearch")}
                     bind:value={bundleSearch}
                     onfocus={() => (bundlePickerOpen = true)}
                     onblur={() => setTimeout(() => (bundlePickerOpen = false), 150)}
@@ -1787,7 +1784,7 @@
                     <div
                       class="absolute top-full z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
                     >
-                      No matches.
+                      {t("products.noMatches")}
                     </div>
                   {/if}
                 </div>
@@ -1799,10 +1796,10 @@
                     disabled={busy}
                     onclick={() => (bundleDraft = null)}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                   <Button size="sm" disabled={busy} onclick={saveBundle}>
-                    Save components
+                    {t("products.saveComponents")}
                   </Button>
                 </div>
               </div>
@@ -1829,20 +1826,20 @@
               </table>
             {:else}
               <p class="text-sm text-muted-foreground">
-                No components yet — this bundle can't be sold until it has some.
+                {t("products.noComponentsYet")}
               </p>
             {/if}
           </div>
         {/each}
         {#if product.variants.length === 0}
-          <p class="text-sm text-muted-foreground">No variants.</p>
+          <p class="text-sm text-muted-foreground">{t("products.noVariants")}</p>
         {/if}
       </section>
     {/if}
 
     <!-- Stock by location -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Stock by location</h2>
+      <h2 class="text-sm font-semibold">{t("products.stockByLocation")}</h2>
       {#each product.variants as v (v.id)}
         <div class="space-y-1">
           <div class="flex items-center justify-between">
@@ -1853,12 +1850,12 @@
                 <span class="font-mono text-xs font-normal text-muted-foreground">{v.sku}</span>
               {/if}
               <span class="ml-1 text-xs text-muted-foreground"
-                >({v.totalQty} total)</span
+                >{t("products.stockTotal", { count: v.totalQty })}</span
               >
             </span>
             <IconButton
               icon={SlidersHorizontal}
-              label="Adjust stock"
+              label={t("products.adjustStock")}
               variant="primary"
               disabled={busy || !canAdjustStock}
               onclick={() => adjustVariantStock(v)}
@@ -1877,7 +1874,7 @@
               {#if v.stock.length === 0}
                 <tr>
                   <td class="py-1 text-muted-foreground" colspan="2">
-                    No stock rows.
+                    {t("products.noStockRows")}
                   </td>
                 </tr>
               {/if}
@@ -1886,19 +1883,19 @@
         </div>
       {/each}
       {#if product.variants.length === 0}
-        <p class="text-sm text-muted-foreground">No variants to stock.</p>
+        <p class="text-sm text-muted-foreground">{t("products.noVariantsToStock")}</p>
       {/if}
 
       {#if stockDraft}
         <div class="space-y-3 rounded-md border bg-background p-4">
           <h3 class="text-sm font-semibold">
-            Adjust stock — {stockDraft.variantLabel}
+            {t("products.adjustStockTitle", { label: stockDraft.variantLabel })}
           </h3>
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Location</span>
+              <span class="text-xs font-medium">{t("products.location")}</span>
               <Select bind:value={stockDraft.locationId}>
-                <option value="">Unlocated (root)</option>
+                <option value="">{t("products.unlocatedRoot")}</option>
                 {#each locations as l (l.id)}
                   <option value={l.id}>{l.name}</option>
                 {/each}
@@ -1906,29 +1903,29 @@
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">
-                Quantity delta (± smallest unit)
+                {t("products.qtyDelta")}
               </span>
               <NumericInput bind:value={stockDraft.qtyDelta} />
             </label>
             <label class="space-y-1 col-span-2">
-              <span class="text-xs font-medium">Reason (required)</span>
+              <span class="text-xs font-medium">{t("products.reasonRequired")}</span>
               <Input bind:value={stockDraft.reason} />
             </label>
           </div>
           <p class="text-xs text-muted-foreground">
-            Positive writes stock on; negative writes it off.
+            {t("products.stockDeltaHelp")}
           </p>
           <div class="flex justify-end gap-2">
             <Button
               variant="ghost"
               size="sm"
               disabled={busy}
-              onclick={() => (stockDraft = null)}>Cancel</Button
+              onclick={() => (stockDraft = null)}>{t("common.cancel")}</Button
             >
             <Button
               size="sm"
               disabled={busy || !stockDraft.qtyDelta || !stockDraft.reason.trim()}
-              onclick={saveStockAdjustment}>Apply adjustment</Button
+              onclick={saveStockAdjustment}>{t("products.applyAdjustment")}</Button
             >
           </div>
         </div>

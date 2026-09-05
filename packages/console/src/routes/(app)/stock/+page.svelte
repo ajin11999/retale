@@ -11,6 +11,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Per-location count sheet — refetched whenever the location changes.
@@ -256,7 +257,7 @@
 
   async function save() {
     if (!reason.trim()) {
-      feedback = { ok: false, text: "Enter a reason for the adjustment." };
+      feedback = { ok: false, text: t("stock.enterReason") };
       return;
     }
     const lines = changedRows.map((r) => ({
@@ -283,7 +284,7 @@
       });
       reason = "";
       search = "";
-      feedback = { ok: true, text: `Adjusted ${n} item${n === 1 ? "" : "s"}.` };
+      feedback = { ok: true, text: t("stock.adjustedSummary", { count: n }) };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
     } finally {
@@ -297,17 +298,17 @@
   };
 </script>
 
-<svelte:head><title>Stock editor · Retale Console</title></svelte:head>
+<svelte:head><title>{t("stock.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-4">
-    <h1 class="text-xl font-semibold">Stock editor</h1>
+    <h1 class="text-xl font-semibold">{t("stock.title")}</h1>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-2 text-sm">
-        <span class="text-muted-foreground">Location</span>
+        <span class="text-muted-foreground">{t("common.location") || t("nav.locations")}</span>
         <div class="w-52">
           <Select bind:value={locValue} onchange={changeLocation}>
-            <option value={ROOT}>— Unlocated (root) —</option>
+            <option value={ROOT}>{t("stock.unlocatedRoot")}</option>
             {#each locations as l (l.id)}
               <option value={l.id}>{l.name}</option>
             {/each}
@@ -318,10 +319,7 @@
   </div>
 
   <p class="text-sm text-muted-foreground">
-    Type the counted on-hand for each item; the system records the difference as
-    a stock adjustment against the chosen location. Use the search to filter the
-    list below, or to pull in items that hold no stock here yet. One reason
-    applies to the whole save.
+    {t("stock.subtitle")}
   </p>
 
   {#if feedback}
@@ -334,13 +332,13 @@
   <div class="relative max-w-md">
     <Input
       bind:value={search}
-      placeholder="Search or add items by name, SKU, or barcode…"
+      placeholder={t("stock.searchPlaceholder")}
       disabled={!canAdjust}
     />
   </div>
 
   {#if $Levels.fetching && levels.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Levels.errors?.length}
     <p class="text-sm text-destructive">{$Levels.errors[0].message}</p>
   {:else}
@@ -348,11 +346,11 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Product</th>
-            <th class="px-4 py-2 font-medium">SKU</th>
-            <th class="px-4 py-2 text-right font-medium">On hand</th>
-            <th class="px-4 py-2 font-medium">Counted</th>
-            <th class="px-4 py-2 text-right font-medium">Δ</th>
+            <th class="px-4 py-2 font-medium">{t("common.product")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.sku")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("stock.onHand")}</th>
+            <th class="px-4 py-2 font-medium">{t("stock.counted")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("stock.delta")}</th>
             <th class="px-4 py-2"></th>
           </tr>
         </thead>
@@ -390,7 +388,7 @@
                 {#if added.some((a) => a.variantId === r.variantId)}
                   <IconButton
                     icon={Trash2}
-                    label="Remove row"
+                    label={t("interchangeGroups.removeRow")}
                     variant="muted"
                     disabled={busy}
                     onclick={() => removeAdded(r.variantId)}
@@ -403,7 +401,7 @@
           {#if search.trim() && hits.length > 0}
             <tr>
               <td colspan="6" class="bg-muted/30 border-y px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Add from Catalog
+                {t("stock.addFromCatalog")}
               </td>
             </tr>
             {#each hits as h (h.variantId)}
@@ -420,7 +418,7 @@
                 <td class="px-4 py-2 text-right tabular-nums text-muted-foreground">—</td>
                 <td class="px-4 py-2">
                   <Button variant="outline" size="sm" onclick={() => addRow(h)}>
-                    Add to location
+                    {t("stock.addToLocation")}
                   </Button>
                 </td>
                 <td class="px-4 py-2"></td>
@@ -433,10 +431,9 @@
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
                 {#if search.trim()}
-                  No items match your search.
+                  {t("stock.noItemsMatch")}
                 {:else}
-                  No stock recorded at this location. Use the search above to add
-                  items and set their counts.
+                  {t("stock.noStockRecorded")}
                 {/if}
               </td>
             </tr>
@@ -447,17 +444,17 @@
 
     <div class="flex items-end justify-between gap-4">
       <label class="flex-1 space-y-1">
-        <span class="text-sm font-medium">Reason</span>
+        <span class="text-sm font-medium">{t("stock.reason")}</span>
         <Input
           bind:value={reason}
-          placeholder="e.g. Stocktake 2026-06-04"
+          placeholder={t("stock.batchName")}
           disabled={!canAdjust || busy}
         />
       </label>
       <div class="flex flex-col items-end gap-1">
         {#if hasInvalid}
           <span class="text-xs text-destructive">
-            Some counts are not valid non-negative numbers.
+            {t("stock.invalidCounts")}
           </span>
         {/if}
         <Button
@@ -465,7 +462,7 @@
           disabled={busy || !canAdjust || changedRows.length === 0 || hasInvalid}
           onclick={save}
         >
-          Save {changedRows.length} change{changedRows.length === 1 ? "" : "s"}
+          {t("stock.saveChanges", { count: changedRows.length })}
         </Button>
       </div>
     </div>

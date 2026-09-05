@@ -2,7 +2,8 @@
   import { graphql, CachePolicy } from "$houdini";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, roundMoney, statusLabel, treePathMap } from "$lib/utils";
+  import { formatMoney, roundMoney, treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -211,7 +212,7 @@
       }
     }
     return (id: string | null | undefined, fallback: string | null | undefined) =>
-      id ? (m.get(id) ?? fallback ?? "Unknown") : (fallback ?? "—");
+      id ? (m.get(id) ?? fallback ?? t("products.unknown")) : (fallback ?? "—");
   });
 
   // Split display parts per variant so goods rows can put the product name on
@@ -490,8 +491,8 @@
 
   const pickerParentLabel = $derived(
     pickerParent === ""
-      ? "Top level"
-      : (items.find((it) => it.id === pickerParent)?.description ?? "cost line"),
+      ? t("deliveryDetail.topLevel")
+      : (items.find((it) => it.id === pickerParent)?.description ?? t("deliveryDetail.costLineGeneric")),
   );
   const pickerLines = $derived(
     poLines.filter((l) => l.purchaseId === pickerPoId),
@@ -674,7 +675,7 @@
   }
 
   async function removeItem(id: string) {
-    if (!confirm("Delete this line? Any lines nested under it move up to its parent.")) return;
+    if (!confirm(t("deliveryDetail.confirmDeleteLine"))) return;
     busy = true;
     error = null;
     try {
@@ -750,7 +751,7 @@
       }
       const newId = res.data?.createDeliveryItem.id;
       if (!newId) {
-        error = "Cost line was not created.";
+        error = t("deliveryDetail.errorCostLineNotCreated");
         return;
       }
       for (const it of selected) {
@@ -777,10 +778,8 @@
   async function commit() {
     if (!delivery) return;
     const msg = isTransit
-      ? "Commit this transit note? The freight payable is raised and its cost " +
-        "banks against the PO lines — no stock moves. This cannot be edited afterwards."
-      : "Commit this delivery? Stock will be received and product costs " +
-        "may be recomputed — this cannot be edited afterwards.";
+      ? t("deliveryDetail.confirmCommitTransit")
+      : t("deliveryDetail.confirmCommitArrival");
     if (!confirm(msg)) {
       return;
     }
@@ -803,9 +802,8 @@
   async function cancelDelivered() {
     if (!delivery) return;
     const msg = isTransit
-      ? "Reverse this transit note? The courier payable is reversed and its " +
-        "banked cost no longer applies to future arrivals."
-      : "Reverse this delivery? Stock will be returned.";
+      ? t("deliveryDetail.confirmReverseTransit")
+      : t("deliveryDetail.confirmReverseArrival");
     if (!confirm(msg)) return;
     busy = true;
     error = null;
@@ -825,7 +823,7 @@
 
   async function deleteDraft() {
     if (!delivery) return;
-    if (!confirm("Discard this draft delivery?")) return;
+    if (!confirm(t("deliveryDetail.confirmDiscard"))) return;
     busy = true;
     error = null;
     try {
@@ -852,21 +850,21 @@
   }
 </script>
 
-<svelte:head><title>Delivery · Retale Console</title></svelte:head>
+<svelte:head><title>{t("deliveryDetail.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
-  <a href="/deliveries" class="text-sm text-primary hover:underline">← All deliveries</a>
+  <a href="/deliveries" class="text-sm text-primary hover:underline">{t("deliveryDetail.backToDeliveries")}</a>
 
   {#if error}
     <p class="text-sm text-destructive">{error}</p>
   {/if}
 
   {#if $Detail.fetching && !delivery}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Detail.errors?.length}
     <p class="text-sm text-destructive">{$Detail.errors[0].message}</p>
   {:else if !delivery}
-    <p class="text-sm text-muted-foreground">Delivery not found.</p>
+    <p class="text-sm text-muted-foreground">{t("deliveryDetail.notFound")}</p>
   {:else}
     <!-- Header -->
     <div class="rounded-lg border bg-card p-4">
@@ -875,52 +873,52 @@
           {#if editingHeader}
             <div class="grid grid-cols-3 gap-3">
               <label class="space-y-1">
-                <span class="text-sm font-medium">Date</span>
+                <span class="text-sm font-medium">{t("common.date")}</span>
                 <Input type="date" bind:value={hDate} />
               </label>
               <label class="space-y-1">
-                <span class="text-sm font-medium">Biller</span>
+                <span class="text-sm font-medium">{t("deliveries.biller")}</span>
                 <Input bind:value={hBiller} />
               </label>
               {#if !isTransit}
                 <label class="space-y-1">
-                  <span class="text-sm font-medium">Target location</span>
+                  <span class="text-sm font-medium">{t("deliveries.targetLocation")}</span>
                   <Combobox
                     options={locationOptions}
                     bind:value={hTargetLocationId}
-                    placeholder="Search location…"
+                    placeholder={t("deliveries.searchLocation")}
                   />
                 </label>
               {/if}
             </div>
             <div class="mt-3 flex gap-2">
-              <Button size="sm" disabled={busy} onclick={saveHeader}>Save</Button>
+              <Button size="sm" disabled={busy} onclick={saveHeader}>{t("common.save")}</Button>
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onclick={() => (editingHeader = false)}>Cancel</Button
+                onclick={() => (editingHeader = false)}>{t("common.cancel")}</Button
               >
             </div>
           {:else}
             <h1 class="text-xl font-semibold">
-              {isTransit ? "Transit note" : "Delivery"}
+              {isTransit ? t("deliveryDetail.transitNote") : t("deliveryDetail.delivery")}
               {fmtDate(delivery.date)}
             </h1>
             <p class="text-sm text-muted-foreground">
-              {delivery.biller ?? "No biller"}{#if !isTransit}
+              {delivery.biller ?? t("deliveryDetail.noBiller")}{#if !isTransit}
                 &nbsp;→ {(delivery.targetLocationId
                   ? locationPaths.get(delivery.targetLocationId)
                   : null) ??
                   delivery.targetLocation?.name ??
                   "—"}{/if}
               {#if delivery.deliveredAt}
-                · {isTransit ? "committed" : "delivered"} {fmtDate(delivery.deliveredAt)}
+                · {isTransit ? t("deliveryDetail.committed") : t("deliveryDetail.delivered")} {fmtDate(delivery.deliveredAt)}
               {/if}
             </p>
             {#if delivery.purchaseId}
               <p class="text-xs text-muted-foreground">
-                Receiving check for PO
+                {t("deliveryDetail.receivingCheckForPo")}
                 <a
                   href={`/purchases/${delivery.purchaseId}`}
                   class="font-mono text-primary hover:underline"
@@ -935,15 +933,15 @@
         <div class="flex flex-col items-end gap-2">
           <div class="flex gap-1">
             {#if isTransit}
-              <Badge class="bg-violet-100 text-violet-700">Transit</Badge>
+              <Badge class="bg-violet-100 text-violet-700">{t("deliveries.transit")}</Badge>
             {/if}
-            <Badge class={statusBadge(delivery.status)}>{statusLabel(delivery.status)}</Badge>
+            <Badge class={statusBadge(delivery.status)}>{t(`deliveries.status.${delivery.status}`)}</Badge>
           </div>
           <p class="text-xs text-muted-foreground">
             {#if isTransit}
-              Freight {formatMoney(costSummary.charges)}
+              {t("deliveryDetail.freight", { amount: formatMoney(costSummary.charges) })}
             {:else}
-              Total {formatMoney(costSummary.total)}
+              {t("deliveryDetail.total", { amount: formatMoney(costSummary.total) })}
             {/if}
           </p>
         </div>
@@ -951,9 +949,7 @@
 
       {#if isDraft && inertCharges.length > 0}
         <div class="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          These charges won't be capitalized into any goods (courier AP still
-          posts): {inertCharges.map((c) => c.description).join(", ")}. Move a
-          charge next to the goods it belongs to, or nest goods under it.
+          {t("deliveryDetail.inertCharges", { list: inertCharges.map((c) => c.description).join(", ") })}
         </div>
       {/if}
 
@@ -962,26 +958,26 @@
         {#if isDraft}
           {#if !editingHeader && editable}
             <Button size="sm" variant="outline" onclick={startHeaderEdit}>
-              Edit header
+              {t("deliveryDetail.editHeader")}
             </Button>
           {/if}
           <Button
             size="sm"
             disabled={busy || !canCommit || items.length === 0}
-            onclick={commit}>{isTransit ? "Commit transit note" : "Commit delivery"}</Button
+            onclick={commit}>{isTransit ? t("deliveryDetail.commitTransit") : t("deliveryDetail.commitDelivery")}</Button
           >
           <Button
             size="sm"
             variant="destructive"
             disabled={busy || !canDraft}
-            onclick={deleteDraft}>Discard draft</Button
+            onclick={deleteDraft}>{t("deliveryDetail.discardDraft")}</Button
           >
         {:else if delivery.status === "delivered"}
           <Button
             size="sm"
             variant="destructive"
             disabled={busy || !canCancel}
-            onclick={cancelDelivered}>Reverse delivery</Button
+            onclick={cancelDelivered}>{t("deliveryDetail.reverseDelivery")}</Button
           >
         {/if}
       </div>
@@ -990,64 +986,58 @@
     <!-- Cost tree -->
     <div class="rounded-lg border bg-card p-4">
       <div class="mb-1 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Cost tree</h2>
+        <h2 class="text-sm font-semibold">{t("deliveryDetail.costTree")}</h2>
         {#if editable}
           <div class="flex items-center gap-2">
             {#if costSelected.size > 0}
               <span class="text-xs text-muted-foreground">
-                {costSelected.size} selected
+                {t("common.selected", { count: costSelected.size })}
               </span>
               <Button size="sm" onclick={startGroupForm}>
-                New cost line for selected
+                {t("deliveryDetail.newCostLineForSelected")}
               </Button>
               <Button size="sm" variant="ghost" disabled={busy} onclick={clearGroupSelect}>
-                Clear
+                {t("common.clear")}
               </Button>
             {/if}
             <Button size="sm" variant="outline" onclick={() => startAdd("")}>
-              Add line
+              {t("deliveryDetail.addLine")}
             </Button>
           </div>
         {/if}
       </div>
       <p class="mb-3 text-xs text-muted-foreground">
-        Add goods lines from any open PO, and freight / customs cost lines. A
-        cost line spreads by value <em>only over the goods nested under it</em> —
-        tick several goods lines and use <em>New cost line for selected</em> to
-        group them under a new charge in one step, or edit a goods line and pick
-        a cost line under <em>Move to</em>. To spread a charge over the whole
-        delivery, add it as a freight leg above instead. Each product shows its
-        landed unit cost (→ /unit).
+        {@html t("deliveryDetail.costTreeHelp")}
       </p>
 
       {#if groupFormOpen && costSelected.size > 0}
         <div class="mb-3 flex items-center gap-2 rounded-md border bg-muted/30 p-3">
           <span class="whitespace-nowrap text-xs text-muted-foreground">
-            New charge over {costSelected.size} line{costSelected.size === 1 ? "" : "s"}:
+            {t("deliveryDetail.newChargeOver", { count: costSelected.size })}
           </span>
           <Input
             bind:value={gDesc}
             class="flex-1"
-            placeholder="Description (e.g. Unloading fee)"
+            placeholder={t("deliveries.costDescription")}
           />
-          <MoneyInput bind:value={gCost} class="w-32" placeholder="Amount" />
+          <MoneyInput bind:value={gCost} class="w-32" placeholder={t("common.amount")} />
           <div class="w-40">
             <Combobox
-              options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
+              options={[{ value: "", label: t("deliveryDetail.noCourier") }, ...courierOptions]}
               bind:value={gVendorId}
-              placeholder="Search courier…"
+              placeholder={t("deliveryDetail.searchCourier")}
             />
           </div>
           <Button
             size="sm"
             disabled={busy || !gDesc.trim() || gCost == null}
-            onclick={createGroupCostLine}>Create</Button
+            onclick={createGroupCostLine}>{t("common.create")}</Button
           >
           <Button
             size="sm"
             variant="ghost"
             disabled={busy}
-            onclick={() => (groupFormOpen = false)}>Cancel</Button
+            onclick={() => (groupFormOpen = false)}>{t("common.cancel")}</Button
           >
         </div>
       {/if}
@@ -1058,7 +1048,7 @@
 
       {#if items.length === 0}
         <p class="text-sm text-muted-foreground">
-          No lines yet{editable ? " — add a goods or cost line to get started." : "."}
+          {editable ? t("deliveryDetail.noLinesYetHint") : t("deliveryDetail.noLinesYet")}
         </p>
       {:else}
         <ul class="space-y-1">
@@ -1073,30 +1063,30 @@
         <dl class="mt-4 ml-auto w-full max-w-xs space-y-1 border-t pt-3 text-sm">
           {#if isTransit}
             <div class="flex justify-between text-muted-foreground">
-              <dt>Goods value (allocation basis)</dt>
+              <dt>{t("deliveryDetail.goodsValueBasis")}</dt>
               <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
             </div>
             <div class="flex justify-between border-t pt-1 font-semibold">
-              <dt>Freight banked to PO lines</dt>
+              <dt>{t("deliveryDetail.freightBanked")}</dt>
               <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
             </div>
           {:else}
             <div class="flex justify-between text-muted-foreground">
-              <dt>Goods value</dt>
+              <dt>{t("deliveryDetail.goodsValue")}</dt>
               <dd class="tabular-nums">{formatMoney(costSummary.goods)}</dd>
             </div>
             <div class="flex justify-between text-muted-foreground">
-              <dt>Freight &amp; customs</dt>
+              <dt>{t("deliveryDetail.freightCustoms")}</dt>
               <dd class="tabular-nums">{formatMoney(costSummary.charges)}</dd>
             </div>
             {#if costSummary.transit > 0}
               <div class="flex justify-between text-muted-foreground">
-                <dt>Transit cost pickup</dt>
+                <dt>{t("deliveryDetail.transitCostPickup")}</dt>
                 <dd class="tabular-nums">{formatMoney(costSummary.transit)}</dd>
               </div>
             {/if}
             <div class="flex justify-between border-t pt-1 font-semibold">
-              <dt>Total landed cost</dt>
+              <dt>{t("deliveryDetail.totalLandedCost")}</dt>
               <dd class="tabular-nums">{formatMoney(costSummary.total)}</dd>
             </div>
           {/if}
@@ -1111,7 +1101,7 @@
        qty. Selections accumulate across purchases; all are added at once. -->
   <button
     type="button"
-    aria-label="Close"
+    aria-label={t("common.close")}
     class="fixed inset-0 z-40 cursor-default bg-black/40"
     onclick={() => (pickerOpen = false)}
   ></button>
@@ -1126,15 +1116,15 @@
           variant="ghost"
           size="sm"
           class="shrink-0"
-          onclick={() => (pickerPoId = "")}>← Purchases</Button
+          onclick={() => (pickerPoId = "")}>{t("deliveryDetail.backToPurchases")}</Button
         >
       {/if}
       <div>
         <h2 class="text-sm font-semibold">
-          {pickerPoId ? pickerPoName : "Add goods lines"}
+          {pickerPoId ? pickerPoName : t("deliveryDetail.addGoodsLines")}
         </h2>
         <p class="text-xs text-muted-foreground">
-          {pickerPoId ? "Tick the lines to receive" : `into ${pickerParentLabel}`}
+          {pickerPoId ? t("deliveryDetail.tickLinesToReceive") : t("deliveryDetail.intoParent", { name: pickerParentLabel })}
         </p>
       </div>
     </div>
@@ -1144,7 +1134,7 @@
         <!-- Step 1: pick a purchase -->
         {#if poGroups.length === 0}
           <p class="p-6 text-center text-sm text-muted-foreground">
-            No open purchases with lines left to receive.
+            {t("deliveryDetail.noOpenPurchases")}
           </p>
         {:else}
           <ul class="divide-y">
@@ -1159,12 +1149,12 @@
                   <span>
                     <span class="text-sm font-medium">{g.vendorName}</span>
                     <span class="block text-xs text-muted-foreground">
-                      #{g.id.slice(-6)} · {g.count} line{g.count === 1 ? "" : "s"} left
+                      {t("deliveryDetail.poLinesLeft", { id: g.id.slice(-6), count: g.count })}
                     </span>
                   </span>
                   <span class="flex items-center gap-2 text-xs text-muted-foreground">
                     {#if picked > 0}
-                      <Badge class="bg-primary/10 text-primary">{picked} picked</Badge>
+                      <Badge class="bg-primary/10 text-primary">{t("deliveryDetail.picked", { count: picked })}</Badge>
                     {/if}
                     <span aria-hidden="true">›</span>
                   </span>
@@ -1187,13 +1177,13 @@
                   indeterminate={somePicked}
                   onchange={toggleAllPicker}
                   class="h-4 w-4"
-                  title="Select all lines in this purchase"
+                  title={t("deliveryDetail.selectAllLines")}
                 />
               </th>
-              <th class="px-3 py-2 font-medium">PO line</th>
-              <th class="px-3 py-2 text-right font-medium">Left</th>
-              <th class="px-3 py-2 text-right font-medium">Unit cost</th>
-              <th class="w-28 px-3 py-2 text-right font-medium">Qty</th>
+              <th class="px-3 py-2 font-medium">{t("deliveryDetail.poLine")}</th>
+              <th class="px-3 py-2 text-right font-medium">{t("deliveryDetail.left")}</th>
+              <th class="px-3 py-2 text-right font-medium">{t("deliveryDetail.unitCost")}</th>
+              <th class="w-28 px-3 py-2 text-right font-medium">{t("common.qty")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1254,17 +1244,17 @@
 
     <div class="flex items-center justify-between gap-3 border-t p-4">
       <p class="text-sm text-muted-foreground">
-        {pickerSelected.length} selected · {formatMoney(pickerTotal)}
+        {t("deliveryDetail.selectedAmount", { count: pickerSelected.length, amount: formatMoney(pickerTotal) })}
       </p>
       <div class="flex gap-2">
         <Button
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (pickerOpen = false)}>Cancel</Button
+          onclick={() => (pickerOpen = false)}>{t("common.cancel")}</Button
         >
         <Button size="sm" disabled={busy || !pickerValid} onclick={confirmPicker}>
-          Add {pickerSelected.length || ""} line{pickerSelected.length === 1 ? "" : "s"}
+          {t("deliveryDetail.addLines", { count: pickerSelected.length || 0 })}
         </Button>
       </div>
     </div>
@@ -1288,7 +1278,7 @@
               </span>
             {/if}
           </span>
-          <Input bind:value={eQty} class="w-24" inputmode="numeric" placeholder="qty" />
+          <Input bind:value={eQty} class="w-24" inputmode="numeric" placeholder={t("common.qty")} />
           <span class="w-32 text-right text-sm">
             {formatMoney(eUnitCost * (eGoodsValid ? eGoodsQty : 0))}
           </span>
@@ -1297,24 +1287,24 @@
           <MoneyInput bind:value={eCost} class="w-32" />
           <div class="w-36">
             <Combobox
-              options={[{ value: "", label: "— No courier —" }, ...courierOptions]}
+              options={[{ value: "", label: t("deliveryDetail.noCourier") }, ...courierOptions]}
               bind:value={eVendorId}
-              placeholder="Search courier…"
+              placeholder={t("deliveryDetail.searchCourier")}
             />
           </div>
         {/if}
-        <Select bind:value={eParentId} class="w-36" title="Nest this line under a cost line">
-          <option value="">↳ Top level</option>
+        <Select bind:value={eParentId} class="w-36" title={t("deliveryDetail.nestUnderCost")}>
+          <option value="">{t("deliveryDetail.topLevelOption")}</option>
           {#each moveTargets as t (t.value)}
             <option value={t.value}>↳ {t.label}</option>
           {/each}
         </Select>
-        <Button size="sm" disabled={busy} onclick={saveEdit}>Save</Button>
+        <Button size="sm" disabled={busy} onclick={saveEdit}>{t("common.save")}</Button>
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
-          onclick={() => (editingId = null)}>Cancel</Button
+          onclick={() => (editingId = null)}>{t("common.cancel")}</Button
         >
       {:else}
         {#if editable && node.item.purchaseItemId}
@@ -1323,7 +1313,7 @@
             class="size-4 cursor-pointer rounded border-input accent-primary"
             checked={costSelected.has(node.item.id)}
             onchange={() => toggleCostSelect(node.item.id)}
-            aria-label="Select goods line"
+            aria-label={t("deliveryDetail.selectGoodsLine")}
           />
         {/if}
         <span class="min-w-0 flex-1 text-sm">
@@ -1335,14 +1325,14 @@
                 isDraft && pi.qtyDelivered + (node.item.qty ?? 0) > pi.qtyOrdered}
               <span
                 class="ml-1 text-xs {over ? 'text-amber-600' : 'text-muted-foreground'}"
-                title="Received of ordered on the linked PO line"
+                title={t("deliveryDetail.receivedOfOrdered")}
               >
                 · PO {pi.qtyDelivered}{#if isDraft && node.item.qty}&nbsp;+{node.item
                     .qty}{/if} / {pi.qtyOrdered}
               </span>
             {:else if node.item.purchaseItemId}
               <span class="ml-1 text-xs text-muted-foreground">
-                · PO line {node.item.purchaseItemId.slice(-6)}
+                · {t("deliveryDetail.poLine")} {node.item.purchaseItemId.slice(-6)}
               </span>
             {:else if node.item.vendor}
               <Badge class="ml-1 bg-sky-100 text-xs text-sky-700">
@@ -1371,9 +1361,9 @@
               class="w-40 text-right text-xs {ld.freightMinor > 0
                 ? 'text-violet-700'
                 : 'text-muted-foreground'}"
-              title="Freight share this line banks against its PO line"
+              title={t("deliveryDetail.freightShareTitle")}
             >
-              banks {formatMoney(ld.freightMinor)}
+              {t("deliveryDetail.banks", { amount: formatMoney(ld.freightMinor) })}
             </span>
           {:else if ld?.isStock}
             <span
@@ -1381,9 +1371,9 @@
               ld.transitFreightMinor > 0
                 ? 'text-emerald-700'
                 : 'text-muted-foreground'}"
-              title="Landed unit cost = line value + freight share + accumulated transit cost"
+              title={t("deliveryDetail.landedUnitTitle")}
             >
-              → {formatMoney(ld.landedUnitCostMinor)}/unit
+              {t("deliveryDetail.landedUnit", { amount: formatMoney(ld.landedUnitCostMinor) })}
             </span>
           {:else}
             <span class="w-40"></span>
@@ -1396,7 +1386,7 @@
             <Button
               size="sm"
               variant="ghost"
-              title="Add a line under this charge"
+              title={t("deliveryDetail.addLineUnder")}
               onclick={() => startAdd(node.item.id)}>+</Button
             >
           {/if}
@@ -1435,60 +1425,60 @@
       <Button
         size="sm"
         variant={nMode === "goods" ? "default" : "outline"}
-        onclick={() => (nMode = "goods")}>Goods line</Button
+        onclick={() => (nMode = "goods")}>{t("deliveryDetail.goodsLine")}</Button
       >
       <Button
         size="sm"
         variant={nMode === "cost" ? "default" : "outline"}
-        onclick={() => (nMode = "cost")}>Cost line</Button
+        onclick={() => (nMode = "cost")}>{t("deliveryDetail.costLineButton")}</Button
       >
     </div>
 
     {#if nMode === "goods"}
       <div class="flex items-center gap-2">
         <Button size="sm" disabled={busy || poLines.length === 0} onclick={openPicker}>
-          Choose PO lines…
+          {t("deliveryDetail.choosePoLines")}
         </Button>
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
-          onclick={() => (addingUnder = null)}>Cancel</Button
+          onclick={() => (addingUnder = null)}>{t("common.cancel")}</Button
         >
         {#if poLines.length === 0}
           <span class="text-xs text-muted-foreground">
-            No open PO lines left to receive.
+            {t("deliveryDetail.noOpenPoLines")}
           </span>
         {/if}
       </div>
     {:else}
       <div class="flex items-end gap-2">
         <label class="flex-1 space-y-1">
-          <span class="text-xs font-medium">Description</span>
-          <Input bind:value={nDesc} placeholder="Freight, customs, …" />
+          <span class="text-xs font-medium">{t("common.description")}</span>
+          <Input bind:value={nDesc} placeholder={t("deliveryDetail.freightCustomsPlaceholder")} />
         </label>
         <label class="w-40 space-y-1">
-          <span class="text-xs font-medium">Cost (Rp)</span>
+          <span class="text-xs font-medium">{t("deliveryDetail.costRp")}</span>
           <MoneyInput bind:value={nCost} />
         </label>
         <label class="w-40 space-y-1">
-          <span class="text-xs font-medium">Courier (AP)</span>
+          <span class="text-xs font-medium">{t("deliveryDetail.courierAp")}</span>
           <Combobox
-            options={[{ value: "", label: "— None —" }, ...courierOptions]}
+            options={[{ value: "", label: t("deliveryDetail.none") }, ...courierOptions]}
             bind:value={nVendorId}
-            placeholder="Search courier…"
+            placeholder={t("deliveryDetail.searchCourier")}
           />
         </label>
         <Button
           size="sm"
           disabled={busy || !nDesc.trim() || nCost == null}
-          onclick={addItem}>Add</Button
+          onclick={addItem}>{t("common.add")}</Button
         >
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
-          onclick={() => (addingUnder = null)}>Cancel</Button
+          onclick={() => (addingUnder = null)}>{t("common.cancel")}</Button
         >
       </div>
     {/if}

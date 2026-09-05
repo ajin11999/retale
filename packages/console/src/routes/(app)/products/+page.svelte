@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Check, Pencil, X } from "@lucide/svelte";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel, treePathMap } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens, treePathMap } from "$lib/utils";
   import type { Viewer } from "../+layout.server";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -14,6 +14,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -299,8 +300,8 @@
     return result.products.map((p) => {
       const prices = p.variants.map((v) => v.priceMinor);
       const category = p.categoryId
-        ? (catName.get(p.categoryId) ?? "Unknown")
-        : "Uncategorized";
+        ? (catName.get(p.categoryId) ?? t("products.unknown"))
+        : t("products.uncategorized");
 
       let variantHaystack = "";
       let minMarginBps: number | null = null;
@@ -348,7 +349,7 @@
   const categoryFilter = $derived(page.url.searchParams.get("category"));
   const categoryFilterName = $derived(
     categoryFilter
-      ? (categoryPaths.get(categoryFilter) ?? "this category")
+      ? (categoryPaths.get(categoryFilter) ?? t("products.thisCategory"))
       : null,
   );
 
@@ -359,7 +360,7 @@
   // Combobox options for the new-product Category picker: a leading
   // "Uncategorized" row (empty value) then one row per category.
   const categoryOptions = $derived([
-    { value: "", label: "Uncategorized" },
+    { value: "", label: t("products.uncategorized") },
     ...($ProductList.data?.categories ?? []).map((c) => ({
       value: c.id,
       label: categoryPaths.get(c.id) ?? c.name,
@@ -384,13 +385,13 @@
 
   type SortKey = "name" | "category" | "kind" | "variants" | "minPrice" | "stock" | "archived";
   const COLUMNS: { key: SortKey; id: string; header: string }[] = [
-    { key: "name", id: "name", header: "Product" },
-    { key: "category", id: "category", header: "Category" },
-    { key: "kind", id: "kind", header: "Kind" },
-    { key: "variants", id: "variants", header: "Variants" },
-    { key: "minPrice", id: "price", header: "Price" },
-    { key: "stock", id: "stock", header: "Stock" },
-    { key: "archived", id: "status", header: "Status" },
+    { key: "name", id: "name", header: t("common.product") },
+    { key: "category", id: "category", header: t("common.category") },
+    { key: "kind", id: "kind", header: t("products.kind") },
+    { key: "variants", id: "variants", header: t("products.variants") },
+    { key: "minPrice", id: "price", header: t("common.price") },
+    { key: "stock", id: "stock", header: t("products.stock") },
+    { key: "archived", id: "status", header: t("common.status") },
   ];
 
   let tableEditMode = $state(false);
@@ -477,12 +478,12 @@
     total: number,
     failed: number,
     firstError: string,
-    pastVerb: string,
+    doneKey: string,
   ) {
     const ok = total - failed;
     feedback = failed
-      ? { ok: false, text: `${pastVerb} ${ok} of ${total}; ${failed} failed — ${firstError}` }
-      : { ok: true, text: `${ok} product${ok === 1 ? "" : "s"} ${pastVerb.toLowerCase()}.` };
+      ? { ok: false, text: t("products.bulkPartial", { ok, total, failed, error: firstError }) }
+      : { ok: true, text: t(doneKey, { count: ok }) };
     selectedIds = [];
     bulkBusy = false;
     await ProductList.fetch({ policy: CachePolicy.NetworkOnly });
@@ -507,7 +508,7 @@
     }
     bulkCategoryPicked = false;
     bulkCategoryId = "";
-    await finishBulk(ids.length, failed, firstError, "Moved");
+    await finishBulk(ids.length, failed, firstError, "products.bulkCategoryDone");
   }
 
   let showBulkEditModal = $state(false);
@@ -561,7 +562,7 @@
     bulkMinQtyInput = null;
     clearMinMargin = false;
     clearMinQty = false;
-    await finishBulk(ids.length, failed, firstError, "Updated settings for");
+    await finishBulk(ids.length, failed, firstError, "products.bulkSettingsDone");
   }
 
   async function bulkDelete() {
@@ -569,7 +570,7 @@
     if (!ids.length) return;
     if (
       !confirm(
-        `Permanently delete ${ids.length} product${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+        t("products.confirmDelete", { count: ids.length }),
       )
     )
       return;
@@ -584,7 +585,7 @@
         firstError ||= res.errors[0].message;
       }
     }
-    await finishBulk(ids.length, failed, firstError, "Deleted");
+    await finishBulk(ids.length, failed, firstError, "products.bulkDeleteDone");
   }
 
   function priceLabel(r: Row): string {
@@ -794,7 +795,7 @@
     "text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 </script>
 
-<svelte:head><title>Products · Retale Console</title></svelte:head>
+<svelte:head><title>{t("products.pageTitle")}</title></svelte:head>
 
 
 {#snippet marginBadge(price: number, cost: number | null, minMarginBps: number | null)}
@@ -812,23 +813,23 @@
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Products</h1>
+    <h1 class="text-xl font-semibold">{t("products.title")}</h1>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-1.5 text-sm text-muted-foreground">
         <input type="checkbox" bind:checked={showArchived} class="size-4" />
-        Show archived
+        {t("common.showArchived")}
       </label>
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search products…"
+          placeholder={t("products.searchProducts")}
           value={searchInput}
           oninput={(e) => onSearchInput(e.currentTarget.value)}
         />
       </div>
       <div class="w-32">
         <NumericInput
-          placeholder="Max margin %"
+          placeholder={t("products.maxMargin")}
           value={maxMarginInput}
           oninput={(e) => onMarginInput(e.currentTarget.value)}
         />
@@ -839,7 +840,7 @@
           variant={tableEditMode ? "default" : "outline"}
           onclick={() => (tableEditMode = !tableEditMode)}
         >
-          {tableEditMode ? "Exit table edit" : "Table edit"}
+          {tableEditMode ? t("products.exitTableEdit") : t("products.tableEdit")}
         </Button>
         {#if tableEditMode && editingRows.size > 0}
           <Button
@@ -848,7 +849,7 @@
             disabled={editBusy}
             onclick={saveAllRows}
           >
-            Save all ({editingRows.size})
+            {t("products.saveAll", { count: editingRows.size })}
           </Button>
         {/if}
       {/if}
@@ -858,11 +859,11 @@
           variant="outline"
           onclick={() => goto("/products/bulk")}
         >
-          Bulk add
+          {t("products.bulkAdd")}
         </Button>
       {/if}
       <Button size="sm" disabled={busy || !canCreate} onclick={newProduct}>
-        Add product
+        {t("products.addProduct")}
       </Button>
     </div>
   </div>
@@ -878,22 +879,22 @@
       class="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm"
     >
       <span>
-        Showing products in <span class="font-medium">{categoryFilterName}</span>
+        {t("products.showingInCategory")} <span class="font-medium">{categoryFilterName}</span>
       </span>
       <button
         class="text-xs text-primary hover:underline"
-        onclick={clearCategoryFilter}>Clear filter</button
+        onclick={clearCategoryFilter}>{t("common.clearFilter")}</button
       >
     </div>
   {/if}
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">New product</h2>
+      <h2 class="text-sm font-semibold">{t("products.newProduct")}</h2>
       <div class="grid grid-cols-2 gap-3">
         <label class="relative space-y-1">
-          <span class="text-xs font-medium">Name</span>
-          <Input bind:value={draft.name} placeholder="Product name" />
+          <span class="text-xs font-medium">{t("common.name")}</span>
+          <Input bind:value={draft.name} placeholder={t("products.productName")} />
           <DuplicateHint
             query={draft.name}
             items={allRows}
@@ -901,22 +902,22 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Category</span>
+          <span class="text-xs font-medium">{t("common.category")}</span>
           <Combobox
             options={categoryOptions}
             bind:value={draft.categoryId}
-            placeholder="Search category…"
+            placeholder={t("products.searchCategory")}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Kind</span>
+          <span class="text-xs font-medium">{t("products.kind")}</span>
           <Select bind:value={draft.kind}>
-            {#each KINDS as k (k)}<option value={k}>{k}</option>{/each}
+            {#each KINDS as k (k)}<option value={k}>{t(`products.kind.${k}`)}</option>{/each}
           </Select>
         </label>
         {#if draft.kind === "open_price"}
           <label class="space-y-1">
-            <span class="text-xs font-medium">Cost ratio (%)</span>
+            <span class="text-xs font-medium">{t("products.costRatio")}</span>
             <NumericInput
               step="0.1"
               value={draft.costRatioBps == null ? null : draft.costRatioBps / 100}
@@ -926,40 +927,37 @@
               }}
             />
             <span class="text-xs text-muted-foreground"
-              >Assumed cost as % of the entered sale price.</span
+              >{t("products.costRatioHint")}</span
             >
           </label>
         {/if}
         {#if draft.kind === "non_stock"}
           <p class="col-span-2 text-xs text-muted-foreground">
-            Cost-tracked, no stock — sells at a real price (overridable at the
-            register) with its cost auto-maintained from purchases/landed cost.
-            For resale-priced items like fasteners.
+            {t("products.nonStockHint")}
           </p>
         {/if}
         <label class="space-y-1">
-          <span class="text-xs font-medium">Price mode</span>
+          <span class="text-xs font-medium">{t("products.priceMode")}</span>
           <Select bind:value={draft.priceMode}>
-            {#each PRICE_MODES as m (m)}<option value={m}>{m}</option>{/each}
+            {#each PRICE_MODES as m (m)}<option value={m}>{t(`products.priceMode.${m}`)}</option>{/each}
           </Select>
         </label>
         <label class="space-y-1">
           <span class="text-xs font-medium">SKU</span>
-          <Input bind:value={draft.sku} placeholder="Auto-generated" />
+          <Input bind:value={draft.sku} placeholder={t("products.autoGenerated")} />
         </label>
         <div></div>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Price (Rp)</span>
+          <span class="text-xs font-medium">{t("products.priceRp")}</span>
           <MoneyInput bind:value={draft.priceMinor} />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium">Cost (Rp)</span>
+          <span class="text-xs font-medium">{t("products.costRp")}</span>
           <MoneyInput bind:value={draft.costMinor} />
         </label>
       </div>
       <p class="text-xs text-muted-foreground">
-        Creates the product with one initial variant. Add more variants and
-        details after saving.
+        {t("products.createHint")}
       </p>
       <div class="flex justify-end gap-2">
         <Button
@@ -968,14 +966,14 @@
           disabled={busy}
           onclick={() => (draft = null)}
         >
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           size="sm"
           disabled={busy || !draft.name.trim()}
           onclick={saveProduct}
         >
-          Create product
+          {t("products.createProduct")}
         </Button>
       </div>
     </div>
@@ -985,14 +983,14 @@
     <div
       class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm"
     >
-      <span class="font-medium">{selectedIds.length} selected</span>
+      <span class="font-medium">{t("common.selected", { count: selectedIds.length })}</span>
       {#if canEdit}
         <div class="flex items-center gap-2">
           <div class="w-56">
             <Combobox
               options={categoryOptions}
               bind:value={bulkCategoryId}
-              placeholder="Move to category…"
+              placeholder={t("products.moveToCategory")}
               onChange={() => (bulkCategoryPicked = true)}
             />
           </div>
@@ -1002,7 +1000,7 @@
             disabled={bulkBusy || !bulkCategoryPicked}
             onclick={bulkSetCategory}
           >
-            Move
+            {t("common.move")}
           </Button>
           <Button
             size="sm"
@@ -1010,7 +1008,7 @@
             disabled={bulkBusy}
             onclick={() => (showBulkEditModal = true)}
           >
-            Bulk edit
+            {t("products.bulkEdit")}
           </Button>
         </div>
       {/if}
@@ -1021,7 +1019,7 @@
           disabled={bulkBusy}
           onclick={bulkDelete}
         >
-          Delete
+          {t("common.delete")}
         </Button>
       {/if}
       <button
@@ -1029,13 +1027,13 @@
         disabled={bulkBusy}
         onclick={() => (selectedIds = [])}
       >
-        Clear
+        {t("common.clear")}
       </button>
     </div>
   {/if}
 
   {#if $ProductList.fetching}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $ProductList.errors?.length}
     <p class="text-sm text-destructive">
       {$ProductList.errors[0].message}
@@ -1047,13 +1045,13 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-muted-foreground">
             <tr>
-              <th class="px-1 py-2 pl-3 text-left font-medium w-full">Name</th>
-              <th class="px-1 py-2 text-left font-medium w-48">Public Name</th>
-              <th class="px-1 py-2 text-left font-medium w-40">Category</th>
-              <th class="px-1 py-2 text-left font-medium w-28">Price</th>
-              <th class="px-1 py-2 text-left font-medium w-48">Description</th>
-              <th class="px-1 py-2 text-left font-medium w-20">Min Qty</th>
-              <th class="px-1 py-2 text-left font-medium w-20">Min Margin</th>
+              <th class="px-1 py-2 pl-3 text-left font-medium w-full">{t("common.name")}</th>
+              <th class="px-1 py-2 text-left font-medium w-48">{t("products.publicName")}</th>
+              <th class="px-1 py-2 text-left font-medium w-40">{t("common.category")}</th>
+              <th class="px-1 py-2 text-left font-medium w-28">{t("common.price")}</th>
+              <th class="px-1 py-2 text-left font-medium w-48">{t("common.description")}</th>
+              <th class="px-1 py-2 text-left font-medium w-20">{t("products.minQty")}</th>
+              <th class="px-1 py-2 text-left font-medium w-20">{t("products.minMargin")}</th>
               <th class="px-1 py-2 pr-3 w-16"></th>
             </tr>
           </thead>
@@ -1070,7 +1068,7 @@
                 </td>
                 <td class="px-1 py-1">
                   <input class={quickInputClass} value={edit?.publicName ?? row.publicName ?? ''}
-                    placeholder="(same as name)"
+                    placeholder={t("products.sameAsName")}
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'publicName', e.currentTarget.value)} />
                 </td>
@@ -1125,9 +1123,9 @@
                 <td class="px-1 py-1 pr-3 text-right whitespace-nowrap">
                   {#if isDirty}
                     <span class="inline-flex items-center gap-0.5">
-                      <IconButton icon={Check} label="Save" variant="primary"
+                      <IconButton icon={Check} label={t("common.save")} variant="primary"
                         disabled={editBusy} onclick={() => saveRow(row.id)} />
-                      <IconButton icon={X} label="Cancel"
+                      <IconButton icon={X} label={t("common.cancel")}
                         disabled={editBusy} onclick={() => cancelRow(row.id)} />
                     </span>
                   {/if}
@@ -1137,7 +1135,7 @@
             {#if pageRows.length === 0}
               <tr>
                 <td colspan="8" class="px-4 py-10 text-center text-muted-foreground">
-                  No products match.
+                  {t("products.noProductsMatch")}
                 </td>
               </tr>
             {/if}
@@ -1152,7 +1150,7 @@
                 <input
                   type="checkbox"
                   class="size-4 align-middle"
-                  aria-label="Select all"
+                  aria-label={t("common.selectAll")}
                   checked={allSelected}
                   use:indeterminate={someSelected}
                   onchange={toggleAll}
@@ -1180,7 +1178,7 @@
                   <input
                     type="checkbox"
                     class="size-4 align-middle"
-                    aria-label="Select {row.name}"
+                    aria-label={t("common.selectRow", { name: row.name })}
                     checked={selectedSet.has(row.id)}
                     onchange={() => toggleRow(row.id)}
                   />
@@ -1204,7 +1202,7 @@
                 {/if}
               </td>
               <td class="px-4 py-2">{row.category}</td>
-              <td class="px-4 py-2">{statusLabel(row.kind)}</td>
+              <td class="px-4 py-2">{t(`products.kind.${row.kind}`)}</td>
               <td class="px-4 py-2">{row.variants}</td>
               <td class="px-4 py-2">
                 {#if quick?.id === row.id}
@@ -1222,7 +1220,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit price"
+                    title={t("products.editPrice")}
                     disabled={busy}
                     onclick={() => startQuick(row, "price")}
                   >
@@ -1239,7 +1237,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {row.archived ? "Archived" : "Active"}
+                  {row.archived ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
@@ -1247,14 +1245,14 @@
                   <span class="inline-flex items-center gap-0.5">
                     <IconButton
                       icon={Check}
-                      label="Save"
+                      label={t("common.save")}
                       variant="primary"
                       disabled={busy || !quick.name.trim()}
                       onclick={saveQuick}
                     />
                     <IconButton
                       icon={X}
-                      label="Cancel"
+                      label={t("common.cancel")}
                       disabled={busy}
                       onclick={() => (quick = null)}
                     />
@@ -1262,7 +1260,7 @@
                 {:else if canEdit && row.variants === 1}
                   <IconButton
                     icon={Pencil}
-                    label="Quick edit"
+                    label={t("products.quickEdit")}
                     variant="primary"
                     disabled={busy}
                     onclick={() => startQuick(row, "name")}
@@ -1277,7 +1275,7 @@
                 colspan={COLUMNS.length + 1 + (canEdit || canDelete ? 1 : 0)}
                 class="px-4 py-10 text-center text-muted-foreground"
               >
-                No products match.
+                {t("products.noProductsMatch")}
               </td>
             </tr>
           {/if}
@@ -1288,7 +1286,7 @@
 
     <div class="flex items-center justify-between text-sm text-muted-foreground">
       <span>
-        {sorted.length} product{sorted.length === 1 ? "" : "s"}
+        {t("products.productCount", { count: sorted.length })}
       </span>
       <div class="flex items-center gap-2">
         <Button
@@ -1297,10 +1295,10 @@
           disabled={currentPage <= 0}
           onclick={prevPage}
         >
-          Previous
+          {t("common.previous")}
         </Button>
         <span>
-          Page {currentPage + 1} of {pageCount}
+          {t("common.page", { current: currentPage + 1, total: pageCount })}
         </span>
         <Button
           variant="outline"
@@ -1308,7 +1306,7 @@
           disabled={currentPage >= pageCount - 1}
           onclick={nextPage}
         >
-          Next
+          {t("common.next")}
         </Button>
       </div>
     </div>
@@ -1327,10 +1325,10 @@
       class="flex w-full max-w-sm flex-col rounded-lg border bg-card shadow-xl"
       role="dialog"
       aria-modal="true"
-      aria-label="Bulk edit product settings"
+      aria-label={t("products.bulkEditSettings")}
     >
       <div class="flex items-center justify-between border-b px-5 py-3">
-        <h2 class="text-sm font-semibold">Bulk edit settings</h2>
+        <h2 class="text-sm font-semibold">{t("products.bulkEditSettings")}</h2>
         <button
           class="rounded-sm opacity-70 hover:opacity-100"
           onclick={() => (showBulkEditModal = false)}
@@ -1340,36 +1338,36 @@
       </div>
       <div class="space-y-4 p-5">
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Minimum margin (%)</span>
+          <span class="text-xs font-medium">{t("products.minimumMargin")}</span>
           <NumericInput
-            placeholder="Leave blank for no change"
+            placeholder={t("products.leaveBlank")}
             bind:value={bulkMinMarginInput}
             disabled={clearMinMargin || bulkBusy}
           />
           <label class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" bind:checked={clearMinMargin} disabled={bulkBusy} class="size-3" />
-            Clear existing value
+            {t("products.clearExisting")}
           </label>
         </label>
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Minimum quantity</span>
+          <span class="text-xs font-medium">{t("products.minimumQuantity")}</span>
           <NumericInput
-            placeholder="Leave blank for no change"
+            placeholder={t("products.leaveBlank")}
             bind:value={bulkMinQtyInput}
             disabled={clearMinQty || bulkBusy}
           />
           <label class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" bind:checked={clearMinQty} disabled={bulkBusy} class="size-3" />
-            Clear existing value
+            {t("products.clearExisting")}
           </label>
         </label>
       </div>
       <div class="flex items-center justify-end gap-2 border-t bg-muted/20 px-5 py-3 rounded-b-lg">
         <Button variant="ghost" size="sm" onclick={() => (showBulkEditModal = false)}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button size="sm" onclick={applyBulkEdit} disabled={bulkBusy}>
-          Apply changes
+          {t("common.applyChanges")}
         </Button>
       </div>
     </div>

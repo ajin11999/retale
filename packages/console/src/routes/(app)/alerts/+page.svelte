@@ -7,6 +7,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -128,7 +129,7 @@
         return;
       }
       if (!silent)
-        info = `Product scan raised ${res.data?.scanProductAlerts.length ?? 0} new alert(s).`;
+        info = t("alerts.productScanRaised", { count: res.data?.scanProductAlerts.length ?? 0 });
       await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -151,13 +152,13 @@
       const overdueErr = overdue.errors?.[0]?.message;
       const sendErr = sendDue.errors?.[0]?.message;
       if (overdueErr || sendErr) {
-        error = overdueErr ?? sendErr ?? "Scan failed.";
+        error = overdueErr ?? sendErr ?? t("alerts.scanFailed");
         return;
       }
       const n =
         (overdue.data?.scanDeliveryOverdue.length ?? 0) +
         (sendDue.data?.scanSendDue.length ?? 0);
-      if (!silent) info = `Purchase scan raised ${n} new alert(s).`;
+      if (!silent) info = t("alerts.purchaseScanRaised", { count: n });
       await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -248,26 +249,26 @@
   }
 </script>
 
-<svelte:head><title>Alerts · Retale Console</title></svelte:head>
+<svelte:head><title>{t("alerts.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Alerts</h1>
+    <h1 class="text-xl font-semibold">{t("alerts.title")}</h1>
     <div class="flex items-center gap-2">
       <Button
         size="sm"
         variant="outline"
         disabled={busy || !canScanProduct}
-        onclick={() => scanProduct()}>Scan products</Button
+        onclick={() => scanProduct()}>{t("alerts.scanProducts")}</Button
       >
       <Button
         size="sm"
         variant="outline"
         disabled={busy || !canScanPurchase}
-        onclick={() => scanPurchases()}>Scan purchases</Button
+        onclick={() => scanPurchases()}>{t("alerts.scanPurchases")}</Button
       >
       <Button size="sm" variant="ghost" onclick={toggleHistory}>
-        {showAcked ? "Hide acknowledged" : "Show acknowledged"}
+        {showAcked ? t("alerts.hideAcknowledged") : t("alerts.showAcknowledged")}
       </Button>
     </div>
   </div>
@@ -280,14 +281,14 @@
   {/if}
 
   {#if $Inbox.fetching && productAlerts.length + purchaseAlerts.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Inbox.errors?.length}
     <p class="text-sm text-destructive">{$Inbox.errors[0].message}</p>
   {:else}
     <!-- Product alerts -->
     <section>
       <h2 class="mb-2 text-sm font-semibold">
-        Product alerts
+        {t("alerts.productAlerts")}
         <span class="ml-1 text-xs font-normal text-muted-foreground">
           ({productAlerts.length})
         </span>
@@ -296,11 +297,11 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="min-w-48 px-4 py-2 font-medium">Product</th>
-              <th class="px-4 py-2 font-medium">Type</th>
-              <th class="px-4 py-2 font-medium">Triggered</th>
-              <th class="px-4 py-2 font-medium">Context</th>
-              <th class="px-4 py-2 font-medium">Status</th>
+              <th class="min-w-48 px-4 py-2 font-medium">{t("common.product")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.type")}</th>
+              <th class="px-4 py-2 font-medium">{t("alerts.triggered")}</th>
+              <th class="px-4 py-2 font-medium">{t("alerts.context")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.status")}</th>
               <th class="px-4 py-2 font-medium"></th>
             </tr>
           </thead>
@@ -324,7 +325,7 @@
                 </td>
                 <td class="px-4 py-2">
                   <Badge class={typeBadge(a.type)}>
-                    {a.type.replace("_", " ")}
+                    {t(`alerts.type.${a.type}`)}
                   </Badge>
                 </td>
                 <td class="whitespace-nowrap px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
@@ -337,12 +338,12 @@
                 </td>
                 <td class="px-4 py-2">
                   {#if a.acknowledgedAt}
-                    <Badge class="bg-emerald-100 text-emerald-700">acked</Badge>
+                    <Badge class="bg-emerald-100 text-emerald-700">{t("alerts.acked")}</Badge>
                     {#if a.resolutionNote}
                       <p class="mt-1 text-xs">{a.resolutionNote}</p>
                     {/if}
                   {:else}
-                    <Badge class="bg-amber-100 text-amber-800">open</Badge>
+                    <Badge class="bg-amber-100 text-amber-800">{t("alerts.open")}</Badge>
                   {/if}
                 </td>
                 <td class="px-4 py-2 text-right">
@@ -351,13 +352,13 @@
                       <div class="flex items-center gap-1">
                         <Input
                           bind:value={ackNote}
-                          placeholder="Resolution note (optional)"
+                           placeholder={t("alerts.resolutionNote")}
                           class="w-56"
                         />
                         <Button
                           size="sm"
                           disabled={busy}
-                          onclick={() => ackProduct(a.id)}>Ack</Button
+                           onclick={() => ackProduct(a.id)}>{t("alerts.ack")}</Button
                         >
                         <Button
                           size="sm"
@@ -376,7 +377,7 @@
                         onclick={() => {
                           ackingId = a.id;
                           ackNote = "";
-                        }}>Acknowledge</Button
+                        }}>{t("alerts.acknowledge")}</Button
                       >
                     {/if}
                   {/if}
@@ -386,7 +387,7 @@
             {#if productAlerts.length === 0}
               <tr>
                 <td colspan="6" class="px-4 py-6 text-center text-muted-foreground">
-                  No product alerts.
+                  {t("alerts.noProductAlerts")}
                 </td>
               </tr>
             {/if}
@@ -401,7 +402,7 @@
     <!-- Purchase alerts -->
     <section>
       <h2 class="mb-2 text-sm font-semibold">
-        Purchase alerts
+        {t("alerts.purchaseAlerts")}
         <span class="ml-1 text-xs font-normal text-muted-foreground">
           ({purchaseAlerts.length})
         </span>
@@ -410,11 +411,11 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="min-w-48 px-4 py-2 font-medium">PO</th>
-              <th class="px-4 py-2 font-medium">Type</th>
-              <th class="px-4 py-2 font-medium">Triggered</th>
-              <th class="px-4 py-2 font-medium">Context</th>
-              <th class="px-4 py-2 font-medium">Status</th>
+              <th class="min-w-48 px-4 py-2 font-medium">{t("alerts.poTab")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.type")}</th>
+              <th class="px-4 py-2 font-medium">{t("alerts.triggered")}</th>
+              <th class="px-4 py-2 font-medium">{t("alerts.context")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.status")}</th>
               <th class="px-4 py-2 font-medium"></th>
             </tr>
           </thead>
@@ -434,7 +435,7 @@
                 </td>
                 <td class="px-4 py-2">
                   <Badge class={typeBadge(a.type)}>
-                    {a.type.replace("_", " ")}
+                    {t(`alerts.type.${a.type}`)}
                   </Badge>
                 </td>
                 <td class="whitespace-nowrap px-4 py-2">{fmtDateTime(a.triggeredAt)}</td>
@@ -445,12 +446,12 @@
                 </td>
                 <td class="px-4 py-2">
                   {#if a.acknowledgedAt}
-                    <Badge class="bg-emerald-100 text-emerald-700">acked</Badge>
+                    <Badge class="bg-emerald-100 text-emerald-700">{t("alerts.acked")}</Badge>
                     {#if a.resolutionNote}
                       <p class="mt-1 text-xs">{a.resolutionNote}</p>
                     {/if}
                   {:else}
-                    <Badge class="bg-amber-100 text-amber-800">open</Badge>
+                    <Badge class="bg-amber-100 text-amber-800">{t("alerts.open")}</Badge>
                   {/if}
                 </td>
                 <td class="px-4 py-2 text-right">
@@ -459,13 +460,13 @@
                       <div class="flex items-center gap-1">
                         <Input
                           bind:value={ackNote}
-                          placeholder="Resolution note (optional)"
+                           placeholder={t("alerts.resolutionNote")}
                           class="w-56"
                         />
                         <Button
                           size="sm"
                           disabled={busy}
-                          onclick={() => ackPurchase(a.id)}>Ack</Button
+                           onclick={() => ackPurchase(a.id)}>{t("alerts.ack")}</Button
                         >
                         <Button
                           size="sm"
@@ -484,7 +485,7 @@
                         onclick={() => {
                           ackingId = a.id;
                           ackNote = "";
-                        }}>Acknowledge</Button
+                        }}>{t("alerts.acknowledge")}</Button
                       >
                     {/if}
                   {/if}
@@ -494,7 +495,7 @@
             {#if purchaseAlerts.length === 0}
               <tr>
                 <td colspan="6" class="px-4 py-6 text-center text-muted-foreground">
-                  No purchase alerts.
+                  {t("alerts.noPurchaseAlerts")}
                 </td>
               </tr>
             {/if}

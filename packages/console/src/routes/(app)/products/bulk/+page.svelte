@@ -10,6 +10,7 @@
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Only the category list is needed — for the batch Category picker.
@@ -60,7 +61,7 @@
   const categories = $derived($BulkAdd.data?.categories ?? []);
   const categoryPaths = $derived(treePathMap(categories));
   const categoryOptions = $derived([
-    { value: "", label: "Uncategorized" },
+    { value: "", label: t("products.uncategorized") },
     ...categories.map((c) => ({
       value: c.id,
       label: categoryPaths.get(c.id) ?? c.name,
@@ -159,34 +160,32 @@
   }
 </script>
 
-<svelte:head><title>Bulk add products · Retale Console</title></svelte:head>
+<svelte:head><title>{t("products.bulkAddPageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
-  <a href="/products" class="text-sm text-primary hover:underline">← Products</a>
+  <a href="/products" class="text-sm text-primary hover:underline">{t("products.backToProducts")}</a>
 
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Bulk add products</h1>
+    <h1 class="text-xl font-semibold">{t("products.bulkAddTitle")}</h1>
   </div>
 
   {#if !canCreate}
     <p class="text-sm text-muted-foreground">
-      You don't have permission to create products.
+      {t("products.noCreatePermission")}
     </p>
   {:else}
     <p class="text-sm text-muted-foreground">
-      Draft products in the grid, then create them all at once. Only name and
-      price are required; cost is optional. Rows are not saved until you click
-      Create, and are discarded if you leave or refresh.
+      {t("products.bulkAddSubtitle")}
     </p>
 
     <div class="flex flex-wrap items-end gap-3">
       <label class="space-y-1">
-        <span class="text-xs font-medium">Category (applied to all)</span>
+        <span class="text-xs font-medium">{t("products.bulkCategoryAll")}</span>
         <div class="w-72">
           <Combobox
             options={categoryOptions}
             bind:value={batchCategoryId}
-            placeholder="Search category…"
+            placeholder={t("products.searchCategory")}
           />
         </div>
       </label>
@@ -198,10 +197,9 @@
           ? 'text-destructive'
           : 'text-emerald-700'}"
       >
-        Created {summary.created} product{summary.created === 1 ? "" : "s"}{summary.failed >
-        0
-          ? ` · ${summary.failed} failed`
-          : ""}.
+        {summary.failed > 0
+          ? t("products.bulkCreatedPartial", { count: summary.created, failed: summary.failed })
+          : t("products.bulkCreated", { count: summary.created })}
       </p>
     {/if}
 
@@ -210,10 +208,10 @@
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
             <th class="w-10 px-3 py-2 text-right font-medium">#</th>
-            <th class="px-3 py-2 font-medium">Name</th>
-            <th class="w-40 px-3 py-2 font-medium">Price (Rp)</th>
-            <th class="w-40 px-3 py-2 font-medium">Cost (Rp)</th>
-            <th class="px-3 py-2 font-medium">Status</th>
+            <th class="px-3 py-2 font-medium">{t("common.name")}</th>
+            <th class="w-40 px-3 py-2 font-medium">{t("products.priceRp")}</th>
+            <th class="w-40 px-3 py-2 font-medium">{t("products.costRp")}</th>
+            <th class="px-3 py-2 font-medium">{t("common.status")}</th>
             <th class="w-10 px-3 py-2"></th>
           </tr>
         </thead>
@@ -231,7 +229,7 @@
                   </a>
                 {:else}
                   <div class="relative">
-                    <Input bind:value={row.name} placeholder="Product name" disabled={busy} />
+                    <Input bind:value={row.name} placeholder={t("products.productName")} disabled={busy} />
                     <DuplicateHint
                       query={row.name}
                       items={existingProducts}
@@ -265,10 +263,10 @@
               <td class="px-3 py-1.5">
                 {#if row.status === "created"}
                   <span class="inline-flex items-center gap-1 text-emerald-700">
-                    <Check class="size-4" /> Created
+                    <Check class="size-4" /> {t("common.created")}
                   </span>
                 {:else if row.status === "saving"}
-                  <span class="text-muted-foreground">Saving…</span>
+                  <span class="text-muted-foreground">{t("common.saving")}</span>
                 {:else if row.status === "error"}
                   <span class="text-destructive">{row.error}</span>
                 {:else}
@@ -279,7 +277,7 @@
                 {#if row.status !== "created" && !(rows.length === 1 && rowEmpty(row))}
                   <IconButton
                     icon={X}
-                    label="Remove row"
+                    label={t("products.removeRow")}
                     disabled={busy}
                     onclick={() => removeRow(i)}
                   />
@@ -294,11 +292,11 @@
     <div class="flex items-center justify-end gap-2">
       {#if rows.some((r) => r.status === "created")}
         <Button variant="ghost" size="sm" disabled={busy} onclick={clearCreated}>
-          Clear created
+          {t("products.clearCreated")}
         </Button>
       {/if}
       <Button size="sm" disabled={busy || readyCount === 0} onclick={createAll}>
-        {busy ? "Creating…" : `Create ${readyCount} product${readyCount === 1 ? "" : "s"}`}
+        {busy ? t("products.creating") : t("products.createCount", { count: readyCount })}
       </Button>
     </div>
   {/if}

@@ -5,7 +5,7 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, statusLabel } from "$lib/utils";
+  import { formatMoney } from "$lib/utils";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -15,6 +15,7 @@
   import Pagination from "$lib/components/ui/pagination.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -583,7 +584,7 @@
     if (c.field === "qty") {
       const n = Number(cellStr);
       if (!Number.isInteger(n) || n < 1) {
-        error = "Qty must be a positive integer.";
+        error = t("orderDetail.qtyPositive");
         return;
       }
       if (n === i.qty) {
@@ -661,7 +662,7 @@
     if (!order) return;
     const amt = payAmount ?? 0;
     if (amt <= 0) {
-      error = "Payment amount must be a positive amount.";
+      error = t("orderDetail.paymentPositive");
       return;
     }
     const ok = await run(() =>
@@ -681,7 +682,7 @@
 
   async function cancelSale() {
     if (!order) return;
-    const reason = prompt("Reason for cancelling this sale?")?.trim();
+    const reason = prompt(t("orderDetail.cancelReasonPrompt"))?.trim();
     if (!reason) return;
     const ok = await run(() => CancelSale.mutate({ orderId: order.id, reason }));
     if (ok) await refetch();
@@ -783,20 +784,21 @@
     error = null;
     try {
       const res = await fetch(pdfHref, { credentials: "same-origin" });
-      if (!res.ok) throw new Error(`PDF unavailable (${res.status})`);
+      if (!res.ok) throw new Error(t("orderDetail.pdfUnavailable", { status: res.status }));
       const blob = await res.blob();
       const file = new File([blob], `receipt-${order.id}.pdf`, {
         type: "application/pdf",
       });
       if (!navigator.canShare?.({ files: [file] })) {
-        error =
-          "This device can't share files. Use Download PDF, then attach it in WhatsApp.";
+        error = t("orderDetail.cantShare");
         return;
       }
-      const caption = `${sendDraft?.subject ?? "Receipt"} — see the attached PDF.`;
+      const caption = t("orderDetail.seeAttachedPdf", {
+        subject: sendDraft?.subject ?? t("orderDetail.receipt"),
+      });
       await navigator.share({
         files: [file],
-        title: sendDraft?.subject ?? "Receipt",
+        title: sendDraft?.subject ?? t("orderDetail.receipt"),
         text: caption,
       });
     } catch (e) {
@@ -809,32 +811,32 @@
 </script>
 
 <svelte:head>
-  <title>Order · Retale Console</title>
+  <title>{t("orderDetail.pageTitle")}</title>
 </svelte:head>
 
 <div class="space-y-4">
-  <a href="/orders" class="text-sm text-primary hover:underline">← All orders</a>
+  <a href="/orders" class="text-sm text-primary hover:underline">{t("orderDetail.backToOrders")}</a>
 
   {#if $OrderDetail.fetching && !order}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $OrderDetail.errors?.length}
     <p class="text-sm text-destructive">{$OrderDetail.errors[0].message}</p>
   {:else if !order}
-    <p class="text-sm text-muted-foreground">Order not found.</p>
+    <p class="text-sm text-muted-foreground">{t("orderDetail.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between">
       <div>
         <h1 class="text-xl font-semibold">
-          {order.displayNumber ?? `Order ${order.id.slice(-8)}`}
+          {order.displayNumber ?? t("orderDetail.orderLabel", { id: order.id.slice(-8) })}
         </h1>
         <p class="text-sm text-muted-foreground">
-          {order.snapshotCustomerName ?? "Walk-in"} · created {fmt(order.createdAt)}
-          {#if order.closedAt}· closed {fmt(order.closedAt)}{/if}
-          {#if order.cancelledAt}· cancelled {fmt(order.cancelledAt)}{/if}
+          {order.snapshotCustomerName ?? t("orderDetail.walkIn")} · {t("orderDetail.created", { date: fmt(order.createdAt) })}
+          {#if order.closedAt}· {t("orderDetail.closed", { date: fmt(order.closedAt) })}{/if}
+          {#if order.cancelledAt}· {t("orderDetail.cancelled", { date: fmt(order.cancelledAt) })}{/if}
         </p>
         {#if order.posSessionId}
           <p class="text-xs text-muted-foreground">
-            Session
+            {t("orderDetail.session")}
             <a
               href={`/sessions/${order.posSessionId}`}
               class="font-mono text-primary hover:underline"
@@ -845,7 +847,7 @@
         {/if}
         {#if order.returnOfOrderId}
           <p class="text-xs text-muted-foreground">
-            Return of
+            {t("orderDetail.returnOf")}
             <a
               href={`/orders/${order.returnOfOrderId}`}
               class="font-mono text-primary hover:underline"
@@ -855,21 +857,21 @@
           </p>
         {/if}
       </div>
-      <Badge class={statusBadge(order.status)}>{statusLabel(order.status)}</Badge>
+      <Badge class={statusBadge(order.status)}>{t(`orders.status.${order.status}`)}</Badge>
     </div>
 
     <!-- Summary metrics -->
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="rounded-lg border bg-card p-3">
-        <span class="text-xs font-medium text-muted-foreground">Total Revenue</span>
+        <span class="text-xs font-medium text-muted-foreground">{t("orderDetail.totalRevenue")}</span>
         <div class="text-lg font-semibold">{formatMoney(order.totalMinor)}</div>
       </div>
       <div class="rounded-lg border bg-card p-3">
-        <span class="text-xs font-medium text-muted-foreground">Total Cost</span>
+        <span class="text-xs font-medium text-muted-foreground">{t("orderDetail.totalCost")}</span>
         <div class="text-lg font-semibold">{formatMoney(computedCost)}</div>
       </div>
       <div class="rounded-lg border bg-card p-3">
-        <span class="text-xs font-medium text-muted-foreground">Margin</span>
+        <span class="text-xs font-medium text-muted-foreground">{t("products.margin")}</span>
         <div class="flex items-center gap-1.5">
           <span class="text-lg font-semibold">{formatMoney(computedMargin)}</span>
           {#if computedMarginPct != null}
@@ -880,7 +882,7 @@
         </div>
       </div>
       <div class="rounded-lg border bg-card p-3">
-        <span class="text-xs font-medium text-muted-foreground">Paid / Outstanding</span>
+        <span class="text-xs font-medium text-muted-foreground">{t("orderDetail.paidOutstanding")}</span>
         <div class="text-lg font-semibold {computed - paid > 0 ? 'text-amber-700' : 'text-emerald-700'}">
           {formatMoney(paid)} / {formatMoney(computed - paid)}
         </div>
@@ -889,7 +891,7 @@
 
     {#if order.cancellationReason}
       <div class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-        <span class="font-medium">Cancelled:</span>
+        <span class="font-medium">{t("orderDetail.cancelledLabel")}</span>
         {order.cancellationReason}
       </div>
     {/if}
@@ -901,11 +903,11 @@
     <!-- Order note -->
     {#if isOpen}
       <div class="space-y-2 rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold">Note</h2>
+        <h2 class="text-sm font-semibold">{t("common.note")}</h2>
         <Textarea
           bind:value={noteDraft}
           disabled={busy || !canEdit}
-          placeholder="Customer instructions, remarks…"
+          placeholder={t("orderDetail.notePlaceholder")}
           class="h-20 resize-none"
         />
         <div class="flex justify-end">
@@ -914,13 +916,13 @@
             disabled={busy || !canEdit || !noteDirty}
             onclick={saveNote}
           >
-            Save note
+            {t("orderDetail.saveNote")}
           </Button>
         </div>
       </div>
     {:else if order.note}
       <div class="space-y-1 rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold">Note</h2>
+        <h2 class="text-sm font-semibold">{t("common.note")}</h2>
         <p class="whitespace-pre-wrap text-sm text-muted-foreground">{order.note}</p>
       </div>
     {/if}
@@ -931,12 +933,12 @@
         <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Item</th>
-            <th class="px-4 py-2 text-right font-medium">Qty</th>
-            <th class="px-4 py-2 text-right font-medium">Cost</th>
-            <th class="px-4 py-2 text-right font-medium">Price</th>
-            <th class="px-4 py-2 text-right font-medium">Discount</th>
-            <th class="px-4 py-2 text-right font-medium">Line total</th>
+            <th class="px-4 py-2 font-medium">{t("orderDetail.item")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.qty")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.cost")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.price")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("orderDetail.discount")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("orderDetail.lineTotal")}</th>
             {#if isOpen}<th></th>{/if}
           </tr>
         </thead>
@@ -958,7 +960,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 text-left font-medium hover:bg-accent"
-                    title="Edit display name (clear to use the default)"
+                    title={t("orderDetail.editNameTitle")}
                     onclick={() => startCellEdit(i, "name")}>{i.displayName}</button
                   >
                 {:else}
@@ -975,7 +977,7 @@
                 {#if margin != null}
                   <div class="mt-1">
                     <Badge class={marginBadgeClass(margin)}>
-                      {margin.toFixed(1)}% margin
+                      {t("orderDetail.marginLabel", { value: margin.toFixed(1) })}
                     </Badge>
                   </div>
                 {/if}
@@ -995,7 +997,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit qty"
+                    title={t("orderDetail.editQty")}
                     onclick={() => startCellEdit(i, "qty")}>{i.qty}</button
                   >
                 {:else}
@@ -1018,7 +1020,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit price"
+                    title={t("products.editPrice")}
                     onclick={() => startCellEdit(i, "price")}
                     >{formatMoney(i.snapshotPriceMinor)}</button
                   >
@@ -1039,7 +1041,7 @@
                   <button
                     type="button"
                     class="-mx-1 rounded px-1 hover:bg-accent"
-                    title="Edit discount"
+                    title={t("orderDetail.editDiscount")}
                     onclick={() => startCellEdit(i, "discount")}
                     >{i.discountMinor ? formatMoney(i.discountMinor) : "—"}</button
                   >
@@ -1054,7 +1056,7 @@
                 <td class="px-4 py-2 text-right whitespace-nowrap">
                   <IconButton
                     icon={Trash2}
-                    label="Delete line"
+                    label={t("orderDetail.deleteLine")}
                     variant="destructive"
                     disabled={busy || !canVoid}
                     onclick={() => deleteLine(i.id)}
@@ -1069,7 +1071,7 @@
                 colspan={isOpen ? 7 : 6}
                 class="px-4 py-8 text-center text-muted-foreground"
               >
-                No line items.
+                {t("orderDetail.noItems")}
               </td>
             </tr>
           {/if}
@@ -1083,7 +1085,7 @@
                 colspan={isOpen ? 6 : 5}
                 class="px-4 py-2 text-right font-medium"
               >
-                Lines total
+                {t("orderDetail.linesTotal")}
               </td>
               <td class="px-4 py-2 text-right font-medium">
                 {formatMoney(computed)}
@@ -1095,7 +1097,7 @@
               colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium text-muted-foreground"
             >
-              Total cost
+              {t("orderDetail.totalCost")}
             </td>
             <td class="px-4 py-2 text-right font-medium text-muted-foreground">
               {formatMoney(computedCost)}
@@ -1106,7 +1108,7 @@
               colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium"
             >
-              Margin
+              {t("products.margin")}
             </td>
             <td class="px-4 py-2 text-right font-medium">
               <span>{formatMoney(computedMargin)}</span>
@@ -1122,7 +1124,7 @@
               colspan={isOpen ? 6 : 5}
               class="px-4 py-2 text-right font-medium"
             >
-              Total
+              {t("common.total")}
             </td>
             <td
               class="px-4 py-2 text-right font-medium
@@ -1144,7 +1146,7 @@
           <div class="relative">
             <Input
               type="search"
-              placeholder="Add line — search product or SKU…"
+              placeholder={t("orderDetail.addLineSearch")}
               bind:value={variantSearch}
               onfocus={() => (pickerOpen = true)}
               onblur={() => setTimeout(() => (pickerOpen = false), 150)}
@@ -1191,7 +1193,7 @@
               <div
                 class="absolute bottom-full z-10 mb-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
               >
-                No matches.
+                {t("products.noMatches")}
               </div>
             {/if}
           </div>
@@ -1206,8 +1208,7 @@
                 </div>
                 <div class="truncate text-xs text-muted-foreground">
                   {draft.row.sku}{draft.row.label ? ` · ${draft.row.label}` : ""}
-                  · {draft.row.unit} · cost {formatMoney(draft.row.costMinor)} · base
-                  {formatMoney(draft.row.priceMinor)}
+                  · {draft.row.unit} · {t("orderDetail.costPrefix", { value: formatMoney(draft.row.costMinor) })} · {t("orderDetail.basePrefix", { value: formatMoney(draft.row.priceMinor) })}
                   {#if draft.productKind !== "physical"}
                     · {draft.productKind}
                   {/if}
@@ -1215,7 +1216,7 @@
               </div>
               <label class="space-y-0.5">
                 <span class="block text-[11px] font-medium text-muted-foreground">
-                  Qty
+                  {t("common.qty")}
                 </span>
                 <NumericInput
                   min={1}
@@ -1228,7 +1229,7 @@
               </label>
               <label class="space-y-0.5">
                 <span class="block text-[11px] font-medium text-muted-foreground">
-                  Disc (Rp)
+                  {t("orderDetail.discRp")}
                 </span>
                 <MoneyInput
                   bind:value={addDiscount}
@@ -1239,12 +1240,12 @@
               </label>
               <label class="space-y-0.5">
                 <span class="block text-[11px] font-medium text-muted-foreground">
-                  Price (Rp)
+                  {t("products.priceRp")}
                 </span>
                 <MoneyInput
                   placeholder={draft.productKind === "open_price"
-                    ? "Required"
-                    : "Base"}
+                    ? t("orderDetail.required")
+                    : t("orderDetail.base")}
                   bind:value={addPriceOverride}
                   onkeydown={onDraftKey}
                   class="h-8 w-28"
@@ -1253,7 +1254,7 @@
               </label>
               {#if draftMargin != null}
                 <Badge class="{marginBadgeClass(draftMargin)} self-end">
-                  {draftMargin.toFixed(1)}% margin
+                  {t("orderDetail.marginLabel", { value: draftMargin.toFixed(1) })}
                 </Badge>
               {/if}
               <Button
@@ -1261,10 +1262,10 @@
                 disabled={busy || !canEdit || addQty < 1}
                 onclick={commitDraft}
               >
-                Add
+                {t("common.add")}
               </Button>
               <Button variant="ghost" size="sm" disabled={busy} onclick={clearDraft}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           {/if}
@@ -1274,28 +1275,26 @@
 
     {#if isOpen && canEdit}
       <p class="text-xs text-muted-foreground">
-        Click a line's name, qty, price, or discount to edit it in place. Enter
-        saves, Escape cancels. Search above to add a line (Enter picks the
-        highlighted match); voiding a line returns its stock.
+        {t("orderDetail.editHint")}
       </p>
     {/if}
 
     <!-- Payments -->
     <div>
-      <h2 class="mb-2 text-sm font-semibold">Payments</h2>
+      <h2 class="mb-2 text-sm font-semibold">{t("orderDetail.payments")}</h2>
       <div class="overflow-hidden rounded-lg border bg-card">
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Method</th>
-              <th class="px-4 py-2 font-medium">When</th>
-              <th class="px-4 py-2 text-right font-medium">Amount</th>
+              <th class="px-4 py-2 font-medium">{t("orderDetail.method")}</th>
+              <th class="px-4 py-2 font-medium">{t("orders.when")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("common.amount")}</th>
             </tr>
           </thead>
           <tbody>
             {#each paginatedPayments as p (p.id)}
               <tr class="border-b last:border-0">
-                <td class="px-4 py-2 capitalize">{p.method}</td>
+                <td class="px-4 py-2 capitalize">{t(`orderDetail.method.${p.method}`)}</td>
                 <td class="px-4 py-2">{fmt(p.createdAt)}</td>
                 <td class="px-4 py-2 text-right">{formatMoney(p.amountMinor)}</td>
               </tr>
@@ -1303,7 +1302,7 @@
             {#if order.payments.length === 0}
               <tr>
                 <td colspan="3" class="px-4 py-6 text-center text-muted-foreground">
-                  No payments recorded.
+                  {t("orderDetail.noPayments")}
                 </td>
               </tr>
             {/if}
@@ -1311,7 +1310,7 @@
           <tfoot class="bg-muted/30">
             <tr>
               <td colspan="2" class="px-4 py-2 text-right font-medium">
-                Paid total
+                {t("orderDetail.paidTotal")}
               </td>
               <td class="px-4 py-2 text-right font-medium">
                 {formatMoney(paid)}
@@ -1319,7 +1318,7 @@
             </tr>
             <tr>
               <td colspan="2" class="px-4 py-2 text-right font-medium">
-                Outstanding
+                {t("orderDetail.outstanding")}
               </td>
               <td
                 class="px-4 py-2 text-right font-medium {computed - paid > 0
@@ -1340,10 +1339,10 @@
     {#if isOpen}
       <!-- Payment / close / cancel -->
       <div class="space-y-3 rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold">Record payment</h2>
+        <h2 class="text-sm font-semibold">{t("orderDetail.recordPayment")}</h2>
         <div class="flex items-end gap-2">
           <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Amount (Rp)</span>
+            <span class="text-xs font-medium">{t("orderDetail.amountRp")}</span>
             <MoneyInput
               bind:value={payAmount}
               placeholder={String(Math.max(computed - paid, 0))}
@@ -1355,12 +1354,11 @@
             disabled={busy || !canEdit || !payAmount}
             onclick={recordPayment}
           >
-            Add payment
+            {t("orderDetail.addPayment")}
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          Console payments are recorded as cash. Outstanding above suggests the
-          remaining amount.
+          {t("orderDetail.paymentHelp")}
         </p>
 
         <div class="flex flex-wrap gap-2 border-t pt-3">
@@ -1369,7 +1367,7 @@
             disabled={busy || !canClose}
             onclick={closeSale}
           >
-            Close sale
+            {t("orderDetail.closeSale")}
           </Button>
           <Button
             size="sm"
@@ -1377,12 +1375,11 @@
             disabled={busy || !canCancel}
             onclick={cancelSale}
           >
-            Cancel sale
+            {t("orderDetail.cancelSale")}
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          Closing assigns a display number; the sale becomes immutable.
-          Cancelling voids every line and is permanent.
+          {t("orderDetail.closeCancelHelp")}
         </p>
       </div>
     {/if}
@@ -1390,39 +1387,38 @@
     <!-- Send to customer -->
     <section class="space-y-3 rounded-lg border bg-card p-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Send to customer</h2>
+        <h2 class="text-sm font-semibold">{t("orderDetail.sendToCustomer")}</h2>
         <Button
           variant="outline"
           size="sm"
           disabled={busy || !canSend || order.status === "cancelled"}
-          onclick={startCompose}>Compose</Button
+          onclick={startCompose}>{t("orderDetail.compose")}</Button
         >
       </div>
 
       {#if !composer}
         <p class="text-sm text-muted-foreground">
-          Send {order.snapshotCustomerName ?? "the customer"} their receipt over
-          WhatsApp or email, or share it as a PDF.
+          {t("orderDetail.sendHint", { name: order.snapshotCustomerName ?? t("orderDetail.theCustomer") })}
         </p>
       {:else}
         <div class="space-y-3 rounded-md border bg-background p-4">
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Channel</span>
+              <span class="text-xs font-medium">{t("orderDetail.channel")}</span>
               <Select bind:value={composer.channel} onchange={previewSend}>
-                {#each CHANNELS as c (c)}<option value={c}>{c}</option>{/each}
+                {#each CHANNELS as c (c)}<option value={c}>{t(`orderDetail.channel.${c}`)}</option>{/each}
               </Select>
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">
-                Recipient override
-                <span class="text-muted-foreground">(optional)</span>
+                {t("orderDetail.recipientOverride")}
+                <span class="text-muted-foreground">({t("common.optional")})</span>
               </span>
               <Input
                 bind:value={composer.recipientOverride}
                 placeholder={composer.channel === "email"
-                  ? "Customer email"
-                  : "Customer phone"}
+                  ? t("orderDetail.customerEmail")
+                  : t("orderDetail.customerPhone")}
                 onblur={previewSend}
               />
             </label>
@@ -1430,40 +1426,40 @@
 
           {#if composer.channel === "whatsapp"}
             <label class="space-y-1">
-              <span class="text-xs font-medium">Format</span>
+              <span class="text-xs font-medium">{t("orderDetail.format")}</span>
               <Select bind:value={composer.format}>
-                <option value="text">Message text</option>
-                <option value="pdf">PDF attachment</option>
+                <option value="text">{t("orderDetail.messageText")}</option>
+                <option value="pdf">{t("orderDetail.pdfAttachment")}</option>
               </Select>
             </label>
           {/if}
 
           {#if previewing}
-            <p class="text-sm text-muted-foreground">Rendering preview…</p>
+            <p class="text-sm text-muted-foreground">{t("orderDetail.renderingPreview")}</p>
           {:else if sendDraft}
             <div class="space-y-2">
               {#if composer.channel !== "manual"}
                 {@const pdfMode =
                   composer.channel === "whatsapp" && composer.format === "pdf"}
                 <p class="text-xs">
-                  <span class="font-medium">Recipient:</span>
+                  <span class="font-medium">{t("orderDetail.recipient")}</span>
                   {sendDraft.recipient ?? "—"}
                   {#if pdfMode}
                     <span class="text-muted-foreground"
-                      >— you'll pick the contact in the share sheet</span
+                      >{t("orderDetail.pickContactShareSheet")}</span
                     >
                   {:else if !sendDraft.recipientAvailable}
                     <Badge class="ml-1 bg-amber-100 text-amber-800">
                       {sendDraft.recipient
-                        ? "unusable for this channel"
-                        : "none on file — add an override"}
+                        ? t("orderDetail.unusableChannel")
+                        : t("orderDetail.noneOnFile")}
                     </Badge>
                   {/if}
                 </p>
               {/if}
               {#if composer.channel === "email"}
                 <p class="text-xs">
-                  <span class="font-medium">Subject:</span>
+                  <span class="font-medium">{t("orderDetail.subject")}</span>
                   {sendDraft.subject}
                 </p>
               {/if}
@@ -1477,14 +1473,14 @@
             <div class="flex flex-wrap items-center gap-2">
               {#if composer.channel === "manual"}
                 <span class="text-xs text-muted-foreground">
-                  Manual send — copy the message above and send it off-system.
+                  {t("orderDetail.manualSendHint")}
                 </span>
               {:else if composer.channel === "whatsapp" && composer.format === "pdf"}
                 <Button size="sm" disabled={busy || sharing} onclick={sharePdf}>
-                  {sharing ? "Preparing PDF…" : "Send PDF to WhatsApp"}
+                  {sharing ? t("orderDetail.preparingPdf") : t("orderDetail.sendPdfWhatsApp")}
                 </Button>
                 <span class="text-xs text-muted-foreground">
-                  Attaches the receipt PDF — pick the customer in the share sheet.
+                  {t("orderDetail.attachPdfHint")}
                 </span>
               {:else if sendDraft.deepLink}
                 <a
@@ -1493,11 +1489,11 @@
                   rel="noopener noreferrer"
                   class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                 >
-                  Open in {composer.channel === "whatsapp" ? "WhatsApp" : "email"}
+                  {composer.channel === "whatsapp" ? t("orderDetail.openInWhatsApp") : t("orderDetail.openInEmail")}
                 </a>
               {:else}
                 <span class="text-xs text-muted-foreground">
-                  Add a usable recipient to enable the {composer.channel} link.
+                  {t("orderDetail.needRecipient", { channel: composer.channel })}
                 </span>
               {/if}
               <a
@@ -1506,21 +1502,20 @@
                 rel="noopener noreferrer"
                 class="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent"
               >
-                Download PDF
+                {t("orderDetail.downloadPdf")}
               </a>
             </div>
           {/if}
 
           <p class="text-xs text-muted-foreground">
-            Opening the link or sharing the PDF sends it directly — nothing is
-            logged.
+            {t("orderDetail.sendDirectNote")}
           </p>
           <div class="flex justify-end">
             <Button
               variant="ghost"
               size="sm"
               disabled={busy}
-              onclick={() => (composer = null)}>Close</Button
+              onclick={() => (composer = null)}>{t("common.close")}</Button
             >
           </div>
         </div>

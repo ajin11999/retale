@@ -49,13 +49,16 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
-    final data = _scope == _Scope.thisShift
-        ? await GraphQLService.instance.query(
-            Ops.sessionOrders,
-            variables: {'posSessionId': widget.posSessionId, 'limit': 100},
-          )
-        : await GraphQLService.instance
-            .query(Ops.recentOrders, variables: {'limit': 100});
+    final data =
+        _scope == _Scope.thisShift
+            ? await GraphQLService.instance.query(
+              Ops.sessionOrders,
+              variables: {'posSessionId': widget.posSessionId, 'limit': 100},
+            )
+            : await GraphQLService.instance.query(
+              Ops.recentOrders,
+              variables: {'limit': 100},
+            );
     return (data['orders'] as List<dynamic>).cast<Map<String, dynamic>>();
   }
 
@@ -84,10 +87,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                 child: SegmentedButton<_Scope>(
                   segments: [
                     ButtonSegment(
-                        value: _Scope.thisShift,
-                        label: Text(tr('history.thisShift'))),
+                      value: _Scope.thisShift,
+                      label: Text(tr('history.thisShift')),
+                    ),
                     ButtonSegment(
-                        value: _Scope.all, label: Text(tr('history.allOrders'))),
+                      value: _Scope.all,
+                      label: Text(tr('history.allOrders')),
+                    ),
                   ],
                   selected: {_scope},
                   onSelectionChanged: (s) => _setScope(s.first),
@@ -102,17 +108,17 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               SizedBox(width: constraints.maxWidth * 0.4, child: listPane),
               const VerticalDivider(width: 1),
               Expanded(
-                child: _selectedOrderId == null
-                    ? Center(
-                        child: Text(tr('history.selectOrderPrompt')))
-                    : _OrderDetailPanel(
-                        // Recreate the panel (and its fetch) per order.
-                        key: ValueKey(_selectedOrderId),
-                        orderId: _selectedOrderId!,
-                        posSessionId: widget.posSessionId,
-                        embedded: true,
-                        onOrderChanged: _reload,
-                      ),
+                child:
+                    _selectedOrderId == null
+                        ? Center(child: Text(tr('history.selectOrderPrompt')))
+                        : _OrderDetailPanel(
+                          // Recreate the panel (and its fetch) per order.
+                          key: ValueKey(_selectedOrderId),
+                          orderId: _selectedOrderId!,
+                          posSessionId: widget.posSessionId,
+                          embedded: true,
+                          onOrderChanged: _reload,
+                        ),
               ),
             ],
           );
@@ -130,14 +136,18 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         }
         if (snapshot.hasError) {
           return ErrorRetry(
-              message: describeError(snapshot.error!), onRetry: _reload);
+            message: describeError(snapshot.error!),
+            onRetry: _reload,
+          );
         }
         final orders = snapshot.data!;
         if (orders.isEmpty) {
           return Center(
-            child: Text(_scope == _Scope.thisShift
-                ? tr('history.noOrdersThisShift')
-                : tr('history.noOrders')),
+            child: Text(
+              _scope == _Scope.thisShift
+                  ? tr('history.noOrdersThisShift')
+                  : tr('history.noOrders'),
+            ),
           );
         }
         return RefreshIndicator(
@@ -157,25 +167,30 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     final id = o['id'] as String;
     return ListTile(
       selected: _wide && _selectedOrderId == id,
-      selectedTileColor: Theme.of(context)
-          .colorScheme
-          .primaryContainer
-          .withValues(alpha: 0.3),
+      selectedTileColor: Theme.of(
+        context,
+      ).colorScheme.primaryContainer.withValues(alpha: 0.3),
       title: Text(o['displayNumber'] as String? ?? id),
       subtitle: Text(_formatTime(o['createdAt'] as String?)),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(Money.format(o['totalMinor'] as num),
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            Money.format(o['totalMinor'] as num),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           if (status != 'closed')
-            Text(status,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: status == 'cancelled'
+            Text(
+              status,
+              style: TextStyle(
+                fontSize: 11,
+                color:
+                    status == 'cancelled'
                         ? Colors.redAccent
-                        : Theme.of(context).hintColor)),
+                        : Theme.of(context).hintColor,
+              ),
+            ),
         ],
       ),
       onTap: () async {
@@ -183,12 +198,15 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           setState(() => _selectedOrderId = id);
           return;
         }
-        await Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => _OrderDetailScreen(
-            orderId: id,
-            posSessionId: widget.posSessionId,
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder:
+                (_) => _OrderDetailScreen(
+                  orderId: id,
+                  posSessionId: widget.posSessionId,
+                ),
           ),
-        ));
+        );
         // A return rung from the detail screen changes totals/status.
         _reload();
       },
@@ -251,10 +269,12 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
   }
 
   Future<Map<String, dynamic>> _load() async {
-    final data = await GraphQLService.instance
-        .query(Ops.orderDetail, variables: {'id': widget.orderId});
+    final data = await GraphQLService.instance.query(
+      Ops.orderDetail,
+      variables: {'id': widget.orderId},
+    );
     final order = data['order'];
-    if (order == null) throw GraphQLAppException('Order not found');
+    if (order == null) throw GraphQLAppException(tr('history.orderNotFound'));
     return order as Map<String, dynamic>;
   }
 
@@ -265,28 +285,33 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
       o['status'] == 'closed' && o['returnOfOrderId'] == null;
 
   void _returnRecorded() {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Return recorded')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(tr('history.returnRecorded'))));
     _reload();
     widget.onOrderChanged?.call();
   }
 
   Future<void> _startReturn(Map<String, dynamic> o) async {
-    final items = (o['items'] as List<dynamic>)
-        .cast<Map<String, dynamic>>()
-        .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
-        .toList();
+    final items =
+        (o['items'] as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+            .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
+            .toList();
     if (widget.embedded) {
       setState(() => _returnItems = items);
       return;
     }
-    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => ReturnScreen(
-        originalOrderId: widget.orderId,
-        posSessionId: widget.posSessionId,
-        items: items,
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder:
+            (_) => ReturnScreen(
+              originalOrderId: widget.orderId,
+              posSessionId: widget.posSessionId,
+              items: items,
+            ),
       ),
-    ));
+    );
     if (done == true && mounted) _returnRecorded();
   }
 
@@ -307,7 +332,9 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
   Future<void> _printReceipt(Map<String, dynamic> o) async {
     final store = await ReceiptService.instance.storeInfo();
     if (!mounted) return;
-    await ReceiptService.instance.printReceipt(Receipt.fromOrderDetail(o, store));
+    await ReceiptService.instance.printReceipt(
+      Receipt.fromOrderDetail(o, store),
+    );
   }
 
   @override
@@ -325,86 +352,95 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
       );
     }
     return FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return ErrorRetry(
-                message: describeError(snapshot.error!), onRetry: _reload);
-          }
-          final o = snapshot.data!;
-          final items =
-              (o['items'] as List<dynamic>).cast<Map<String, dynamic>>();
-          final payments =
-              (o['payments'] as List<dynamic>).cast<Map<String, dynamic>>();
-          return Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  children: [
-                    ListTile(
-                      title: Text(
-                          o['displayNumber'] as String? ?? o['id'] as String,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(
-                          '${o['status']}  ·  ${_formatTime(o['createdAt'] as String?)}'),
-                      trailing: Text(Money.format(o['totalMinor'] as num),
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return ErrorRetry(
+            message: describeError(snapshot.error!),
+            onRetry: _reload,
+          );
+        }
+        final o = snapshot.data!;
+        final items =
+            (o['items'] as List<dynamic>).cast<Map<String, dynamic>>();
+        final payments =
+            (o['payments'] as List<dynamic>).cast<Map<String, dynamic>>();
+        return Column(
+          children: [
+            Expanded(
+              child: ListView(
+                children: [
+                  ListTile(
+                    title: Text(
+                      o['displayNumber'] as String? ?? o['id'] as String,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    const Divider(),
-                    for (final it in items) _itemTile(it),
-                    const Divider(),
-                    for (final p in payments)
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.payments),
-                        title: Text(p['method'] as String),
-                        trailing: Text(Money.format(p['amountMinor'] as num)),
+                    subtitle: Text(
+                      '${o['status']}  ·  ${_formatTime(o['createdAt'] as String?)}',
+                    ),
+                    trailing: Text(
+                      Money.format(o['totalMinor'] as num),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.print_outlined),
-                            label: Text(tr('receipt.print')),
-                            onPressed: () => _printReceipt(o),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.chat_outlined),
-                            label: Text(tr('receipt.sendWhatsApp')),
-                            onPressed: () => _sendReceipt(o),
-                          ),
-                        ),
-                      ],
                     ),
-                    if (_returnable(o)) ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.assignment_return),
-                        label: Text(tr('history.refund')),
-                        onPressed: () => _startReturn(o),
+                  ),
+                  const Divider(),
+                  for (final it in items) _itemTile(it),
+                  const Divider(),
+                  for (final p in payments)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.payments),
+                      title: Text(p['method'] as String),
+                      trailing: Text(Money.format(p['amountMinor'] as num)),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.print_outlined),
+                          label: Text(tr('receipt.print')),
+                          onPressed: () => _printReceipt(o),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.chat_outlined),
+                          label: Text(tr('receipt.sendWhatsApp')),
+                          onPressed: () => _sendReceipt(o),
+                        ),
                       ),
                     ],
+                  ),
+                  if (_returnable(o)) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.assignment_return),
+                      label: Text(tr('history.refund')),
+                      onPressed: () => _startReturn(o),
+                    ),
                   ],
-                ),
+                ],
               ),
-            ],
-          );
-        });
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Widget _itemTile(Map<String, dynamic> it) {
@@ -414,12 +450,12 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
       dense: true,
       title: Text(
         it['displayName'] as String,
-        style: voided
-            ? const TextStyle(decoration: TextDecoration.lineThrough)
-            : null,
+        style:
+            voided
+                ? const TextStyle(decoration: TextDecoration.lineThrough)
+                : null,
       ),
-      subtitle:
-          Text('$qty × ${Money.format(it['snapshotPriceMinor'] as num)}'),
+      subtitle: Text('$qty × ${Money.format(it['snapshotPriceMinor'] as num)}'),
       trailing: Text(Money.format(it['lineTotalMinor'] as num)),
     );
   }
@@ -499,20 +535,24 @@ class _ReturnScreenState extends State<ReturnScreen> {
   }
 
   Future<void> _submit() async {
-    final items = _qty.entries
-        .map((e) => {'orderItemId': e.key, 'qty': e.value})
-        .toList();
+    final items =
+        _qty.entries
+            .map((e) => {'orderItemId': e.key, 'qty': e.value})
+            .toList();
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await GraphQLService.instance.mutate(Ops.createReturn, variables: {
-        'originalOrderId': widget.originalOrderId,
-        'posSessionId': widget.posSessionId,
-        'items': items,
-        'refundMethod': _refundMethod,
-      });
+      await GraphQLService.instance.mutate(
+        Ops.createReturn,
+        variables: {
+          'originalOrderId': widget.originalOrderId,
+          'posSessionId': widget.posSessionId,
+          'items': items,
+          'refundMethod': _refundMethod,
+        },
+      );
       if (mounted) {
         final onClose = widget.onClose;
         if (onClose != null) {
@@ -533,23 +573,22 @@ class _ReturnScreenState extends State<ReturnScreen> {
     final onClose = widget.onClose;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Return items'),
+        title: Text(tr('history.returnItemsTitle')),
         automaticallyImplyLeading: onClose == null,
-        leading: onClose == null
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Back to order',
-                onPressed: () => onClose(false),
-              ),
+        leading:
+            onClose == null
+                ? null
+                : IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: tr('history.backToOrder'),
+                  onPressed: () => onClose(false),
+                ),
       ),
       body: Column(
         children: [
           Expanded(
             child: ListView(
-              children: [
-                for (final it in widget.items) _returnLine(it),
-              ],
+              children: [for (final it in widget.items) _returnLine(it)],
             ),
           ),
           const Divider(height: 1),
@@ -560,17 +599,22 @@ class _ReturnScreenState extends State<ReturnScreen> {
               children: [
                 Row(
                   children: [
-                    const Text('Refund as'),
+                    Text(tr('history.refundAs')),
                     const Spacer(),
                     SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'cash', label: Text('Cash')),
+                      segments: [
                         ButtonSegment(
-                            value: 'store_credit', label: Text('Store credit')),
+                          value: 'cash',
+                          label: Text(tr('register.cash')),
+                        ),
+                        ButtonSegment(
+                          value: 'store_credit',
+                          label: Text(tr('history.storeCredit')),
+                        ),
                       ],
                       selected: {_refundMethod},
-                      onSelectionChanged: (s) =>
-                          setState(() => _refundMethod = s.first),
+                      onSelectionChanged:
+                          (s) => setState(() => _refundMethod = s.first),
                     ),
                   ],
                 ),
@@ -581,11 +625,12 @@ class _ReturnScreenState extends State<ReturnScreen> {
                 const SizedBox(height: 12),
                 FilledButton.icon(
                   icon: const Icon(Icons.assignment_return),
-                  label: Text(_selectedCount == 0
-                      ? 'Select items to return'
-                      : 'Return $_selectedCount item${_selectedCount == 1 ? '' : 's'}'),
-                  onPressed:
-                      (_busy || _selectedCount == 0) ? null : _submit,
+                  label: Text(
+                    _selectedCount == 0
+                        ? tr('history.selectItemsToReturn')
+                        : tr('history.returnItems', {'count': _selectedCount}),
+                  ),
+                  onPressed: (_busy || _selectedCount == 0) ? null : _submit,
                 ),
               ],
             ),
@@ -602,13 +647,18 @@ class _ReturnScreenState extends State<ReturnScreen> {
     return ListTile(
       title: Text(it['displayName'] as String),
       subtitle: Text(
-          'Sold $max × ${Money.format(it['snapshotPriceMinor'] as num)}'),
+        tr('history.soldLine', {
+          'qty': max,
+          'price': Money.format(it['snapshotPriceMinor'] as num),
+        }),
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
             icon: const Icon(Icons.remove_circle_outline),
-            onPressed: selected == 0 ? null : () => _setQty(id, max, selected - 1),
+            onPressed:
+                selected == 0 ? null : () => _setQty(id, max, selected - 1),
           ),
           Text('$selected'),
           IconButton(
@@ -661,14 +711,17 @@ class ReturnOrderPicker extends StatelessWidget {
   }
 
   Future<void> _pick(BuildContext context, Map<String, dynamic> o) async {
-    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => ReturnScreen(
-        originalOrderId: o['id'] as String,
-        posSessionId: posSessionId,
-        items: _returnableItems(o),
-        prefillByVariantId: demand,
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder:
+            (_) => ReturnScreen(
+              originalOrderId: o['id'] as String,
+              posSessionId: posSessionId,
+              items: _returnableItems(o),
+              prefillByVariantId: demand,
+            ),
       ),
-    ));
+    );
     if (done == true && context.mounted) Navigator.pop(context, true);
   }
 
@@ -680,7 +733,7 @@ class ReturnOrderPicker extends StatelessWidget {
     final partial = candidates.where((o) => !_coversCart(o)).toList();
     final ordered = [...covering, ...partial];
     return Scaffold(
-      appBar: AppBar(title: const Text('Return against…')),
+      appBar: AppBar(title: Text(tr('history.returnAgainst'))),
       body: ListView.separated(
         itemCount: ordered.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -691,19 +744,23 @@ class ReturnOrderPicker extends StatelessWidget {
           return ListTile(
             title: Text(o['displayNumber'] as String? ?? o['id'] as String),
             subtitle: Text(
-                '${_formatTime(o['createdAt'] as String?)}  ·  $lineCount item${lineCount == 1 ? '' : 's'}'),
+              '${_formatTime(o['createdAt'] as String?)}  ·  ${tr('history.itemsCount', {'count': lineCount})}',
+            ),
             trailing: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(Money.format(o['totalMinor'] as num),
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text(covers ? 'covers cart' : 'partial',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: covers
-                            ? Colors.green
-                            : Theme.of(context).hintColor)),
+                Text(
+                  Money.format(o['totalMinor'] as num),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  covers ? tr('history.coversCart') : tr('history.partial'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: covers ? Colors.green : Theme.of(context).hintColor,
+                  ),
+                ),
               ],
             ),
             onTap: () => _pick(context, o),

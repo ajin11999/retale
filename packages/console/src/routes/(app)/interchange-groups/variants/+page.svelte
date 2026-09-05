@@ -6,6 +6,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
   import { InterchangeGroupsVariantSearchStore } from "$houdini";
 
@@ -45,7 +46,7 @@
   const groups = $derived($Options.data?.interchangeGroups ?? []);
   
   const groupOptions = $derived([
-    { value: "", label: "— None —" },
+    { value: "", label: t("interchangeGroups.none") },
     ...groups.map(g => ({ value: g.id, label: g.name }))
   ]);
 
@@ -114,28 +115,28 @@
   }
 </script>
 
-<svelte:head><title>Manage Variants · Retale Console</title></svelte:head>
+<svelte:head><title>{t("interchangeGroups.manageVariantsPageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
-  <a href="/interchange-groups" class="text-sm text-primary hover:underline">← Interchange Groups</a>
+  <a href="/interchange-groups" class="text-sm text-primary hover:underline">{t("interchangeGroups.backToGroups")}</a>
 
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Manage variant interchange groups</h1>
+    <h1 class="text-xl font-semibold">{t("interchangeGroups.manageVariantsTitle")}</h1>
   </div>
 
   {#if !canEdit}
     <p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-      You don't have permission to edit products.
+      {t("interchangeGroups.noEditPermission")}
     </p>
   {:else}
     <p class="text-sm text-muted-foreground">
-      Search for variants and assign them to interchange groups quickly.
+      {t("interchangeGroups.manageVariantsSubtitle")}
     </p>
     
     <div class="w-full max-w-md">
       <Input
         type="search"
-        placeholder="Search variants by SKU or name..."
+        placeholder={t("interchangeGroups.searchVariantsPlaceholder")}
         bind:value={search}
       />
     </div>
@@ -150,20 +151,20 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Variant</th>
-            <th class="px-4 py-2 font-medium">SKU</th>
-            <th class="w-72 px-4 py-2 font-medium">Interchange Group</th>
+            <th class="px-4 py-2 font-medium">{t("interchangeGroups.variant")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.sku")}</th>
+            <th class="w-72 px-4 py-2 font-medium">{t("interchangeGroups.interchangeGroup")}</th>
           </tr>
         </thead>
         <tbody>
           {#if $searchStore.fetching && variants.length === 0}
             <tr>
-              <td colspan="3" class="px-4 py-10 text-center text-muted-foreground">Loading…</td>
+              <td colspan="3" class="px-4 py-10 text-center text-muted-foreground">{t("common.loading")}</td>
             </tr>
           {:else if variants.length === 0}
             <tr>
               <td colspan="3" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No variants found." : "Type to search for variants."}
+                {search.trim() ? t("interchangeGroups.noVariantsFound") : t("interchangeGroups.typeToSearchVariants")}
               </td>
             </tr>
           {:else}
@@ -186,7 +187,7 @@
                         updateGroup(v.id, val);
                       }
                     }}
-                    placeholder="— None —"
+                    placeholder={t("interchangeGroups.none")}
                     disabled={busy}
                   />
                 </td>
@@ -198,7 +199,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {variants.length} variant{variants.length === 1 ? "" : "s"}
+        {t("interchangeGroups.variantCount", { count: variants.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={variants.length} />
     </div>

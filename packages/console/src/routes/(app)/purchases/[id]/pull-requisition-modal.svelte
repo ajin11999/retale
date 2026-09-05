@@ -2,6 +2,7 @@
   import { graphql } from "$houdini";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
+  import { t } from "$lib/i18n";
   import { X, Check } from "@lucide/svelte";
 
   let { 
@@ -70,7 +71,7 @@
   const availableItems = $derived(requisition?.items.filter((i: any) => i.qtyRequested > i.qtyOrdered) || []);
 
   function getVariantName(variantId: string | null, fallback: string | null) {
-    if (!variantId) return fallback || "Unknown";
+    if (!variantId) return fallback || t("products.unknown");
     for (const p of products) {
       for (const v of p.variants) {
         if (v.id === variantId) {
@@ -78,7 +79,7 @@
         }
       }
     }
-    return fallback || "Unknown";
+    return fallback || t("products.unknown");
   }
 
   function getSku(variantId: string | null) {
@@ -134,7 +135,7 @@
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
     <div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-card shadow-lg ring-1 ring-border">
       <div class="flex shrink-0 items-center justify-between border-b p-4">
-        <h2 class="text-lg font-semibold">Pull from Requisition</h2>
+        <h2 class="text-lg font-semibold">{t("pullRequisition.title")}</h2>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground" onclick={() => open = false}>
           <X class="h-5 w-5" />
         </Button>
@@ -142,22 +143,22 @@
 
       <div class="overflow-y-auto p-4 sm:p-6 space-y-4">
         <div class="space-y-1">
-          <label class="text-sm font-medium">Select Requisition</label>
-          <Combobox options={reqOptions} bind:value={selectedReqId} placeholder="Search open requisitions..." />
+          <label class="text-sm font-medium">{t("pullRequisition.selectRequisition")}</label>
+          <Combobox options={reqOptions} bind:value={selectedReqId} placeholder={t("pullRequisition.searchRequisitions")} />
         </div>
 
         {#if requisition}
           <div class="mt-6 border rounded-lg overflow-hidden">
             <div class="bg-muted/30 px-4 py-2 border-b font-medium text-sm">
-              Outstanding Items ({availableItems.length})
+              {t("pullRequisition.outstandingItems", { count: availableItems.length })}
             </div>
             <table class="w-full text-sm">
               <thead class="border-b bg-muted/10 text-left text-muted-foreground">
                 <tr>
                   <th class="w-10 px-4 py-2"></th>
-                  <th class="px-4 py-2 font-medium">SKU</th>
-                  <th class="px-4 py-2 font-medium">Item</th>
-                  <th class="px-4 py-2 text-right font-medium">Remaining Qty</th>
+                  <th class="px-4 py-2 font-medium">{t("common.sku")}</th>
+                  <th class="px-4 py-2 font-medium">{t("pullRequisition.item")}</th>
+                  <th class="px-4 py-2 text-right font-medium">{t("pullRequisition.remainingQty")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,7 +179,7 @@
                       {#if selected}
                         <div class="flex justify-end gap-2" onclick={(e) => e.stopPropagation()}>
                           <div class="flex flex-col items-end">
-                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">Qty</span>
+                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">{t("common.qty")}</span>
                             <input 
                               type="number" 
                               class="w-20 text-right text-sm border rounded px-2 py-1 bg-background" 
@@ -187,7 +188,7 @@
                             />
                           </div>
                           <div class="flex flex-col items-end">
-                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">Base Cost</span>
+                            <span class="text-[10px] text-muted-foreground uppercase font-semibold leading-none mb-1">{t("pullRequisition.baseCost")}</span>
                             <div class="relative">
                               <span class="absolute left-2 top-1.5 text-xs text-muted-foreground">Rp</span>
                               <input 
@@ -201,29 +202,29 @@
                         </div>
                       {:else}
                         <div class="flex flex-col items-end cursor-pointer" onclick={() => toggleItem(item)}>
-                          <span class="text-amber-600 font-semibold">{item.qtyRequested - item.qtyOrdered} <span class="text-xs font-normal">rem</span></span>
+                          <span class="text-amber-600 font-semibold">{item.qtyRequested - item.qtyOrdered} <span class="text-xs font-normal">{t("pullRequisition.rem")}</span></span>
                         </div>
                       {/if}
                     </td>
                   </tr>
                 {:else}
-                  <tr><td colspan="4" class="px-4 py-8 text-center text-muted-foreground">No outstanding items on this requisition.</td></tr>
+                  <tr><td colspan="4" class="px-4 py-8 text-center text-muted-foreground">{t("pullRequisition.noOutstanding")}</td></tr>
                 {/each}
               </tbody>
             </table>
           </div>
           {#if availableItems.length > 0}
             <p class="text-xs text-muted-foreground mt-2 text-center">
-              Click items in the exact order they appear on your physical vendor invoice.
+              {t("pullRequisition.clickOrderHint")}
             </p>
           {/if}
         {/if}
       </div>
 
       <div class="flex shrink-0 items-center justify-end gap-2 border-t p-4 bg-muted/20">
-        <Button variant="ghost" onclick={() => open = false}>Cancel</Button>
+        <Button variant="ghost" onclick={() => open = false}>{t("common.cancel")}</Button>
         <Button disabled={selectedItems.length === 0 || busy} onclick={addSelected}>
-          Pull {selectedItems.length} {selectedItems.length === 1 ? 'line' : 'lines'}
+          {t("pullRequisition.pullLines", { count: selectedItems.length })}
         </Button>
       </div>
     </div>

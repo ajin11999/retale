@@ -14,6 +14,7 @@
   import Pagination from "$lib/components/ui/pagination.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
   import { SvelteSet } from "svelte/reactivity";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -148,7 +149,7 @@
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
   const variantComboOptions = $derived.by(() => {
-    const options = [{ value: "", label: "— None —" }];
+    const options = [{ value: "", label: t("interchangeGroups.none") }];
     const d = draft;
     if (!d?.id) return options;
     const group = interchangeGroups.find((g) => g.id === d.id);
@@ -184,7 +185,7 @@
     interchangeGroups.map((c) => ({
       id: c.id,
       name: c.name,
-      note: c.archivedAt ? "Archived" : null,
+      note: c.archivedAt ? t("common.archived") : null,
     })),
   );
 
@@ -194,7 +195,7 @@
   }
 
   async function run(
-    label: string,
+    message: string,
     fn: () => Promise<{ errors?: readonly { message: string }[] | null }>,
   ): Promise<boolean> {
     busy = true;
@@ -205,7 +206,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: message };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -218,7 +219,7 @@
   async function saveGroup() {
     const d = draft;
     if (!d || !d.name.trim()) return;
-    const ok = await run("Interchange group", () =>
+    const ok = await run(t("common.saved", { label: t("interchangeGroups.group") }), () =>
       d.id
         ? UpdateInterchangeGroup.mutate({
             id: d.id,
@@ -239,15 +240,15 @@
   }
 
   async function toggleArchived(n: typeof interchangeGroups[0]) {
-    const ok = await run("Interchange group", () =>
+    const ok = await run(t("common.saved", { label: t("interchangeGroups.group") }), () =>
       SetInterchangeGroupArchived.mutate({ id: n.id, archived: !n.archivedAt }),
     );
     if (ok) await InterchangeGroupList.fetch({ policy: CachePolicy.NetworkOnly });
   }
 
   async function deleteGroup(n: typeof interchangeGroups[0]) {
-    if (!confirm(`Delete "${n.name}"?`)) return;
-    const ok = await run("Interchange group", () => DeleteInterchangeGroup.mutate({ id: n.id }));
+    if (!confirm(t("interchangeGroups.confirmDelete", { name: n.name }))) return;
+    const ok = await run(t("common.saved", { label: t("interchangeGroups.group") }), () => DeleteInterchangeGroup.mutate({ id: n.id }));
     if (ok) {
       if (draft?.id === n.id) draft = null;
       await InterchangeGroupList.fetch({ policy: CachePolicy.NetworkOnly });
@@ -303,7 +304,7 @@
 
   async function addSelectedVariants() {
     if (!managingGroup || selectedVariantIds.size === 0) return;
-    const ok = await run("Variants assigned", () =>
+    const ok = await run(t("interchangeGroups.variantsAssigned"), () =>
       SetVariantsInterchangeGroup.mutate({
         groupId: managingGroup!.id,
         variantIds: Array.from(selectedVariantIds),
@@ -316,8 +317,8 @@
   }
 
   async function removeVariant(variantId: string) {
-    if (!confirm("Remove variant from this group?")) return;
-    const ok = await run("Variant removed", () =>
+    if (!confirm(t("interchangeGroups.confirmRemoveVariant"))) return;
+    const ok = await run(t("interchangeGroups.variantRemoved"), () =>
       SetVariantsInterchangeGroup.mutate({
         groupId: null,
         variantIds: [variantId],
@@ -330,7 +331,7 @@
 
   async function setPreferredVariant(variantId: string) {
     if (!managingGroup) return;
-    const ok = await run("Preferred variant updated", () =>
+    const ok = await run(t("interchangeGroups.preferredUpdated"), () =>
       UpdateInterchangeGroup.mutate({
         id: managingGroup!.id,
         preferredVariantId: variantId,
@@ -342,27 +343,27 @@
   }
 </script>
 
-<svelte:head><title>Interchange Groups · Retale Console</title></svelte:head>
+<svelte:head><title>{t("interchangeGroups.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Interchange Groups</h1>
+    <h1 class="text-xl font-semibold">{t("interchangeGroups.title")}</h1>
     <div class="flex items-center gap-2">
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search groups…"
+          placeholder={t("interchangeGroups.searchGroups")}
           bind:value={search}
         />
       </div>
       <Button variant="outline" size="sm" disabled={busy || !canCreate} onclick={() => goto("/interchange-groups/bulk")}>
-        Bulk add groups
+        {t("interchangeGroups.bulkAdd")}
       </Button>
       <Button variant="outline" size="sm" disabled={busy || !canEdit} onclick={() => goto("/interchange-groups/variants")}>
-        Manage variants
+        {t("interchangeGroups.manageVariants")}
       </Button>
       <Button size="sm" disabled={busy || !canCreate} onclick={newGroup}>
-        New group
+        {t("interchangeGroups.newGroup")}
       </Button>
     </div>
   </div>
@@ -377,18 +378,18 @@
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      You have read-only access to products — editing is disabled.
+      {t("categories.readOnlyNotice")}
     </p>
   {/if}
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">
-        {draft.id ? "Edit group" : "New group"}
+        {draft.id ? t("interchangeGroups.editGroup") : t("interchangeGroups.newGroup")}
       </h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="relative space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={draft.name} disabled={!canEdit} />
           <DuplicateHint
             query={draft.name}
@@ -398,19 +399,19 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min qty</span>
+          <span class="text-sm font-medium">{t("products.minQty")}</span>
           <NumericInput
             bind:value={draft.minQty}
-            placeholder="None"
+            placeholder={t("interchangeGroups.none")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Preferred variant</span>
+          <span class="text-sm font-medium">{t("interchangeGroups.preferredVariant")}</span>
           <Combobox
             options={variantComboOptions}
             bind:value={draft.preferredVariantId}
-            placeholder="Search variant…"
+            placeholder={t("products.searchProducts")}
             disabled={!canEdit}
           />
         </label>
@@ -420,14 +421,14 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button
           size="sm"
           disabled={busy || !canEdit || !draft.name.trim()}
           onclick={saveGroup}
         >
-          {draft.id ? "Save group" : "Create group"}
+          {draft.id ? t("interchangeGroups.saveGroup") : t("interchangeGroups.createGroup")}
         </Button>
       </div>
     </div>
@@ -437,16 +438,16 @@
     <div class="space-y-4 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold">
-          Manage Variants: {managingGroup.name}
+          {t("interchangeGroups.manageVariants")}: {managingGroup.name}
         </h2>
-        <Button variant="ghost" size="sm" onclick={() => (managingGroup = null)}>Close</Button>
+        <Button variant="ghost" size="sm" onclick={() => (managingGroup = null)}>{t("common.close")}</Button>
       </div>
 
       <div class="grid md:grid-cols-2 gap-6">
         <div class="space-y-3">
-          <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Current Variants in Group</h3>
+          <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("interchangeGroups.currentVariants")}</h3>
           {#if groupVariants.length === 0}
-            <p class="text-sm text-muted-foreground">No variants assigned to this group yet.</p>
+            <p class="text-sm text-muted-foreground">{t("interchangeGroups.noVariantsAssigned")}</p>
           {:else}
             <div class="space-y-2">
               {#each groupVariants as v}
@@ -455,14 +456,14 @@
                     <span class="text-sm font-medium">{v.name}</span>
                     <span class="text-xs font-mono text-muted-foreground">{v.sku}</span>
                     {#if v.isPreferred}
-                      <span class="text-[10px] text-emerald-600 font-semibold uppercase mt-0.5">Preferred</span>
+                      <span class="text-[10px] text-emerald-600 font-semibold uppercase mt-0.5">{t("interchangeGroups.preferred")}</span>
                     {/if}
                   </div>
                   <div class="flex items-center gap-1">
                     {#if !v.isPreferred}
                       <IconButton
                         icon={Star}
-                        label="Set as preferred"
+                        label={t("interchangeGroups.setAsPreferred")}
                         variant="muted"
                         disabled={busy || !canEdit}
                         onclick={() => setPreferredVariant(v.id)}
@@ -470,7 +471,7 @@
                     {/if}
                     <IconButton
                       icon={X}
-                      label="Remove from group"
+                      label={t("interchangeGroups.removeFromGroup")}
                       variant="muted"
                       disabled={busy || !canEdit}
                       onclick={() => removeVariant(v.id)}
@@ -483,10 +484,10 @@
         </div>
 
         <div class="space-y-3">
-          <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Add Variants</h3>
+          <h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("interchangeGroups.addVariants")}</h3>
           <div class="flex gap-2">
             <Input 
-              placeholder="Search by name or SKU..." 
+              placeholder={t("requisitions.searchVariant")} 
               bind:value={variantSearch}
               class="flex-1"
             />
@@ -495,7 +496,7 @@
               disabled={busy || !canEdit || selectedVariantIds.size === 0} 
               onclick={addSelectedVariants}
             >
-              Add Selected ({selectedVariantIds.size})
+              {t("interchangeGroups.addSelected", { count: selectedVariantIds.size })}
             </Button>
           </div>
           <div class="max-h-64 overflow-y-auto space-y-1 rounded border p-1">
@@ -518,7 +519,7 @@
               </label>
             {:else}
               <div class="p-4 text-center text-sm text-muted-foreground">
-                {variantSearch.trim() ? "No matching variants outside this group." : "Type to search variants..."}
+                {variantSearch.trim() ? t("interchangeGroups.noMatchingVariants") : t("interchangeGroups.typeToSearch")}
               </div>
             {/each}
           </div>
@@ -528,7 +529,7 @@
   {/if}
 
   {#if $InterchangeGroupList.fetching && interchangeGroups.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $InterchangeGroupList.errors?.length}
     <p class="text-sm text-destructive">{$InterchangeGroupList.errors[0].message}</p>
   {:else}
@@ -536,9 +537,9 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Group</th>
-            <th class="px-4 py-2 text-right font-medium">Min qty</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("interchangeGroups.group")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("products.minQty")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
             <th class="px-4 py-2"></th>
           </tr>
         </thead>
@@ -557,34 +558,34 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {n.archivedAt != null ? "Archived" : "Active"}
+                  {n.archivedAt != null ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
                 <span class="inline-flex items-center gap-0.5">
                   <IconButton
                     icon={List}
-                    label="Manage Variants"
+                    label={t("interchangeGroups.manageVariants")}
                     variant="primary"
                     disabled={busy || !canEdit}
                     onclick={() => manageVariants(n)}
                   />
                   <IconButton
                     icon={Pencil}
-                    label="Edit"
+                    label={t("common.edit")}
                     variant="primary"
                     disabled={busy || !canEdit}
                     onclick={() => editGroup(n)}
                   />
                   <IconButton
                     icon={n.archivedAt != null ? ArchiveRestore : Archive}
-                    label={n.archivedAt != null ? "Restore" : "Archive"}
+                    label={n.archivedAt != null ? t("addresses.restore") : t("addresses.archive")}
                     disabled={busy || !canArchive}
                     onclick={() => toggleArchived(n)}
                   />
                   <IconButton
                     icon={Trash2}
-                    label="Delete"
+                    label={t("common.delete")}
                     variant="destructive"
                     disabled={busy || !canEdit}
                     onclick={() => deleteGroup(n)}
@@ -596,7 +597,7 @@
           {#if visibleGroups.length === 0}
             <tr>
               <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No groups match." : "No groups yet."}
+                {search.trim() ? t("interchangeGroups.noMatch") : t("interchangeGroups.noGroups")}
               </td>
             </tr>
           {/if}
@@ -605,7 +606,7 @@
     </div>
     <div class="mt-2 flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {visibleGroups.length} group{visibleGroups.length === 1 ? "" : "s"}
+        {t("interchangeGroups.groupCount", { count: visibleGroups.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleGroups.length} />
     </div>

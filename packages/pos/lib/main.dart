@@ -33,7 +33,7 @@ Future<void> main() async {
   // isn't stranded on a misleading "cannot reach the server" screen.
   AuthService.instance.onSessionExpired = () {
     scaffoldMessengerKey.currentState?.showSnackBar(
-      const SnackBar(content: Text('Session expired — please log in again.')),
+      SnackBar(content: Text(tr('auth.sessionExpired'))),
     );
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const RouterScreen()),

@@ -4,6 +4,7 @@
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
   import { formatMoney, searchTokens, matchesTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -276,7 +277,7 @@
   );
 
   const vendorOptions = $derived([
-    { value: "", label: "— Ad-hoc / Walk-in vendor —" },
+    { value: "", label: t("rfqs.adHocOption") },
     ...vendors.map((v: any) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -297,7 +298,7 @@
   });
 
   const variantLabel = (id: string | null | undefined) =>
-    id ? variantOptions.find((v) => v.value === id)?.label ?? "Unknown" : null;
+    id ? variantOptions.find((v) => v.value === id)?.label ?? t("products.unknown") : null;
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -377,7 +378,7 @@
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
       } else {
-        feedback = { ok: true, text: "RFQ header updated." };
+        feedback = { ok: true, text: t("rfqs.headerUpdated") };
         await refetch();
       }
     } catch (e) {
@@ -494,7 +495,7 @@
     }
 
     if (itemsToImport.length === 0) {
-      feedback = { ok: false, text: "No items selected to import." };
+      feedback = { ok: false, text: t("rfqs.noItemsSelected") };
       return;
     }
 
@@ -507,7 +508,7 @@
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
       } else {
-        feedback = { ok: true, text: `Imported ${itemsToImport.length} items from ${selectedPr.name}.` };
+        feedback = { ok: true, text: t("rfqs.importedItems", { count: itemsToImport.length, name: selectedPr.name }) };
         showImportModal = false;
         await refetch();
       }
@@ -527,9 +528,7 @@
   async function convertToPO() {
     if (!rfq) return;
     if (
-      !confirm(
-        `Convert RFQ ${rfq.rfqNumber} to a Purchase Order? This will mark the RFQ as awarded.`
-      )
+      !confirm(t("rfqs.confirmConvert", { number: rfq.rfqNumber }))
     )
       return;
 
@@ -556,7 +555,7 @@
   }
 
   async function deleteRfq() {
-    if (!rfq || !confirm(`Delete RFQ ${rfq.rfqNumber}? This action cannot be undone.`))
+    if (!rfq || !confirm(t("rfqs.confirmDelete", { number: rfq.rfqNumber })))
       return;
     busy = true;
     try {
@@ -629,7 +628,7 @@
       out.push({
         id: UNGROUPED,
         key: UNGROUPED,
-        name: "General Items",
+        name: t("rfqs.generalItems"),
         items: ung,
         targetSubtotal: ung.reduce((a, i) => a + i.qtyRequested * i.targetUnitCostMinor, 0),
         quotedSubtotal: ung.reduce((a, i) => a + i.qtyRequested * (i.quotedUnitCostMinor || i.targetUnitCostMinor), 0),
@@ -708,7 +707,7 @@
 
   async function bulkDeleteSelected() {
     if (!selected.size) return;
-    if (!confirm(`Delete ${selected.size} selected line items?`)) return;
+    if (!confirm(t("rfqs.confirmDeleteSelected", { count: selected.size }))) return;
     busy = true;
     try {
       for (const id of selected) {
@@ -827,7 +826,7 @@
   }
 
   async function deleteSection(id: string) {
-    if (!confirm("Delete this section? Its items will move to General Items.")) return;
+    if (!confirm(t("rfqs.confirmDeleteSection"))) return;
     busy = true;
     try {
       const res = await DeleteSection.mutate({ id });
@@ -915,7 +914,7 @@
   }
 
   async function deleteItem(id: string) {
-    if (!confirm("Delete line item?")) return;
+    if (!confirm(t("rfqs.confirmDeleteLine"))) return;
     busy = true;
     try {
       const res = await DeleteItem.mutate({ id });
@@ -978,7 +977,7 @@
   const lineParts = (i: RfqItemType): { name: string; sku: string | null } => {
     if (!i.variantId) return { name: i.description ?? "—", sku: null };
     const full = variantLabel(i.variantId);
-    if (!full) return { name: "Unknown", sku: null };
+    if (!full) return { name: t("products.unknown"), sku: null };
     const idx = full.indexOf(" · ");
     if (idx === -1) return { name: full, sku: null };
     return { name: full.slice(0, idx), sku: full.slice(idx + 3) };
@@ -986,14 +985,14 @@
 </script>
 
 <svelte:head>
-  <title>{rfq ? `${rfq.rfqNumber} · RFQ` : "RFQ Detail"} · Retale Console</title>
+  <title>{rfq ? `${rfq.rfqNumber} · RFQ` : t("rfqs.detailTitle")} · Retale Console</title>
 </svelte:head>
 
 {#if $RfqDetail.fetching && !rfq}
-  <div class="p-8 text-center text-sm text-muted-foreground">Loading RFQ…</div>
+  <div class="p-8 text-center text-sm text-muted-foreground">{t("rfqs.loadingRfq")}</div>
 {:else if $RfqDetail.errors?.length || !rfq}
   <div class="p-8 text-center text-sm text-destructive">
-    {$RfqDetail.errors?.[0]?.message ?? "RFQ not found"}
+    {$RfqDetail.errors?.[0]?.message ?? t("rfqs.notFound")}
   </div>
 {:else}
   <div class="space-y-6">
@@ -1002,17 +1001,17 @@
       <div>
         <div class="flex items-center gap-3">
           <h1 class="text-2xl font-bold font-mono">{rfq.rfqNumber}</h1>
-          <Badge class={statusClass(rfq.status)}>{rfq.status}</Badge>
+          <Badge class={statusClass(rfq.status)}>{t(`rfqs.status.${rfq.status}`)}</Badge>
         </div>
         <p class="text-sm text-muted-foreground mt-1">
-          Created {new Date(rfq.createdAt).toLocaleDateString()}
+          {t("rfqs.created", { date: new Date(rfq.createdAt).toLocaleDateString() })}
         </p>
       </div>
 
       <div class="flex items-center gap-2">
         <a href={`/rfqs/${rfq.id}/print`} target="_blank" rel="noopener noreferrer">
           <Button variant="outline" size="sm">
-            <Printer class="mr-1.5 size-4" /> Print / Export
+            <Printer class="mr-1.5 size-4" /> {t("rfqs.printExport")}
           </Button>
         </a>
 
@@ -1024,7 +1023,7 @@
               disabled={busy}
               onclick={() => setStatus("sent")}
             >
-              Mark Sent
+              {t("rfqs.markSent")}
             </Button>
           {:else if rfq.status === "sent"}
             <Button
@@ -1033,7 +1032,7 @@
               disabled={busy}
               onclick={() => setStatus("received")}
             >
-              Mark Quote Received
+              {t("rfqs.markQuoteReceived")}
             </Button>
           {/if}
 
@@ -1043,7 +1042,7 @@
             disabled={busy || rawItems.length === 0}
             onclick={convertToPO}
           >
-            <ArrowRight class="mr-1.5 size-4" /> Award &amp; Convert to PO
+            <ArrowRight class="mr-1.5 size-4" /> {t("rfqs.awardConvert")}
           </Button>
 
           <Button
@@ -1074,13 +1073,13 @@
       <div class="grid grid-cols-5 gap-4">
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Vendor</span
+            >{t("rfqs.vendor")}</span
           >
           {#if isEditable}
             <Combobox
               options={vendorOptions}
               bind:value={form.vendorId}
-              placeholder="Select vendor…"
+              placeholder={t("rfqs.selectVendor")}
             />
           {:else}
             <p class="text-sm font-medium">{rfq.snapshotVendorName}</p>
@@ -1089,12 +1088,12 @@
 
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Ad-hoc / Walk-in Vendor</span
+            >{t("rfqs.adHocVendor")}</span
           >
           {#if isEditable}
             <Input
               bind:value={form.adHocName}
-              placeholder="Used when no vendor picked"
+              placeholder={t("rfqs.adHocPlaceholder")}
               disabled={form.vendorId !== ""}
             />
           {:else}
@@ -1104,7 +1103,7 @@
 
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >RFQ Date</span
+            >{t("rfqs.rfqDate")}</span
           >
           {#if isEditable}
             <Input type="date" bind:value={form.date} />
@@ -1115,7 +1114,7 @@
 
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Due Date</span
+            >{t("rfqs.dueDate")}</span
           >
           {#if isEditable}
             <Input type="date" bind:value={form.dueDate} />
@@ -1126,18 +1125,18 @@
 
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Status</span
+            >{t("common.status")}</span
           >
           {#if isEditable}
             <Select bind:value={form.status}>
-              <option value="draft">Draft</option>
-              <option value="sent">Sent to Vendor</option>
-              <option value="received">Quote Received</option>
-              <option value="awarded">Awarded</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="draft">{t("rfqs.status.draft")}</option>
+              <option value="sent">{t("rfqs.status.sent")}</option>
+              <option value="received">{t("rfqs.status.received")}</option>
+              <option value="awarded">{t("rfqs.status.awarded")}</option>
+              <option value="cancelled">{t("rfqs.status.cancelled")}</option>
             </Select>
           {:else}
-            <p class="text-sm font-medium capitalize">{rfq.status}</p>
+            <p class="text-sm font-medium capitalize">{t(`rfqs.status.${rfq.status}`)}</p>
           {/if}
         </label>
       </div>
@@ -1145,7 +1144,7 @@
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Internal Memo</span
+            >{t("rfqs.internalMemo")}</span
           >
           {#if isEditable}
             <Textarea bind:value={form.memo} rows={2} />
@@ -1156,7 +1155,7 @@
 
         <label class="space-y-1">
           <span class="text-xs font-semibold uppercase text-muted-foreground"
-            >Terms &amp; Conditions</span
+            >{t("rfqs.termsConditions")}</span
           >
           {#if isEditable}
             <Textarea bind:value={form.termsAndConditions} rows={2} />
@@ -1171,7 +1170,7 @@
       {#if isEditable}
         <div class="flex justify-end pt-2 border-t">
           <Button size="sm" disabled={busy} onclick={saveHeader}
-            >Save Header Changes</Button
+            >{t("rfqs.saveHeaderChanges")}</Button
           >
         </div>
       {/if}
@@ -1180,13 +1179,13 @@
     <!-- Summary metrics -->
     <div class="grid grid-cols-2 gap-4">
       <div class="rounded-lg border bg-card p-4">
-        <p class="text-xs font-medium text-muted-foreground">Target Total Cost</p>
+        <p class="text-xs font-medium text-muted-foreground">{t("rfqs.targetTotalCost")}</p>
         <p class="text-xl font-bold font-mono text-foreground mt-1">
           {formatMoney(totalTargetCost)}
         </p>
       </div>
       <div class="rounded-lg border bg-card p-4">
-        <p class="text-xs font-medium text-muted-foreground">Quoted Total Cost</p>
+        <p class="text-xs font-medium text-muted-foreground">{t("rfqs.quotedTotalCost")}</p>
         <p class="text-xl font-bold font-mono text-emerald-600 mt-1">
           {formatMoney(totalQuotedCost)}
         </p>
@@ -1197,14 +1196,14 @@
     <div class="space-y-4">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div class="flex items-center gap-3">
-          <h2 class="text-lg font-semibold">Line Items ({rawItems.length})</h2>
+          <h2 class="text-lg font-semibold">{t("rfqs.lineItems", { count: rawItems.length })}</h2>
           {#if rawItems.length > 0}
             <div class="flex items-center gap-2">
               <div class="relative w-48">
                 <Search class="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
                 <Input
                   type="search"
-                  placeholder="Filter lines…"
+                  placeholder={t("rfqs.filterLines")}
                   bind:value={lineSearch}
                   class="h-8 pl-8 text-xs"
                 />
@@ -1212,11 +1211,11 @@
 
               {#if sections.length > 0}
                 <Select bind:value={sectionFilter} class="h-8 text-xs w-40">
-                  <option value="">All Sections</option>
+                  <option value="">{t("rfqs.allSections")}</option>
                   {#each sections as s (s.id)}
                     <option value={s.id}>{s.name}</option>
                   {/each}
-                  <option value={UNGROUPED}>General Items</option>
+                  <option value={UNGROUPED}>{t("rfqs.generalItems")}</option>
                 </Select>
               {/if}
             </div>
@@ -1230,17 +1229,17 @@
               variant="outline"
               onclick={openImportPrModal}
             >
-              <FileDown class="mr-1.5 size-4" /> Import from PR
+              <FileDown class="mr-1.5 size-4" /> {t("rfqs.importFromPr")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onclick={() => (newSectionName = "")}
             >
-              Add Section
+              {t("rfqs.addSection")}
             </Button>
             <Button size="sm" onclick={() => startAddItem("")}>
-              Add Line Item
+              {t("rfqs.addLineItem")}
             </Button>
           </div>
         {/if}
@@ -1249,17 +1248,17 @@
       {#if newSectionName !== null}
         <div class="flex items-center gap-2 border p-3 rounded-lg bg-card shadow-sm">
           <Input
-            placeholder="Section name (e.g. Electrical Parts)…"
+            placeholder={t("rfqs.sectionName")}
             bind:value={newSectionName}
             class="max-w-xs h-8 text-xs"
             autofocus
             onkeydown={(e: any) => e.key === "Enter" && addSection()}
           />
-          <Button size="sm" onclick={addSection} disabled={busy || !newSectionName.trim()}>Save Section</Button>
+          <Button size="sm" onclick={addSection} disabled={busy || !newSectionName.trim()}>{t("rfqs.saveSection")}</Button>
           <Button
             size="sm"
             variant="ghost"
-            onclick={() => (newSectionName = null)}>Cancel</Button
+            onclick={() => (newSectionName = null)}>{t("common.cancel")}</Button
           >
         </div>
       {/if}
@@ -1268,16 +1267,16 @@
         <div class="border rounded-lg p-4 bg-card space-y-3 shadow-sm">
           <div class="flex items-center justify-between border-b pb-2">
             <h3 class="text-sm font-semibold">
-              {itemDraft.id ? "Edit Line Item" : "Add Line Item"}
+              {itemDraft.id ? t("rfqs.editLineItem") : t("rfqs.addLineItem")}
             </h3>
             {#if sections.length > 0}
               <div class="flex items-center gap-2 text-xs">
-                <span class="text-muted-foreground font-medium">Section:</span>
+                <span class="text-muted-foreground font-medium">{t("rfqs.sectionLabel")}</span>
                 <select
                   class="h-7 rounded border bg-background px-2 text-xs"
                   bind:value={itemDraft.sectionId}
                 >
-                  <option value="">General Items (No Section)</option>
+                  <option value="">{t("rfqs.generalItemsNoSection")}</option>
                   {#each sections as sec (sec.id)}
                     <option value={sec.id}>{sec.name}</option>
                   {/each}
@@ -1288,35 +1287,35 @@
 
           <div class="grid grid-cols-4 gap-3">
             <label class="space-y-1 col-span-2">
-              <span class="text-xs font-medium">Product / Variant</span>
+              <span class="text-xs font-medium">{t("rfqs.productVariant")}</span>
               <Combobox
                 options={variantOptions}
                 bind:value={itemDraft.variantId}
-                placeholder="Search variant…"
+                placeholder={t("rfqs.searchVariant")}
               />
             </label>
             <label class="space-y-1 col-span-2">
               <span class="text-xs font-medium"
-                >Description (Non-stock fallback)</span
+                >{t("rfqs.descriptionNonStock")}</span
               >
               <Input
                 bind:value={itemDraft.description}
-                placeholder="Custom line description…"
+                placeholder={t("rfqs.customLineDescription")}
               />
             </label>
           </div>
 
           <div class="grid grid-cols-3 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Qty Requested</span>
+              <span class="text-xs font-medium">{t("rfqs.qtyRequested")}</span>
               <NumericInput bind:value={itemDraft.qtyRequested} min={1} />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Target Unit Cost (Rp)</span>
+              <span class="text-xs font-medium">{t("rfqs.targetUnitCost")}</span>
               <MoneyInput bind:value={itemDraft.targetUnitCostMinor} />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Quoted Unit Cost (Rp)</span>
+              <span class="text-xs font-medium">{t("rfqs.quotedUnitCost")}</span>
               <MoneyInput bind:value={itemDraft.quotedUnitCostMinor} />
             </label>
           </div>
@@ -1325,9 +1324,9 @@
             <Button
               size="sm"
               variant="ghost"
-              onclick={() => (itemDraft = null)}>Cancel</Button
+              onclick={() => (itemDraft = null)}>{t("common.cancel")}</Button
             >
-            <Button size="sm" disabled={busy} onclick={saveItem}>Save Line</Button>
+            <Button size="sm" disabled={busy} onclick={saveItem}>{t("rfqs.saveLine")}</Button>
           </div>
         </div>
       {/if}
@@ -1336,9 +1335,9 @@
       {#if isEditable && selectedCount > 0}
         <div class="sticky top-2 z-40 flex items-center justify-between rounded-lg border bg-primary text-primary-foreground px-4 py-2.5 shadow-md">
           <div class="flex items-center gap-3 text-xs font-medium">
-            <span><strong>{selectedCount}</strong> line item{selectedCount === 1 ? "" : "s"} selected</span>
+            <span>{t("rfqs.lineItemsSelected", { count: selectedCount })}</span>
             <Button size="sm" variant="ghost" class="h-6 text-xs text-primary-foreground hover:bg-primary-foreground/20" onclick={toggleSelectAll}>
-              {selectedCount === rawItems.length ? "Deselect All" : "Select All"}
+              {selectedCount === rawItems.length ? t("common.deselectAll") : t("common.selectAll")}
             </Button>
           </div>
 
@@ -1353,8 +1352,8 @@
                   }
                 }}
               >
-                <option value="" disabled selected class="bg-card text-foreground">Move selected to Section…</option>
-                <option value="" class="bg-card text-foreground">General Items (No Section)</option>
+                <option value="" disabled selected class="bg-card text-foreground">{t("rfqs.moveSelectedToSection")}</option>
+                <option value="" class="bg-card text-foreground">{t("rfqs.generalItemsNoSection")}</option>
                 {#each sections as sec (sec.id)}
                   <option value={sec.id} class="bg-card text-foreground">{sec.name}</option>
                 {/each}
@@ -1367,7 +1366,7 @@
               class="h-7 text-xs"
               onclick={bulkDeleteSelected}
             >
-              <Trash2 class="mr-1 size-3.5" /> Delete Selected
+              <Trash2 class="mr-1 size-3.5" /> {t("rfqs.deleteSelected")}
             </Button>
 
             <Button
@@ -1376,7 +1375,7 @@
               class="h-7 text-xs text-primary-foreground hover:bg-primary-foreground/20"
               onclick={() => (selected = new Set())}
             >
-              Clear
+              {t("common.clear")}
             </Button>
           </div>
         </div>
@@ -1425,8 +1424,8 @@
                         autofocus
                         onkeydown={(e: any) => e.key === "Enter" && saveRenameSection()}
                       />
-                      <IconButton icon={Check} label="Save" onclick={saveRenameSection} />
-                      <IconButton icon={X} label="Cancel" onclick={() => (editingSectionId = null)} />
+                      <IconButton icon={Check} label={t("common.save")} onclick={saveRenameSection} />
+                      <IconButton icon={X} label={t("common.cancel")} onclick={() => (editingSectionId = null)} />
                     </div>
                   {:else}
                     <div class="flex items-center gap-2">
@@ -1438,7 +1437,7 @@
                         {g.name}
                       </button>
                       <Badge class="font-normal text-xs py-0 px-1.5 bg-background border">
-                        {g.items.length} line{g.items.length === 1 ? "" : "s"}
+                        {t("rfqs.lines", { count: g.items.length })}
                       </Badge>
                     </div>
                   {/if}
@@ -1446,8 +1445,8 @@
 
                 <div class="flex items-center gap-4 text-xs">
                   <div class="flex items-center gap-3 font-mono">
-                    <span class="text-muted-foreground">Target: <strong class="text-foreground">{formatMoney(g.targetSubtotal)}</strong></span>
-                    <span class="text-muted-foreground">Quoted: <strong class="text-emerald-700 font-semibold">{formatMoney(g.quotedSubtotal)}</strong></span>
+                    <span class="text-muted-foreground">{t("rfqs.target")} <strong class="text-foreground">{formatMoney(g.targetSubtotal)}</strong></span>
+                    <span class="text-muted-foreground">{t("rfqs.quoted")} <strong class="text-emerald-700 font-semibold">{formatMoney(g.quotedSubtotal)}</strong></span>
                   </div>
 
                   {#if isEditable}
@@ -1458,17 +1457,17 @@
                         class="h-7 text-xs px-2"
                         onclick={() => startAddItem(g.key === UNGROUPED ? "" : g.key)}
                       >
-                        + Add Line
+                        {t("rfqs.addLine")}
                       </Button>
                       {#if g.key !== UNGROUPED}
                         <IconButton
                           icon={Pencil}
-                          label="Rename Section"
+                          label={t("rfqs.renameSection")}
                           onclick={() => startRenameSection(g.id, g.name)}
                         />
                         <IconButton
                           icon={Trash2}
-                          label="Delete Section"
+                          label={t("rfqs.deleteSection")}
                           variant="destructive"
                           onclick={() => deleteSection(g.id)}
                         />
@@ -1498,12 +1497,12 @@
                           />
                         </th>
                       {/if}
-                      <th class="px-4 py-2 font-medium">Product / Description</th>
-                      <th class="px-4 py-2 text-right font-medium w-28">Qty Requested</th>
-                      <th class="px-4 py-2 text-right font-medium w-32">Target Cost</th>
-                      <th class="px-4 py-2 text-right font-medium w-32">Quoted Cost</th>
-                      <th class="px-4 py-2 text-right font-medium w-32">Target Total</th>
-                      <th class="px-4 py-2 text-right font-medium w-32">Quoted Total</th>
+                      <th class="px-4 py-2 font-medium">{t("rfqs.productDescription")}</th>
+                      <th class="px-4 py-2 text-right font-medium w-28">{t("rfqs.qtyRequested")}</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">{t("rfqs.targetCost")}</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">{t("rfqs.quotedCost")}</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">{t("rfqs.targetTotal")}</th>
+                      <th class="px-4 py-2 text-right font-medium w-32">{t("rfqs.quotedTotal")}</th>
                       {#if isEditable}
                         <th class="w-16 px-4 py-2"></th>
                       {/if}
@@ -1626,12 +1625,12 @@
                             <div class="flex items-center justify-end gap-1">
                               <IconButton
                                 icon={Pencil}
-                                label="Edit line"
+                                label={t("rfqs.editLine")}
                                 onclick={() => startEditItem(i)}
                               />
                               <IconButton
                                 icon={Trash2}
-                                label="Delete line"
+                                label={t("rfqs.deleteLine")}
                                 variant="destructive"
                                 onclick={() => deleteItem(i.id)}
                               />
@@ -1645,7 +1644,7 @@
                           colspan={isEditable ? 9 : 6}
                           class="px-4 py-6 text-center text-muted-foreground text-xs"
                         >
-                          No line items in this section.
+                          {t("rfqs.noLineItemsInSection")}
                         </td>
                       </tr>
                     {/each}
@@ -1666,11 +1665,11 @@
       <!-- Modal Header -->
       <div class="flex items-center justify-between border-b px-6 py-4 bg-muted/40">
         <div>
-          <h2 class="text-lg font-bold text-foreground">Import Items from Purchase Requisition</h2>
+          <h2 class="text-lg font-bold text-foreground">{t("rfqs.importModalTitle")}</h2>
           <div class="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-            <span class={importStep === 1 ? "font-semibold text-primary" : ""}>Step 1: Select PR</span>
+            <span class={importStep === 1 ? "font-semibold text-primary" : ""}>{t("rfqs.step1")}</span>
             <span>&rarr;</span>
-            <span class={importStep === 2 ? "font-semibold text-primary" : ""}>Step 2: Select Items &amp; Costs</span>
+            <span class={importStep === 2 ? "font-semibold text-primary" : ""}>{t("rfqs.step2")}</span>
           </div>
         </div>
         <Button variant="ghost" size="sm" onclick={() => (showImportModal = false)}>
@@ -1682,15 +1681,15 @@
       {#if importStep === 1}
         <div class="p-6 space-y-4 overflow-y-auto flex-1">
           <div class="flex items-center justify-between gap-4">
-            <p class="text-xs text-muted-foreground">Select an open Purchase Requisition to import items into this RFQ:</p>
+            <p class="text-xs text-muted-foreground">{t("rfqs.importSelectHint")}</p>
             <div class="w-64">
-              <Input type="search" placeholder="Search PR name..." bind:value={prSearch} class="h-8 text-xs" />
+              <Input type="search" placeholder={t("rfqs.searchPRName")} bind:value={prSearch} class="h-8 text-xs" />
             </div>
           </div>
 
           {#if filteredPrs.length === 0}
             <div class="py-12 text-center text-sm text-muted-foreground border rounded-lg bg-muted/20">
-              No open purchase requisitions with available items found.
+              {t("rfqs.noOpenPrs")}
             </div>
           {:else}
             <div class="space-y-2">
@@ -1703,18 +1702,18 @@
                   <div class="space-y-1">
                     <div class="flex items-center gap-2">
                       <span class="font-semibold text-sm">{pr.name}</span>
-                      <Badge class="bg-sky-100 text-sky-700 capitalize text-xs">{pr.status.replace("_", " ")}</Badge>
+                      <Badge class="bg-sky-100 text-sky-700 capitalize text-xs">{t(`requisitions.status.${pr.status}`)}</Badge>
                     </div>
                     <p class="text-xs text-muted-foreground font-mono">
-                      Created {new Date(pr.createdAt).toLocaleDateString()} &middot; {pr.items.length} total line{pr.items.length === 1 ? "" : "s"}
+                      {t("rfqs.createdLineCount", { date: new Date(pr.createdAt).toLocaleDateString(), count: pr.items.length })}
                     </p>
                   </div>
                   <div class="flex items-center gap-3">
                     <span class="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
-                      {availableCount} item{availableCount === 1 ? "" : "s"} available
+                      {t("rfqs.itemsAvailable", { count: availableCount })}
                     </span>
                     <Button size="sm" variant="outline" onclick={(e) => { e.stopPropagation(); selectPr(pr.id); }}>
-                      Select PR &rarr;
+                      {t("rfqs.selectPr")}
                     </Button>
                   </div>
                 </div>
@@ -1724,29 +1723,29 @@
         </div>
 
         <div class="flex justify-end px-6 py-3 border-t bg-muted/20">
-          <Button variant="outline" size="sm" onclick={() => (showImportModal = false)}>Cancel</Button>
+          <Button variant="outline" size="sm" onclick={() => (showImportModal = false)}>{t("common.cancel")}</Button>
         </div>
 
       {:else if importStep === 2 && selectedPr}
         <div class="px-6 py-3 border-b bg-muted/20 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => (importStep = 1)}>
-              &larr; Back to PRs
+              {t("rfqs.backToPrs")}
             </Button>
             <span class="text-sm font-semibold text-foreground border-l pl-3">
-              PR: {selectedPr.name}
+              {t("rfqs.prLabel", { name: selectedPr.name })}
             </span>
           </div>
           <div class="flex items-center gap-2">
-            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={selectAllImportItems}>Select All</Button>
-            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={deselectAllImportItems}>Deselect All</Button>
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={selectAllImportItems}>{t("common.selectAll")}</Button>
+            <Button size="sm" variant="outline" class="h-7 text-xs" onclick={deselectAllImportItems}>{t("common.deselectAll")}</Button>
           </div>
         </div>
 
         <div class="p-6 space-y-4 overflow-y-auto flex-1">
           {#if selectedPr.items.filter((i: any) => (i.qtyRequested - i.qtyOrdered) > 0).length === 0}
             <div class="py-8 text-center text-sm text-muted-foreground">
-              No remaining items in this PR to import.
+              {t("rfqs.noRemainingItems")}
             </div>
           {:else}
             <!-- Group by PR Sections -->
@@ -1764,7 +1763,7 @@
 
             {#each Array.from(sectionMap.entries()) as [secId, secItems] (secId ?? "none")}
               {@const secObj = selectedPr.sections.find((s: any) => s.id === secId)}
-              {@const secName = secObj ? secObj.name : (sectionMap.size > 1 ? "General Items" : null)}
+              {@const secName = secObj ? secObj.name : (sectionMap.size > 1 ? t("rfqs.generalItems") : null)}
               {@const allSecSelected = secItems.every((i: any) => importItemsMap[i.id]?.selected)}
 
               <div class="border rounded-lg overflow-hidden space-y-0">
@@ -1776,7 +1775,7 @@
                       class="text-xs font-semibold text-primary hover:underline"
                       onclick={() => toggleImportSectionItems(secId, !allSecSelected)}
                     >
-                      {allSecSelected ? "Deselect Section" : "Select Section"}
+                      {allSecSelected ? t("rfqs.deselectSection") : t("rfqs.selectSection")}
                     </button>
                   </div>
                 {/if}
@@ -1796,13 +1795,13 @@
                           />
                           <div class="space-y-0.5">
                             <p class="text-sm font-medium leading-tight">
-                              {vLabel ?? item.description ?? "Custom Item"}
+                              {vLabel ?? item.description ?? t("rfqs.customItem")}
                             </p>
                             {#if vLabel && item.description}
                               <p class="text-xs text-muted-foreground">{item.description}</p>
                             {/if}
                             <p class="text-xs text-muted-foreground font-mono">
-                              Remaining: <span class="font-semibold text-foreground">{remaining}</span> (Requested: {item.qtyRequested}, Ordered: {item.qtyOrdered})
+                              {t("rfqs.remainingDetail", { remaining, requested: item.qtyRequested, ordered: item.qtyOrdered })}
                             </p>
                           </div>
                         </label>
@@ -1810,7 +1809,7 @@
                         {#if cfg.selected}
                           <div class="flex items-center gap-3">
                             <label class="flex items-center gap-1.5">
-                              <span class="text-xs text-muted-foreground font-medium">Qty:</span>
+                              <span class="text-xs text-muted-foreground font-medium">{t("rfqs.qtyColon")}</span>
                               <NumericInput
                                 bind:value={cfg.qty}
                                 min={1}
@@ -1819,7 +1818,7 @@
                               />
                             </label>
                             <label class="flex items-center gap-1.5">
-                              <span class="text-xs text-muted-foreground font-medium">Est. Cost:</span>
+                              <span class="text-xs text-muted-foreground font-medium">{t("rfqs.estCost")}</span>
                               <div class="w-32">
                                 <MoneyInput
                                   bind:value={cfg.cost}
@@ -1841,17 +1840,17 @@
         <!-- Modal Footer -->
         <div class="flex items-center justify-between px-6 py-4 border-t bg-muted/20">
           <p class="text-xs text-muted-foreground font-medium">
-            <span class="font-bold text-foreground">{selectedImportItemsCount}</span> item{selectedImportItemsCount === 1 ? "" : "s"} selected for import
+            {t("rfqs.itemsSelectedForImport", { count: selectedImportItemsCount })}
           </p>
           <div class="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onclick={() => (showImportModal = false)}>Cancel</Button>
-            <Button variant="outline" size="sm" onclick={() => (importStep = 1)}>&larr; Back</Button>
+            <Button variant="ghost" size="sm" onclick={() => (showImportModal = false)}>{t("common.cancel")}</Button>
+            <Button variant="outline" size="sm" onclick={() => (importStep = 1)}>{t("rfqs.back")}</Button>
             <Button
               size="sm"
               disabled={busy || selectedImportItemsCount === 0}
               onclick={doImportPrItems}
             >
-              Import {selectedImportItemsCount} Item{selectedImportItemsCount === 1 ? "" : "s"}
+              {t("rfqs.importButton", { count: selectedImportItemsCount })}
             </Button>
           </div>
         </div>

@@ -9,6 +9,7 @@
   import DonutChart from "$lib/components/ui/donut-chart.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import LineChart from "$lib/components/ui/line-chart.svelte";
+  import { t } from "$lib/i18n";
 
   // Each report is its own query store, fetched on demand — a viewer may hold
   // only some report.* keys, so querying them together would error on the
@@ -160,25 +161,25 @@
     perm: string;
     ranged: boolean; // true → driven by the period inputs
   }
-  const ALL_TABS: Tab[] = [
-    { id: "sales", label: "Sales", perm: "report.sales.view", ranged: true },
-    { id: "profit", label: "Profit", perm: "report.margin.view", ranged: true },
-    { id: "ar", label: "AR aging", perm: "report.ar_aging.view", ranged: true },
-    { id: "ap", label: "AP aging", perm: "report.ap_aging.view", ranged: true },
+  const ALL_TABS = $derived<Tab[]>([
+    { id: "sales", label: t("reports.tab.sales"), perm: "report.sales.view", ranged: true },
+    { id: "profit", label: t("reports.tab.profit"), perm: "report.margin.view", ranged: true },
+    { id: "ar", label: t("reports.tab.ar"), perm: "report.ar_aging.view", ranged: true },
+    { id: "ap", label: t("reports.tab.ap"), perm: "report.ap_aging.view", ranged: true },
     {
       id: "variance",
-      label: "Cash variance",
+      label: t("reports.tab.variance"),
       perm: "report.session_variance.view",
       ranged: true,
     },
     {
       id: "buying",
-      label: "Purchases & Deliveries",
+      label: t("reports.tab.buying"),
       perm: "purchase.edit",
       ranged: true,
     },
-    { id: "tracking", label: "Tracking", perm: "tracking_account.edit", ranged: false },
-  ];
+    { id: "tracking", label: t("reports.tab.tracking"), perm: "tracking_account.edit", ranged: false },
+  ]);
   const tabs = $derived(ALL_TABS.filter((t) => has(t.perm)));
 
   // ---- Period --------------------------------------------------------------
@@ -203,10 +204,10 @@
   );
 
   // Build an array of the last 12 months for the month picker buttons.
-  const MONTH_NAMES_SHORT = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
+  const MONTH_NAMES_SHORT = $derived([
+    t("reports.month.jan"), t("reports.month.feb"), t("reports.month.mar"), t("reports.month.apr"), t("reports.month.may"), t("reports.month.jun"),
+    t("reports.month.jul"), t("reports.month.aug"), t("reports.month.sep"), t("reports.month.oct"), t("reports.month.nov"), t("reports.month.dec"),
+  ]);
   const recentMonths = $derived.by(() => {
     const months: { value: string; label: string }[] = [];
     for (let i = 0; i < 12; i++) {
@@ -432,29 +433,29 @@
   const pct = (bps: number) => `${(bps / 100).toFixed(1)}%`;
 </script>
 
-<svelte:head><title>Reports · Retale Console</title></svelte:head>
+<svelte:head><title>{t("reports.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
-  <h1 class="text-xl font-semibold">Reports</h1>
+  <h1 class="text-xl font-semibold">{t("reports.title")}</h1>
 
   {#if tabs.length === 0}
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      You don't have access to any reports.
+      {t("reports.noAccess")}
     </p>
   {:else}
     <!-- Tab bar -->
     <div class="flex gap-1 border-b">
-      {#each tabs as t (t.id)}
+      {#each tabs as tab (tab.id)}
         <button
           class="border-b-2 px-3 py-2 text-sm transition-colors
-            {active === t.id
+            {active === tab.id
             ? 'border-primary font-medium text-foreground'
             : 'border-transparent text-muted-foreground hover:text-foreground'}"
-          onclick={() => selectTab(t.id)}
+          onclick={() => selectTab(tab.id)}
         >
-          {t.label}
+          {tab.label}
         </button>
       {/each}
     </div>
@@ -471,9 +472,9 @@
               variant={useAllTime ? "default" : "outline"}
               onclick={clearFilter}
             >
-              All time
+              {t("reports.allTime")}
             </Button>
-            <span class="text-sm text-muted-foreground">or filter by:</span>
+            <span class="text-sm text-muted-foreground">{t("reports.orFilterBy")}</span>
             <div class="flex rounded-md border">
               <button
                 class="px-3 py-1.5 text-sm transition-colors
@@ -482,7 +483,7 @@
                   : 'text-muted-foreground hover:text-foreground'}"
                 onclick={() => (filterMode = "month")}
               >
-                Month
+                {t("reports.month")}
               </button>
               <button
                 class="px-3 py-1.5 text-sm transition-colors border-l
@@ -491,7 +492,7 @@
                   : 'text-muted-foreground hover:text-foreground'}"
                 onclick={() => (filterMode = "range")}
               >
-                Date range
+                {t("reports.dateRange")}
               </button>
             </div>
           </div>
@@ -518,11 +519,11 @@
         {#if (!isOptionalTab) || (isOptionalTab && filterMode === "range")}
           <div class="flex items-end gap-3">
             <label class="space-y-1">
-              <span class="text-sm font-medium">From</span>
+              <span class="text-sm font-medium">{t("reports.from")}</span>
               <Input type="date" bind:value={periodStart} class="w-44" />
             </label>
             <label class="space-y-1">
-              <span class="text-sm font-medium">To</span>
+              <span class="text-sm font-medium">{t("reports.to")}</span>
               <Input type="date" bind:value={periodEnd} class="w-44" />
             </label>
             <Button
@@ -530,7 +531,7 @@
               disabled={busy}
               onclick={() => isOptionalTab ? applyFilter() : active && load(active)}
             >
-              Apply
+              {t("common.apply")}
             </Button>
           </div>
         {/if}
@@ -539,13 +540,12 @@
         {#if isOptionalTab && !useAllTime}
           {@const eff = effectiveRange()}
           <p class="text-xs text-muted-foreground">
-            Showing entries from <span class="font-medium text-foreground">{eff.periodStart}</span>
-            to <span class="font-medium text-foreground">{eff.periodEnd}</span>
+            {t("reports.showingEntries", { from: eff.periodStart, to: eff.periodEnd })}
             <button
               class="ml-2 text-xs text-primary hover:underline"
               onclick={clearFilter}
             >
-              ✕ Clear filter
+              ✕ {t("common.clearFilter")}
             </button>
           </p>
         {/if}
@@ -557,7 +557,7 @@
     {/if}
 
     {#if busy}
-      <p class="text-sm text-muted-foreground">Loading…</p>
+      <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
     {/if}
 
     <!-- ---- Sales ---------------------------------------------------------- -->
@@ -565,15 +565,15 @@
       {#if sales}
         <div class="grid grid-cols-3 gap-4">
           <div class="rounded-lg border bg-card p-4">
-            <p class="text-sm text-muted-foreground">Orders</p>
+            <p class="text-sm text-muted-foreground">{t("reports.orders")}</p>
             <p class="text-2xl font-semibold">{sales.orderCount}</p>
           </div>
           <div class="rounded-lg border bg-card p-4">
-            <p class="text-sm text-muted-foreground">Units sold</p>
+            <p class="text-sm text-muted-foreground">{t("reports.unitsSold")}</p>
             <p class="text-2xl font-semibold">{sales.itemsSoldQty}</p>
           </div>
           <div class="rounded-lg border bg-card p-4">
-            <p class="text-sm text-muted-foreground">Revenue</p>
+            <p class="text-sm text-muted-foreground">{t("reports.revenue")}</p>
             <p class="text-2xl font-semibold">
               {formatMoney(sales.revenueMinor)}
             </p>
@@ -581,7 +581,7 @@
         </div>
         {#if salesSeries.length > 0}
           <div class="rounded-lg border bg-card p-4">
-            <p class="mb-2 text-sm text-muted-foreground">Revenue by day</p>
+            <p class="mb-2 text-sm text-muted-foreground">{t("reports.revenueByDay")}</p>
             <AreaChart points={salesSeries} formatValue={formatMoney} />
           </div>
         {/if}
@@ -589,9 +589,9 @@
           <table class="w-full text-sm">
             <thead class="border-b bg-muted/50 text-left text-muted-foreground">
               <tr>
-                <th class="px-4 py-2 font-medium">Date</th>
-                <th class="px-4 py-2 text-right font-medium">Orders</th>
-                <th class="px-4 py-2 text-right font-medium">Revenue</th>
+                <th class="px-4 py-2 font-medium">{t("common.date")}</th>
+                <th class="px-4 py-2 text-right font-medium">{t("reports.orders")}</th>
+                <th class="px-4 py-2 text-right font-medium">{t("reports.revenue")}</th>
               </tr>
             </thead>
             <tbody>
@@ -610,7 +610,7 @@
                     colspan="3"
                     class="px-4 py-8 text-center text-muted-foreground"
                   >
-                    No sales in this period.
+                    {t("reports.noSales")}
                   </td>
                 </tr>
               {/if}
@@ -624,46 +624,45 @@
     {#if active === "profit" && !busy && profit}
       <div class="grid grid-cols-4 gap-4">
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">Revenue</p>
+          <p class="text-sm text-muted-foreground">{t("reports.revenue")}</p>
           <p class="text-2xl font-semibold">{formatMoney(profit.revenueMinor)}</p>
         </div>
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">COGS</p>
+          <p class="text-sm text-muted-foreground">{t("reports.cogs")}</p>
           <p class="text-2xl font-semibold">{formatMoney(profit.cogsMinor)}</p>
         </div>
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">Gross margin</p>
+          <p class="text-sm text-muted-foreground">{t("reports.grossMargin")}</p>
           <p class="text-2xl font-semibold">
             {formatMoney(profit.grossMarginMinor)}
           </p>
         </div>
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">Margin</p>
+          <p class="text-sm text-muted-foreground">{t("reports.margin")}</p>
           <p class="text-2xl font-semibold">{pct(profit.marginBps)}</p>
         </div>
       </div>
       {#if profitSeries.length > 0}
         <div class="rounded-lg border bg-card p-4">
-          <p class="mb-2 text-sm text-muted-foreground">Sales vs COGS by day</p>
+          <p class="mb-2 text-sm text-muted-foreground">{t("reports.salesVsCogs")}</p>
           <LineChart
             points={profitSeries}
             series={[
-              { label: "Revenue", color: "var(--primary)" },
-              { label: "COGS", color: "var(--muted-foreground)" },
+              { label: t("reports.revenue"), color: "var(--primary)" },
+              { label: t("reports.cogs"), color: "var(--muted-foreground)" },
             ]}
             formatValue={formatMoney}
-            tooltipFooter={(v) => `Gross margin: ${formatMoney(v[0] - v[1])}`}
+            tooltipFooter={(v) => t("reports.grossMarginColon", { value: formatMoney(v[0] - v[1]) })}
           />
         </div>
       {/if}
       {#if profit.revenueMinor > 0}
         <div class="rounded-lg border bg-card p-4">
-          <p class="mb-3 text-sm text-muted-foreground">Revenue breakdown</p>
+          <p class="mb-3 text-sm text-muted-foreground">{t("reports.revenueBreakdown")}</p>
           {#if profit.grossMarginMinor < 0}
             <div class="h-4 rounded-full bg-destructive"></div>
             <p class="mt-2 text-xs text-destructive">
-              COGS exceeded revenue — negative margin of
-              {formatMoney(-profit.grossMarginMinor)}.
+              {t("reports.cogsExceeded", { amount: formatMoney(-profit.grossMarginMinor) })}
             </p>
           {:else}
             <div class="flex justify-center">
@@ -673,17 +672,17 @@
                   { value: profit.grossMarginMinor, color: "var(--primary)" },
                 ]}
                 centerLabel={pct(profit.marginBps)}
-                centerSub="margin"
+                centerSub={t("reports.marginShort")}
               />
             </div>
             <div class="mt-2 flex justify-center gap-6 text-xs text-muted-foreground">
               <span class="flex items-center gap-1.5">
                 <span class="size-2.5 rounded-full bg-muted-foreground/40"></span>
-                COGS {formatMoney(profit.cogsMinor)} ({pct(10000 - profit.marginBps)})
+                {t("reports.cogsValue", { amount: formatMoney(profit.cogsMinor), pct: pct(10000 - profit.marginBps) })}
               </span>
               <span class="flex items-center gap-1.5">
                 <span class="size-2.5 rounded-full bg-primary"></span>
-                Gross margin {formatMoney(profit.grossMarginMinor)} ({pct(profit.marginBps)})
+                {t("reports.grossMarginValue", { amount: formatMoney(profit.grossMarginMinor), pct: pct(profit.marginBps) })}
               </span>
             </div>
           {/if}
@@ -692,20 +691,17 @@
     {/if}
 
     <!-- ---- AR / AP aging -------------------------------------------------- -->
-    {#each [{ id: "ar", report: ar, who: "Customer" }, { id: "ap", report: ap, who: "Vendor" }] as v (v.id)}
+    {#each [{ id: "ar", report: ar, who: t("common.customer") }, { id: "ap", report: ap, who: t("common.vendor") }] as v (v.id)}
       {#if active === v.id && !busy && v.report}
         <p class="text-sm text-muted-foreground">
-          As of {fmtDate(v.report.asOf)} · total outstanding
-          <span class="font-medium text-foreground"
-            >{formatMoney(v.report.totalBalanceMinor)}</span
-          >
+          {t("reports.asOfOutstanding", { date: fmtDate(v.report.asOf), amount: formatMoney(v.report.totalBalanceMinor) })}
         </p>
         <div class="overflow-hidden rounded-lg border bg-card">
           <table class="w-full text-sm">
             <thead class="border-b bg-muted/50 text-left text-muted-foreground">
               <tr>
                 <th class="px-4 py-2 font-medium">{v.who}</th>
-                <th class="px-4 py-2 text-right font-medium">Balance</th>
+                <th class="px-4 py-2 text-right font-medium">{t("common.balance")}</th>
                 <th class="px-4 py-2 text-right font-medium">0–30</th>
                 <th class="px-4 py-2 text-right font-medium">31–60</th>
                 <th class="px-4 py-2 text-right font-medium">61–90</th>
@@ -733,7 +729,7 @@
                     colspan="6"
                     class="px-4 py-8 text-center text-muted-foreground"
                   >
-                    Nothing outstanding.
+                    {t("reports.nothingOutstanding")}
                   </td>
                 </tr>
               {/if}
@@ -747,13 +743,13 @@
     {#if active === "variance" && !busy && variance}
       <div class="grid grid-cols-2 gap-4">
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">Total variance</p>
+          <p class="text-sm text-muted-foreground">{t("reports.totalVariance")}</p>
           <p class="text-2xl font-semibold">
             {formatMoney(variance.totalVarianceMinor)}
           </p>
         </div>
         <div class="rounded-lg border bg-card p-4">
-          <p class="text-sm text-muted-foreground">Unreconciled sessions</p>
+          <p class="text-sm text-muted-foreground">{t("reports.unreconciledSessions")}</p>
           <p class="text-2xl font-semibold">{variance.unreconciledCount}</p>
         </div>
       </div>
@@ -761,12 +757,12 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">POS</th>
-              <th class="px-4 py-2 font-medium">Opened</th>
-              <th class="px-4 py-2 font-medium">Closed</th>
-              <th class="px-4 py-2 text-right font-medium">Opening</th>
-              <th class="px-4 py-2 text-right font-medium">Closing</th>
-              <th class="px-4 py-2 text-right font-medium">Variance</th>
+              <th class="px-4 py-2 font-medium">{t("reports.pos")}</th>
+              <th class="px-4 py-2 font-medium">{t("reports.opened")}</th>
+              <th class="px-4 py-2 font-medium">{t("reports.closed")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("reports.opening")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("reports.closing")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("reports.variance")}</th>
             </tr>
           </thead>
           <tbody>
@@ -786,7 +782,7 @@
                 <td class="px-4 py-2 text-right">
                   {#if s.forceClosed}
                     <Badge class="bg-amber-100 text-amber-800">
-                      force-closed
+                      {t("reports.forceClosed")}
                     </Badge>
                   {:else if s.varianceMinor == null}
                     —
@@ -808,7 +804,7 @@
                   colspan="6"
                   class="px-4 py-8 text-center text-muted-foreground"
                 >
-                  No sessions closed in this period.
+                  {t("reports.noSessions")}
                 </td>
               </tr>
             {/if}
@@ -822,30 +818,30 @@
       <div class="grid grid-cols-2 gap-4">
         <div class="rounded-lg border bg-card p-4">
           <p class="text-sm text-muted-foreground">
-            Total purchases ({purchaseRows.length})
+            {t("reports.totalPurchases", { count: purchaseRows.length })}
           </p>
           <p class="text-2xl font-semibold">
             {formatMoney(purchasesTotalMinor)}
           </p>
           <p class="mt-1 text-xs text-muted-foreground">
-            Goods ordered (non-cancelled), by purchase date.
+            {t("reports.goodsOrderedHint")}
           </p>
         </div>
         <div class="rounded-lg border bg-card p-4">
           <p class="text-sm text-muted-foreground">
-            Total delivery cost ({deliveryRows.length})
+            {t("reports.totalDeliveryCost", { count: deliveryRows.length })}
           </p>
           {#if has("delivery.draft")}
             <p class="text-2xl font-semibold">
               {formatMoney(deliveryCostTotalMinor)}
             </p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Freight / customs added on receipt, excluding goods lines.
+              {t("reports.freightHint")}
             </p>
           {:else}
             <p class="text-2xl font-semibold text-muted-foreground">—</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              Requires delivery access.
+              {t("reports.requiresDeliveryAccess")}
             </p>
           {/if}
         </div>
@@ -854,9 +850,9 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Date</th>
-              <th class="px-4 py-2 font-medium">Vendor</th>
-              <th class="px-4 py-2 text-right font-medium">Invoice total</th>
+              <th class="px-4 py-2 font-medium">{t("common.date")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.vendor")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("reports.invoiceTotal")}</th>
             </tr>
           </thead>
           <tbody>
@@ -875,7 +871,7 @@
                   colspan="3"
                   class="px-4 py-8 text-center text-muted-foreground"
                 >
-                  No purchases in this period.
+                  {t("reports.noPurchases")}
                 </td>
               </tr>
             {/if}
@@ -890,9 +886,9 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Account</th>
-              <th class="px-4 py-2 font-medium">Category</th>
-              <th class="px-4 py-2 text-right font-medium">Balance</th>
+              <th class="px-4 py-2 font-medium">{t("reports.account")}</th>
+              <th class="px-4 py-2 font-medium">{t("reports.category")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("common.balance")}</th>
             </tr>
           </thead>
           <tbody>
@@ -905,12 +901,12 @@
                   colspan="3"
                   class="px-4 py-8 text-center text-muted-foreground"
                 >
-                  No tracking accounts.
+                  {t("reports.noTrackingAccounts")}
                 </td>
               </tr>
             {:else}
               <tr class="border-t bg-muted/30 font-medium">
-                <td class="px-4 py-2" colspan="2">Total owed</td>
+                <td class="px-4 py-2" colspan="2">{t("reports.totalOwed")}</td>
                 <td class="px-4 py-2 text-right">
                   {formatMoney(trackingTotalMinor)}
                 </td>

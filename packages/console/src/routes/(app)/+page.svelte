@@ -20,6 +20,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import MoneyInput from "$lib/components/ui/money-input.svelte";
+  import { t } from "$lib/i18n";
 
   // ---- Informatic counts ---------------------------------------------------
   // Product + purchase alerts share the alert.acknowledge gate, so they ride a
@@ -341,8 +342,11 @@
         cashFeedback = { ok: false, text: res.errors[0].message };
         return;
       }
-      const verb = dir === "in" ? "Cash in" : "Cash out";
-      cashFeedback = { ok: true, text: `${verb} recorded — ${formatMoney(amt)}.` };
+      const recordedMsg =
+        dir === "in"
+          ? t("dashboard.cashInRecorded", { amount: formatMoney(amt) })
+          : t("dashboard.cashOutRecorded", { amount: formatMoney(amt) });
+      cashFeedback = { ok: true, text: recordedMsg };
       cashOpen = null;
       // Refresh the picker so the next entry shows the updated balance.
       if (kind === "tracking")
@@ -362,34 +366,34 @@
       ? ""
       : cashOpen.kind === "tracking"
         ? cashOpen.dir === "in"
-          ? "Cash advanced into the account."
-          : "Paid out of the drawer."
+          ? t("dashboard.hintTrackingIn")
+          : t("dashboard.hintTrackingOut")
         : cashOpen.kind === "vendor"
-          ? "Pay the vendor from the drawer."
+          ? t("dashboard.hintVendor")
           : cashOpen.dir === "in"
-            ? "Customer pays down their AR balance."
-            : "Cash lent to the customer — raises their AR balance.",
+            ? t("dashboard.hintCustomerIn")
+            : t("dashboard.hintCustomerOut"),
   );
 
   const pickerPlaceholder = $derived(
     cashOpen?.kind === "tracking"
-      ? "Search account…"
+      ? t("dashboard.searchAccount")
       : cashOpen?.kind === "vendor"
-        ? "Search vendor…"
-        : "Search customer…",
+        ? t("dashboard.searchVendor")
+        : t("dashboard.searchCustomer"),
   );
 
   const isOpen = (kind: CashKind, dir: CashDir) =>
     cashOpen?.kind === kind && cashOpen?.dir === dir;
 </script>
 
-<svelte:head><title>Dashboard · Retale Console</title></svelte:head>
+<svelte:head><title>{t("dashboard.pageTitle")}</title></svelte:head>
 
 <div class="space-y-5">
   <div>
-    <h1 class="text-xl font-semibold">Dashboard</h1>
+    <h1 class="text-xl font-semibold">{t("dashboard.title")}</h1>
     <p class="text-sm text-muted-foreground">
-      What needs attention, and quick cash entry.
+      {t("dashboard.subtitle")}
     </p>
   </div>
 
@@ -399,29 +403,28 @@
       <h2
         class="px-1 text-xs font-medium tracking-wider text-muted-foreground uppercase"
       >
-        Needs attention
+        {t("dashboard.needsAttention")}
       </h2>
 
       {#if !canSeeAlerts && !canSeeReorder}
         <p class="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
-          Nothing to show — you don't have access to alerts or reorder
-          suggestions.
+          {t("dashboard.noAccess")}
         </p>
       {/if}
 
       {#if canSeeAlerts}
         {@render infoCard(
           TriangleAlert,
-          "Product margin alerts",
-          "Open the alerts inbox →",
+          t("dashboard.productAlerts"),
+          t("dashboard.openAlerts"),
           "/alerts",
           productAlertCount,
           $DashboardAlerts.fetching,
         )}
         {@render infoCard(
           ClipboardList,
-          "Purchase alerts",
-          "Open the alerts inbox →",
+          t("dashboard.purchaseAlerts"),
+          t("dashboard.openAlerts"),
           "/alerts",
           purchaseAlertCount,
           $DashboardAlerts.fetching,
@@ -431,8 +434,8 @@
       {#if canSeeReorder}
         {@render infoCard(
           PackageSearch,
-          "Reorder suggestions",
-          "Review & convert to purchases →",
+          t("dashboard.reorderSuggestions"),
+          t("dashboard.reviewReorder"),
           "/reorder",
           reorderCount,
           $DashboardReorder.fetching,
@@ -445,7 +448,7 @@
       <h2
         class="px-1 text-xs font-medium tracking-wider text-muted-foreground uppercase"
       >
-        Cash shortcuts
+        {t("dashboard.cashShortcuts")}
       </h2>
 
       {#if cashFeedback}
@@ -460,18 +463,18 @@
 
       {#if !hasCashCard}
         <p class="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
-          You don't have permission to record cash movements.
+          {t("dashboard.noPermission")}
         </p>
       {/if}
 
       {#if showTracking}
-        {@render cashCard(Landmark, "Tracking accounts", "tracking", canTrackIn, canTrackOut)}
+        {@render cashCard(Landmark, t("dashboard.trackingAccounts"), "tracking", canTrackIn, canTrackOut)}
       {/if}
       {#if showVendor}
-        {@render cashCard(Truck, "Vendor payment", "vendor", false, true)}
+        {@render cashCard(Truck, t("dashboard.vendorPayment"), "vendor", false, true)}
       {/if}
       {#if showCustomer}
-        {@render cashCard(Users, "Customer cash", "customer", canCustIn, canCustOut)}
+        {@render cashCard(Users, t("dashboard.customerCash"), "customer", canCustIn, canCustOut)}
       {/if}
     </section>
   </div>
@@ -520,7 +523,7 @@
   kind: CashKind,
   showIn: boolean,
   showOut: boolean,
-)}
+  )}
   <div class="rounded-lg border bg-card p-4">
     <div class="flex items-center gap-3">
       <span
@@ -537,7 +540,7 @@
             disabled={cashBusy}
             onclick={() => openCash(kind, "in")}
           >
-            <ArrowDownToLine class="size-4" /> Cash in
+            <ArrowDownToLine class="size-4" /> {t("dashboard.cashIn")}
           </Button>
         {/if}
         {#if showOut}
@@ -547,7 +550,7 @@
             disabled={cashBusy}
             onclick={() => openCash(kind, "out")}
           >
-            <ArrowUpFromLine class="size-4" /> Cash out
+            <ArrowUpFromLine class="size-4" /> {t("dashboard.cashOut")}
           </Button>
         {/if}
       </div>
@@ -560,19 +563,19 @@
           <Combobox
             options={activeOptions}
             bind:value={cashTargetId}
-            placeholder={activeLoading ? "Loading…" : pickerPlaceholder}
+            placeholder={activeLoading ? t("common.loading") : pickerPlaceholder}
             disabled={cashBusy}
           />
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Amount (Rp)</span>
+              <span class="text-xs font-medium">{t("dashboard.amountLabel")}</span>
               <MoneyInput bind:value={cashAmount} class="w-40" disabled={cashBusy} />
             </label>
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">
-                Note {cashOpen.kind === "customer" && cashOpen.dir === "out"
-                  ? "(defaults to “Cash loan”)"
-                  : "(optional)"}
+                {cashOpen.kind === "customer" && cashOpen.dir === "out"
+                  ? t("dashboard.noteDefaultLoan")
+                  : t("dashboard.noteOptional")}
               </span>
               <Input bind:value={cashNote} disabled={cashBusy} />
             </label>
@@ -581,7 +584,7 @@
               disabled={cashBusy || !cashTargetId || !cashAmount || cashAmount <= 0}
               onclick={submitCash}
             >
-              Record
+              {t("common.record")}
             </Button>
             <Button
               size="sm"
@@ -589,7 +592,7 @@
               disabled={cashBusy}
               onclick={() => (cashOpen = null)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </div>

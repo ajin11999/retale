@@ -2,6 +2,7 @@ import 'package:jwt_decoder/jwt_decoder.dart';
 
 import '../graphql/graphql_service.dart';
 import '../graphql/operations.dart';
+import '../i18n/i18n_service.dart';
 import '../models/user.dart';
 import 'token_store.dart';
 
@@ -9,8 +10,8 @@ import 'token_store.dart';
 /// challenge the UI must complete with a TOTP / recovery code.
 class LoginOutcome {
   LoginOutcome.authenticated()
-      : requiresTwoFactor = false,
-        challengeToken = null;
+    : requiresTwoFactor = false,
+      challengeToken = null;
   LoginOutcome.twoFactor(this.challengeToken) : requiresTwoFactor = true;
 
   final bool requiresTwoFactor;
@@ -60,7 +61,8 @@ class AuthService {
     }
     final token = _store.accessToken;
     if (token == null) return;
-    final stale = JwtDecoder.isExpired(token) ||
+    final stale =
+        JwtDecoder.isExpired(token) ||
         _expiresWithin(token, const Duration(seconds: 60));
     if (stale && _store.hasRefreshToken) {
       await refresh();
@@ -78,10 +80,10 @@ class AuthService {
 
   /// Authenticate with username + password.
   Future<LoginOutcome> login(String username, String password) async {
-    final data = await _gql.mutate(Ops.login, variables: {
-      'username': username,
-      'password': password,
-    });
+    final data = await _gql.mutate(
+      Ops.login,
+      variables: {'username': username, 'password': password},
+    );
     final result = data['login'] as Map<String, dynamic>;
     if (result['requiresTwoFactor'] == true) {
       return LoginOutcome.twoFactor(result['challengeToken'] as String);
@@ -92,10 +94,10 @@ class AuthService {
 
   /// Complete a 2FA challenge with a TOTP or recovery code.
   Future<void> completeTwoFactor(String challengeToken, String code) async {
-    final data = await _gql.mutate(Ops.loginTwoFactor, variables: {
-      'challengeToken': challengeToken,
-      'code': code,
-    });
+    final data = await _gql.mutate(
+      Ops.loginTwoFactor,
+      variables: {'challengeToken': challengeToken, 'code': code},
+    );
     await _persist(data['loginTwoFactor'] as Map<String, dynamic>);
   }
 
@@ -112,13 +114,14 @@ class AuthService {
 
   Future<void> _doRefresh() async {
     if (!_store.hasRefreshToken) {
-      throw GraphQLAppException('Session expired. Please log in again.');
+      throw GraphQLAppException(tr('auth.sessionExpired'));
     }
     _refreshing = true;
     try {
-      final data = await _gql.mutate(Ops.refreshToken, variables: {
-        'refreshToken': _store.refreshToken,
-      });
+      final data = await _gql.mutate(
+        Ops.refreshToken,
+        variables: {'refreshToken': _store.refreshToken},
+      );
       await _persist(data['refreshToken'] as Map<String, dynamic>);
     } on GraphQLAppException catch (e) {
       // The server rejected the refresh token: the session is dead (revoked or
@@ -140,9 +143,10 @@ class AuthService {
     final refreshToken = _store.refreshToken;
     if (refreshToken != null) {
       try {
-        await _gql.mutate(Ops.logout, variables: {
-          'refreshToken': refreshToken,
-        });
+        await _gql.mutate(
+          Ops.logout,
+          variables: {'refreshToken': refreshToken},
+        );
       } catch (_) {
         // Logout is best-effort; clear locally regardless.
       }
@@ -155,8 +159,7 @@ class AuthService {
       access: authPayload['accessToken'] as String,
       refresh: authPayload['refreshToken'] as String,
       refreshExp: authPayload['refreshExpiresAt'] as String,
-      authUser:
-          AppUser.fromJson(authPayload['user'] as Map<String, dynamic>),
+      authUser: AppUser.fromJson(authPayload['user'] as Map<String, dynamic>),
     );
   }
 }

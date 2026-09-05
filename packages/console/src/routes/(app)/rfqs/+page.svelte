@@ -3,7 +3,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -78,7 +79,7 @@
   const vendors = $derived($RfqList.data?.vendors ?? []);
 
   const vendorOptions = $derived([
-    { value: "", label: "— Ad-hoc / Walk-in vendor —" },
+    { value: "", label: t("rfqs.adHocOption") },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -180,17 +181,17 @@
   }
 </script>
 
-<svelte:head><title>Requests for Quotation · Retale Console</title></svelte:head>
+<svelte:head><title>{t("rfqs.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold">Requests for Quotation (RFQ)</h1>
-      <p class="text-xs text-muted-foreground">Request, compare, and award vendor quotes</p>
+      <h1 class="text-xl font-semibold">{t("rfqs.title")}</h1>
+      <p class="text-xs text-muted-foreground">{t("rfqs.subtitle")}</p>
     </div>
     <div class="flex items-center gap-3">
       <div class="w-56">
-        <Input type="search" placeholder="Search RFQs…" bind:value={search} />
+        <Input type="search" placeholder={t("rfqs.searchRFQs")} bind:value={search} />
       </div>
       <div class="flex items-center gap-1 rounded-md border p-1 bg-muted/30">
         {#each STATUSES as s (s)}
@@ -198,12 +199,12 @@
             class="rounded px-3 py-1.5 text-sm font-medium capitalize transition-colors {statusFilter === s ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'}"
             onclick={() => (statusFilter = s)}
           >
-            {s === "all" ? "All" : s}
+            {t(`rfqs.status.${s}`)}
           </button>
         {/each}
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={startNew}>
-        New RFQ
+        {t("rfqs.newRFQ")}
       </Button>
     </div>
   </div>
@@ -214,49 +215,49 @@
 
   {#if draft}
     <div class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Create New RFQ</h2>
+      <h2 class="text-sm font-semibold">{t("rfqs.createNewRFQ")}</h2>
 
       <div class="grid grid-cols-4 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Vendor</span>
+          <span class="text-sm font-medium">{t("rfqs.vendor")}</span>
           <Combobox
             options={vendorOptions}
             bind:value={draft.vendorId}
-            placeholder="Search vendor…"
+            placeholder={t("rfqs.searchVendor")}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Ad-hoc / Walk-in Vendor</span>
+          <span class="text-sm font-medium">{t("rfqs.adHocVendor")}</span>
           <Input
             bind:value={draft.adHocName}
-            placeholder="Used when no vendor picked"
+            placeholder={t("rfqs.adHocPlaceholder")}
             disabled={draft.vendorId !== ""}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Date</span>
+          <span class="text-sm font-medium">{t("common.date")}</span>
           <Input type="date" bind:value={draft.date} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Due Date (Optional)</span>
+          <span class="text-sm font-medium">{t("rfqs.dueDateOptional")}</span>
           <Input type="date" bind:value={draft.dueDate} />
         </label>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Memo / Internal Notes</span>
+          <span class="text-sm font-medium">{t("rfqs.memoInternal")}</span>
           <Textarea
             bind:value={draft.memo}
-            placeholder="Notes for internal procurement team…"
+            placeholder={t("rfqs.memoPlaceholder")}
             rows={2}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Terms &amp; Conditions</span>
+          <span class="text-sm font-medium">{t("rfqs.termsConditions")}</span>
           <Textarea
             bind:value={draft.termsAndConditions}
-            placeholder="Default terms for vendor response…"
+            placeholder={t("rfqs.termsPlaceholder")}
             rows={2}
           />
         </label>
@@ -267,17 +268,17 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button size="sm" disabled={busy} onclick={createRfq}>
-          Create RFQ
+          {t("rfqs.createRfqBtn")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $RfqList.fetching && rfqs.length === 0}
-    <p class="text-sm text-muted-foreground">Loading RFQs…</p>
+    <p class="text-sm text-muted-foreground">{t("rfqs.loading")}</p>
   {:else if $RfqList.errors?.length}
     <p class="text-sm text-destructive">{$RfqList.errors[0].message}</p>
   {:else}
@@ -285,12 +286,12 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">RFQ Number</th>
-            <th class="px-4 py-2 font-medium">Vendor</th>
-            <th class="px-4 py-2 font-medium">Date</th>
-            <th class="px-4 py-2 font-medium">Due Date</th>
-            <th class="px-4 py-2 font-medium">Items</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("rfqs.rfqNumber")}</th>
+            <th class="px-4 py-2 font-medium">{t("rfqs.vendor")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.date")}</th>
+            <th class="px-4 py-2 font-medium">{t("rfqs.dueDate")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.items")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -309,9 +310,9 @@
               </td>
               <td class="px-4 py-2">{fmtDate(r.date)}</td>
               <td class="px-4 py-2 text-muted-foreground">{fmtDate(r.dueDate)}</td>
-              <td class="px-4 py-2">{r.items.length} lines</td>
+              <td class="px-4 py-2">{t("rfqs.lines", { count: r.items.length })}</td>
               <td class="px-4 py-2">
-                <Badge class={statusClass(r.status)}>{r.status}</Badge>
+                <Badge class={statusClass(r.status)}>{t(`rfqs.status.${r.status}`)}</Badge>
               </td>
             </tr>
           {/each}
@@ -319,8 +320,10 @@
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
                 {search.trim()
-                  ? "No RFQs match search criteria."
-                  : `No RFQs${statusFilter === "all" ? "" : ` (${statusFilter})`}.`}
+                  ? t("rfqs.noRfqsMatch")
+                  : (statusFilter === "all"
+                      ? t("rfqs.noRfqs")
+                      : t("rfqs.noRfqsStatus", { status: t(`rfqs.status.${statusFilter}`) }))}
               </td>
             </tr>
           {/if}
@@ -329,7 +332,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} RFQ{rows.length === 1 ? "" : "s"}
+        {t("rfqs.rfqCount", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

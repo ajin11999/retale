@@ -9,6 +9,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -110,7 +111,7 @@
       .filter((a) => !a.archivedAt)
       .map((a) => ({ value: a.id, label: pathOf(a.id) }))
       .sort((x, y) => x.label.localeCompare(y.label));
-    return [{ value: "", label: "— Top level —" }, ...opts];
+    return [{ value: "", label: t("tracking.topLevel") }, ...opts];
   });
 
   // ---- Search --------------------------------------------------------------
@@ -196,20 +197,20 @@
   }
 </script>
 
-<svelte:head><title>Tracking accounts · Retale Console</title></svelte:head>
+<svelte:head><title>{t("tracking.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Tracking accounts</h1>
+    <h1 class="text-xl font-semibold">{t("tracking.title")}</h1>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-1.5 text-sm text-muted-foreground">
         <input type="checkbox" bind:checked={showArchived} class="size-4" />
-        Show archived
+        {t("common.showArchived")}
       </label>
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search accounts…"
+          placeholder={t("tracking.searchAccounts")}
           bind:value={search}
         />
       </div>
@@ -218,7 +219,7 @@
         disabled={busy || !canCreate}
         onclick={() => (showNew = true)}
       >
-        New account
+        {t("tracking.newAccount")}
       </Button>
     </div>
   </div>
@@ -231,58 +232,58 @@
     <div class="space-y-3 rounded-lg border bg-card p-4">
       <div class="grid grid-cols-2 gap-3">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Name</span>
-          <Input bind:value={nName} placeholder="e.g. Andi (cashier)" />
+          <span class="text-sm font-medium">{t("common.name")}</span>
+          <Input bind:value={nName} placeholder={t("tracking.namePlaceholder")} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Code (optional)</span>
+          <span class="text-sm font-medium">{t("tracking.codeOptional")}</span>
           <Input bind:value={nCode} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Account category</span>
+          <span class="text-sm font-medium">{t("tracking.accountCategory")}</span>
           <Input bind:value={nAccountCategory} placeholder="liability.tracking.staff" />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Counter category</span>
+          <span class="text-sm font-medium">{t("tracking.counterCategory")}</span>
           <Input bind:value={nCounterCategory} placeholder="expense.commission" />
         </label>
         <label class="col-span-2 space-y-1">
-          <span class="text-sm font-medium">Parent (optional)</span>
+          <span class="text-sm font-medium">{t("tracking.parentOptional")}</span>
           <Combobox
             options={parentComboOptions}
             bind:value={nParentId}
-            placeholder="Search parent account…"
+            placeholder={t("tracking.searchParentAccount")}
           />
         </label>
       </div>
       <div class="flex justify-end gap-2">
         <Button variant="ghost" size="sm" disabled={busy} onclick={resetNew}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           size="sm"
           disabled={busy || !nName.trim()}
-          onclick={createAccount}>Create &amp; edit</Button
+          onclick={createAccount}>{t("tracking.createAndEdit")}</Button
         >
       </div>
     </div>
   {/if}
 
   {#if $Store.fetching && accounts.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Store.errors?.length}
     <p class="text-sm text-destructive">{$Store.errors[0].message}</p>
   {:else if accounts.length === 0}
-    <p class="text-sm text-muted-foreground">No tracking accounts yet.</p>
+    <p class="text-sm text-muted-foreground">{t("tracking.noAccounts")}</p>
   {:else}
     <div class="overflow-hidden rounded-lg border bg-card">
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Account</th>
-            <th class="px-4 py-2 font-medium">Category</th>
-            <th class="px-4 py-2 text-right font-medium">Balance</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("tracking.account")}</th>
+            <th class="px-4 py-2 font-medium">{t("tracking.category")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.balance")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -315,7 +316,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {node.acc.archivedAt ? "Archived" : "Active"}
+                  {node.acc.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
             </tr>
@@ -323,7 +324,7 @@
           {#if visibleTree.length === 0}
             <tr>
               <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
-                No accounts match.
+                {t("tracking.noMatch")}
               </td>
             </tr>
           {/if}
@@ -332,7 +333,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {visibleTree.length} account{visibleTree.length === 1 ? "" : "s"}
+        {t("tracking.count", { count: visibleTree.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleTree.length} />
     </div>

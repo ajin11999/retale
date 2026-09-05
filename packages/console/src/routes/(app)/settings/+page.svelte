@@ -124,7 +124,7 @@
         error = res.errors[0].message;
         return;
       }
-      info = "Settings saved.";
+      info = t("settings.saved");
       await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -150,10 +150,10 @@
       const res = await fetch("/settings/logo", { method: "POST", body });
       if (!res.ok) {
         const msg = await res.text();
-        error = msg || `Upload failed (${res.status})`;
+        error = msg || t("products.uploadFailed", { text: res.status });
         return;
       }
-      info = "Logo updated.";
+      info = t("settings.logoUpdated");
       await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -164,7 +164,7 @@
   }
 
   async function removeLogo() {
-    if (!confirm("Remove the business logo?")) return;
+    if (!confirm(t("settings.confirmRemoveLogo"))) return;
     logoBusy = true;
     error = null;
     info = null;
@@ -174,7 +174,7 @@
         error = res.errors[0].message;
         return;
       }
-      info = "Logo removed.";
+      info = t("settings.logoRemoved");
       await View.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -211,16 +211,16 @@
   {:else if $View.errors?.length}
     <p class="text-sm text-destructive">{$View.errors[0].message}</p>
   {:else if !settings}
-    <p class="text-sm text-muted-foreground">No settings record.</p>
+    <p class="text-sm text-muted-foreground">{t("settings.noRecord")}</p>
   {:else}
     <a
       href="/settings/addresses"
       class="flex items-center justify-between rounded-lg border bg-card p-4 hover:bg-accent"
     >
       <div>
-        <h2 class="text-sm font-semibold">Ship-to addresses</h2>
+        <h2 class="text-sm font-semibold">{t("settings.addresses")}</h2>
         <p class="text-xs text-muted-foreground">
-          Your locations, printed as “Ship To” on purchase orders.
+          {t("settings.addressesHint")}
         </p>
       </div>
       <span class="text-muted-foreground">→</span>
@@ -246,8 +246,7 @@
       <div class="space-y-2">
         <span class="text-sm font-medium">{t("settings.logo")}</span>
         <p class="text-xs text-muted-foreground">
-          Shown on purchase orders. PNG, JPG, or SVG; transparent PNG or SVG
-          looks best.
+          {t("settings.logoHint")}
         </p>
         <div class="flex items-center gap-4">
           <div
@@ -256,11 +255,11 @@
             {#if settings.logoUrl}
               <img
                 src={`/settings/logo?v=${encodeURIComponent(settings.updatedAt ?? "")}`}
-                alt="Business logo"
+                alt={t("settings.logo")}
                 class="max-h-full max-w-full object-contain"
               />
             {:else}
-              <span class="text-xs text-muted-foreground">No logo</span>
+              <span class="text-xs text-muted-foreground">{t("settings.noLogo")}</span>
             {/if}
           </div>
           <div class="flex flex-col gap-2">
@@ -289,8 +288,7 @@
       <div>
         <h2 class="text-sm font-semibold">{t("settings.poTemplate")}</h2>
         <p class="text-xs text-muted-foreground">
-          Wrapped around the auto-generated PO line items in WhatsApp / email
-          messages.
+          {t("settings.poTemplateHint")}
         </p>
       </div>
       <label class="block space-y-1">
@@ -298,7 +296,7 @@
         <Textarea
           bind:value={poGreeting}
           disabled={!canManage}
-          placeholder="e.g. Hi {'{vendor}'}, please prepare the following:"
+          placeholder={t("settings.poGreetingPlaceholder")}
           class="min-h-16"
         />
       </label>
@@ -307,7 +305,7 @@
         <Textarea
           bind:value={poFooter}
           disabled={!canManage}
-          placeholder="e.g. Thanks! — {'{business}'}"
+          placeholder={t("settings.poFooterPlaceholder")}
           class="min-h-16"
         />
       </label>
@@ -317,8 +315,7 @@
       <div>
         <h2 class="text-sm font-semibold">{t("settings.receiptTemplate")}</h2>
         <p class="text-xs text-muted-foreground">
-          Wrapped around the auto-generated receipt line items when sending a sale
-          to a customer over WhatsApp / email.
+          {t("settings.receiptTemplateHint")}
         </p>
       </div>
       <label class="block space-y-1">
@@ -343,7 +340,7 @@
 
     <div class="flex items-center justify-between">
       <p class="text-xs text-muted-foreground">
-        Last updated {fmtDateTime(settings.updatedAt)}
+        {t("settings.lastUpdated", { date: fmtDateTime(settings.updatedAt) })}
       </p>
       <Button
         size="sm"
@@ -354,7 +351,7 @@
 
     {#if !canManage}
       <p class="text-sm text-muted-foreground">
-        You don't have permission to edit these settings.
+        {t("settings.noPermission")}
       </p>
     {/if}
   {/if}

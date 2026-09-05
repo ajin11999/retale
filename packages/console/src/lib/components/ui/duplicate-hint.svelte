@@ -5,6 +5,7 @@
   // substring (see normalizeName) — punctuation/spacing-insensitive, no fuzzy
   // dependency. All filtering is client-side over a list the page already holds.
   import { normalizeName } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   interface Candidate {
     id: string;
@@ -46,6 +47,8 @@
     return seen.slice(0, limit);
   });
 
+  const nounLabel = $derived(t(`common.${noun}`));
+
   const exact = $derived(
     matches.some((m) => normalizeName(m.name) === normalizeName(query ?? "")),
   );
@@ -85,8 +88,8 @@
         : 'bg-amber-50 text-amber-800'}"
     >
       {exact
-        ? `A ${noun} with this exact name already exists`
-        : `Similar ${noun}${matches.length === 1 ? "" : "s"} already exist`}
+        ? t("duplicateHint.exact", { noun: nounLabel })
+        : t("duplicateHint.similar", { noun: nounLabel })}
     </p>
     <ul class="max-h-56 divide-y overflow-y-auto text-sm">
       {#each matches as m (m.id)}

@@ -9,6 +9,7 @@
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -45,7 +46,7 @@
     customers.map((c) => ({
       id: c.id,
       name: c.name,
-      note: c.archivedAt ? "Archived" : (c.phone ?? null),
+      note: c.archivedAt ? t("common.archived") : (c.phone ?? null),
     })),
   );
 
@@ -151,16 +152,16 @@
     c.creditLimitMinor != null && c.balanceMinor > c.creditLimitMinor;
 </script>
 
-<svelte:head><title>Customers · Retale Console</title></svelte:head>
+<svelte:head><title>{t("customers.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Customers</h1>
+    <h1 class="text-xl font-semibold">{t("customers.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search customers…"
+          placeholder={t("customers.searchCustomers")}
           bind:value={search}
         />
       </div>
@@ -169,7 +170,7 @@
         disabled={busy || !canCreate}
         onclick={() => (newName = "")}
       >
-        New customer
+        {t("customers.newCustomer")}
       </Button>
     </div>
   </div>
@@ -181,8 +182,8 @@
   {#if newName !== null}
     <div class="flex items-end gap-2 rounded-lg border bg-card p-4">
       <label class="relative flex-1 space-y-1">
-        <span class="text-sm font-medium">Customer name</span>
-        <Input bind:value={newName} placeholder="Customer name" />
+        <span class="text-sm font-medium">{t("customers.customerName")}</span>
+        <Input bind:value={newName} placeholder={t("customers.customerName")} />
         <DuplicateHint
           query={newName ?? ""}
           items={customerCandidates}
@@ -192,19 +193,19 @@
       <Button
         size="sm"
         disabled={busy || !(newName ?? "").trim()}
-        onclick={createCustomer}>Create &amp; edit</Button
+        onclick={createCustomer}>{t("customers.createAndEdit")}</Button
       >
       <Button
         variant="ghost"
         size="sm"
         disabled={busy}
-        onclick={() => (newName = null)}>Cancel</Button
+        onclick={() => (newName = null)}>{t("common.cancel")}</Button
       >
     </div>
   {/if}
 
   {#if $CustomerList.fetching && customers.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $CustomerList.errors?.length}
     <p class="text-sm text-destructive">{$CustomerList.errors[0].message}</p>
   {:else}
@@ -217,17 +218,17 @@
                 class="inline-flex items-center hover:text-foreground"
                 onclick={() => toggleSort("name")}
               >
-                Customer{sortGlyph("name")}
+                {t("common.customer")}{sortGlyph("name")}
               </button>
             </th>
-            <th class="px-4 py-2 font-medium">Phone</th>
-            <th class="px-4 py-2 font-medium">Email</th>
+            <th class="px-4 py-2 font-medium">{t("customers.phone")}</th>
+            <th class="px-4 py-2 font-medium">{t("customers.email")}</th>
             <th class="px-4 py-2 text-right font-medium">
               <button
                 class="inline-flex items-center hover:text-foreground"
                 onclick={() => toggleSort("balance")}
               >
-                AR balance{sortGlyph("balance")}
+                {t("customers.arBalance")}{sortGlyph("balance")}
               </button>
             </th>
             <th class="px-4 py-2 text-right font-medium">
@@ -235,10 +236,10 @@
                 class="inline-flex items-center hover:text-foreground"
                 onclick={() => toggleSort("limit")}
               >
-                Credit limit{sortGlyph("limit")}
+                {t("customers.creditLimit")}{sortGlyph("limit")}
               </button>
             </th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -270,7 +271,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {c.archivedAt ? "Archived" : "Active"}
+                  {c.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
             </tr>
@@ -281,7 +282,7 @@
                 colspan="6"
                 class="px-4 py-10 text-center text-muted-foreground"
               >
-                No customers match.
+                {t("customers.noCustomersMatch")}
               </td>
             </tr>
           {/if}
@@ -290,7 +291,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} customer{rows.length === 1 ? "" : "s"}
+        {t("customers.count", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

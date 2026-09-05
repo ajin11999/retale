@@ -1,11 +1,12 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import { goto } from "$app/navigation";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
   import { page } from "$app/state";
 
@@ -81,14 +82,14 @@
   );
 </script>
 
-<svelte:head><title>Purchase Requisitions · Retale Console</title></svelte:head>
+<svelte:head><title>{t("requisitions.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Purchase Requisitions</h1>
+    <h1 class="text-xl font-semibold">{t("requisitions.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="w-56">
-        <Input type="search" placeholder="Search requisitions…" bind:value={search} />
+        <Input type="search" placeholder={t("requisitions.searchRequisitions")} bind:value={search} />
       </div>
       <div class="flex items-center gap-1 rounded-md border p-1 bg-muted/30">
         {#each STATUSES as s}
@@ -96,18 +97,18 @@
             class="rounded px-3 py-1.5 text-sm font-medium capitalize transition-colors {statusFilter === s ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:bg-muted/50'}"
             onclick={() => statusFilter = s}
           >
-            {s === "all" ? "All" : s.replace('_', ' ')}
+            {s === "all" ? t("requisitions.all") : (t(`requisitions.status.${s}`) || s.replace('_', ' '))}
           </button>
         {/each}
       </div>
       {#if showCreate}
         <div class="flex items-center gap-2">
-          <Input placeholder="Requisition name..." bind:value={newName} class="w-48" onkeydown={(e: any) => e.key === 'Enter' && createRequisition()} autofocus />
-          <Button size="sm" onclick={createRequisition} disabled={creating}>Create</Button>
-          <Button size="sm" variant="ghost" onclick={() => showCreate = false}>Cancel</Button>
+          <Input placeholder={t("requisitions.requisitionName")} bind:value={newName} class="w-48" onkeydown={(e: any) => e.key === 'Enter' && createRequisition()} autofocus />
+          <Button size="sm" onclick={createRequisition} disabled={creating}>{t("common.create")}</Button>
+          <Button size="sm" variant="ghost" onclick={() => showCreate = false}>{t("common.cancel")}</Button>
         </div>
       {:else}
-        <Button size="sm" onclick={() => showCreate = true}>New Requisition</Button>
+        <Button size="sm" onclick={() => showCreate = true}>{t("requisitions.newRequisition")}</Button>
       {/if}
     </div>
   </div>
@@ -116,10 +117,10 @@
     <table class="w-full text-sm">
       <thead class="border-b bg-muted/50 text-left text-muted-foreground">
         <tr>
-          <th class="px-4 py-2 font-medium">Name</th>
-          <th class="px-4 py-2 font-medium">Date</th>
-          <th class="px-4 py-2 font-medium">Items</th>
-          <th class="px-4 py-2 font-medium">Status</th>
+          <th class="px-4 py-2 font-medium">{t("common.name")}</th>
+          <th class="px-4 py-2 font-medium">{t("requisitions.date")}</th>
+          <th class="px-4 py-2 font-medium">{t("requisitions.items")}</th>
+          <th class="px-4 py-2 font-medium">{t("common.status")}</th>
         </tr>
       </thead>
       <tbody>
@@ -131,15 +132,15 @@
               </a>
             </td>
             <td class="px-4 py-2">{new Date(Number(req.createdAt)).toLocaleDateString()}</td>
-            <td class="px-4 py-2">{req.items.length} lines</td>
+            <td class="px-4 py-2">{t("requisitions.lines", { count: req.items.length })}</td>
             <td class="px-4 py-2">
-              <Badge class={statusClass(req.status)}>{req.status.replace('_', ' ')}</Badge>
+              <Badge class={statusClass(req.status)}>{t(`requisitions.status.${req.status}`) || req.status.replace('_', ' ')}</Badge>
             </td>
           </tr>
         {:else}
           <tr>
             <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">
-              No requisitions found.
+              {t("requisitions.noRequisitionsFound")}
             </td>
           </tr>
         {/each}

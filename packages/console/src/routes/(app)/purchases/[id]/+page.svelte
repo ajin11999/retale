@@ -6,7 +6,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import { dndzone, type DndEvent } from "svelte-dnd-action";
   import { flip } from "svelte/animate";
@@ -473,7 +474,7 @@
   // Searchable Combobox options for the header vendor; the leading empty row
   // keeps the "ad-hoc vendor" (no vendor on file) choice.
   const vendorOptions = $derived([
-    { value: "", label: "— Ad-hoc vendor —" },
+    { value: "", label: t("purchases.adHocVendor") },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
   const products = $derived(($RefData.data?.products ?? []).filter(p => p.kind !== "bundle"));
@@ -495,7 +496,7 @@
     return out.sort((a, b) => a.label.localeCompare(b.label));
   });
   const variantLabel = (id: string | null | undefined) =>
-    id ? (variantOptions.find((v) => v.value === id)?.label ?? "Unknown") : null;
+    id ? (variantOptions.find((v) => v.value === id)?.label ?? t("products.unknown")) : null;
 
   // ---- Unit-cost prefill ----------------------------------------------------
   // New lines prefill with what this vendor last charged for the variant; the
@@ -598,7 +599,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: label };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -643,7 +644,7 @@
 
   async function saveHeader() {
     if (!purchase) return;
-    await run("Purchase", () =>
+    await run(t("purchaseDetail.savedPurchase"), () =>
       UpdatePurchase.mutate({
         id: purchase.id,
         vendorId: form.vendorId || null,
@@ -661,9 +662,9 @@
   }
 
   async function cancelPurchase() {
-    if (!purchase || !confirm("Cancel this purchase? This cannot be undone."))
+    if (!purchase || !confirm(t("purchaseDetail.confirmCancel")))
       return;
-    const ok = await run("Purchase", () =>
+    const ok = await run(t("purchaseDetail.savedPurchase"), () =>
       CancelPurchase.mutate({ id: purchase.id }),
     );
     if (ok) await refetch();
@@ -698,7 +699,7 @@
   async function addSection() {
     const name = (newSectionName ?? "").trim();
     if (!purchase || !name) return;
-    const ok = await run("Section", () =>
+    const ok = await run(t("purchaseDetail.savedSection"), () =>
       CreateSection.mutate({ purchaseId: purchase.id, name }),
     );
     if (ok) {
@@ -716,7 +717,7 @@
     const id = editingSectionId;
     const name = editingSectionName.trim();
     if (!id || !name) return;
-    const ok = await run("Section", () => UpdateSection.mutate({ id, name }));
+    const ok = await run(t("purchaseDetail.savedSection"), () => UpdateSection.mutate({ id, name }));
     if (ok) {
       editingSectionId = null;
       await refetch();
@@ -724,8 +725,8 @@
   }
 
   async function deleteSection(id: string) {
-    if (!confirm("Delete this section? Its items move to no section.")) return;
-    const ok = await run("Section", () => DeleteSection.mutate({ id }));
+    if (!confirm(t("purchaseDetail.confirmDeleteSection"))) return;
+    const ok = await run(t("purchaseDetail.savedSection"), () => DeleteSection.mutate({ id }));
     if (ok) await refetch();
   }
 
@@ -810,12 +811,12 @@
     if (!d || !purchase) return;
     // A line is either a stock variant or a free-text non-stock line.
     if (!d.variantId && !d.description.trim()) {
-      feedback = { ok: false, text: "Pick a variant or enter a description." };
+      feedback = { ok: false, text: t("purchaseDetail.errorPickVariant") };
       return;
     }
     const isNew = !d.id;
     const existingItem = d.id ? items.find((x) => x.id === d.id) : null;
-    const ok = await run("Item", () =>
+    const ok = await run(t("purchaseDetail.savedItem"), () =>
       d.id
         ? UpdateItem.mutate({
             id: d.id,
@@ -883,7 +884,7 @@
       if (variantId) {
         await RefData.fetch({ policy: "NetworkOnly" });
         d.variantId = variantId;
-        feedback = { ok: true, text: `Created “${name}”.` };
+        feedback = { ok: true, text: t("purchaseDetail.createdProduct", { name }) };
         focusLineField("line-qty");
       }
     } catch (e) {
@@ -894,7 +895,7 @@
   }
 
   async function deleteItem(id: string) {
-    const ok = await run("Item", () => DeleteItem.mutate({ id }));
+    const ok = await run(t("purchaseDetail.savedItem"), () => DeleteItem.mutate({ id }));
     if (ok) await refetch();
   }
 
@@ -1034,7 +1035,7 @@
         unitCostMinor: p.unitCostMinor ?? 0,
       }));
     if (lines.length === 0) return;
-    const ok = await run("Lines", () =>
+    const ok = await run(t("purchaseDetail.savedLines"), () =>
       CreateItems.mutate({ purchaseId: purchase.id, lines }),
     );
     if (ok) {
@@ -1066,7 +1067,7 @@
   let importRows = $state<ImportRow[]>([]);
   const importIncludedCount = $derived(importRows.filter((r) => r.include).length);
   const importSectionOptions = $derived([
-    { value: "", label: "— No section —" },
+    { value: "", label: t("purchaseDetail.noSection") },
     ...sections.map((s) => ({ value: s.id, label: s.name })),
   ]);
 
@@ -1088,7 +1089,7 @@
         body: fd,
       });
       if (!res.ok) {
-        let msg = `Recognition failed (${res.status}).`;
+        let msg = t("purchaseDetail.errorRecognitionFailed", { status: res.status });
         try {
           msg = ((await res.json()) as { message?: string }).message ?? msg;
         } catch {
@@ -1109,7 +1110,7 @@
         }>;
       };
       if (!lines.length) {
-        feedback = { ok: false, text: "No lines could be read from that file." };
+        feedback = { ok: false, text: t("purchaseDetail.errorNoLinesRead") };
         return;
       }
       importRows = lines.map((l) => ({
@@ -1150,7 +1151,7 @@
       const variantId = res.data?.createProduct.variants[0]?.id ?? null;
       if (variantId) {
         await RefData.fetch({ policy: "NetworkOnly" });
-        feedback = { ok: true, text: `Created “${name}”.` };
+        feedback = { ok: true, text: t("purchaseDetail.createdProduct", { name }) };
       }
       return variantId;
     } catch (e) {
@@ -1167,12 +1168,12 @@
     if (chosen.length === 0) return;
     for (const r of chosen) {
       if (!r.variantId && !r.description.trim()) {
-        feedback = { ok: false, text: "Each line needs a product or a description." };
+        feedback = { ok: false, text: t("purchaseDetail.errorLineNeedsProduct") };
         return;
       }
       const q = Number(r.qty);
       if (!Number.isFinite(q) || q < 1) {
-        feedback = { ok: false, text: "Each quantity must be at least 1." };
+        feedback = { ok: false, text: t("purchaseDetail.errorQtyAtLeastOne") };
         return;
       }
     }
@@ -1183,7 +1184,7 @@
       qtyOrdered: Math.round(Number(r.qty)),
       unitCostMinor: r.unitCostMinor ?? 0,
     }));
-    const ok = await run("Lines", () =>
+    const ok = await run(t("purchaseDetail.savedLines"), () =>
       CreateItems.mutate({ purchaseId: purchase.id, lines }),
     );
     if (ok) {
@@ -1242,13 +1243,13 @@
     if (c.field === "qty") {
       const n = Number(cellStr);
       if (!Number.isFinite(n) || n < 0) {
-        feedback = { ok: false, text: "Quantity must be a non-negative number." };
+        feedback = { ok: false, text: t("purchaseDetail.errorQtyNonNegative") };
         return;
       }
       if (n < i.qtyDelivered) {
         feedback = {
           ok: false,
-          text: `Can't order fewer than the ${i.qtyDelivered} already delivered.`,
+          text: t("purchaseDetail.errorQtyBelowDelivered", { count: i.qtyDelivered }),
         };
         return;
       }
@@ -1270,7 +1271,7 @@
     } else {
       const d = cellStr.trim();
       if (!i.variantId && !d) {
-        feedback = { ok: false, text: "A non-stock line needs a description." };
+        feedback = { ok: false, text: t("purchaseDetail.errorNonStockDescription") };
         return;
       }
       if ((d || null) === (i.description ?? null)) {
@@ -1317,7 +1318,7 @@
   const lineParts = (i: (typeof items)[number]): { name: string; sku: string | null } => {
     if (!i.variantId) return { name: i.description ?? "—", sku: null };
     const full = variantLabel(i.variantId);
-    if (!full) return { name: "Unknown", sku: null };
+    if (!full) return { name: t("products.unknown"), sku: null };
     const idx = full.indexOf(" · ");
     if (idx === -1) return { name: full, sku: null };
     return { name: full.slice(0, idx), sku: full.slice(idx + 3) };
@@ -1361,7 +1362,7 @@
     });
     const ung = bySection.get(UNGROUPED) ?? [];
     if (ung.length)
-      out.push({ id: UNGROUPED, key: UNGROUPED, name: "Ungrouped", items: ung, subtotal: ung.reduce((a, i) => a + lineTotal(i), 0) });
+      out.push({ id: UNGROUPED, key: UNGROUPED, name: t("purchases.ungrouped"), items: ung, subtotal: ung.reduce((a, i) => a + lineTotal(i), 0) });
     return out;
   });
 
@@ -1438,7 +1439,7 @@
   // Run `fn` for every selected id in turn, stopping at the first error. Like
   // run() but tallies how many succeeded, then clears the selection + refetches.
   async function runBulk(
-    verb: string,
+    doneKey: string,
     fn: (id: string) => Promise<{ errors?: readonly { message: string }[] | null }>,
   ) {
     const ids = [...selected];
@@ -1458,7 +1459,7 @@
       if (!feedback)
         feedback = {
           ok: true,
-          text: `${verb} ${done} line${done === 1 ? "" : "s"}.`,
+          text: t(doneKey, { count: done }),
         };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -1471,21 +1472,16 @@
 
   async function deleteSelected() {
     const n = selected.size;
-    if (
-      !n ||
-      !confirm(
-        `Delete ${n} selected line${n === 1 ? "" : "s"}? This cannot be undone.`,
-      )
-    )
+    if (!n || !confirm(t("purchaseDetail.confirmDeleteLines", { count: n })))
       return;
-    await runBulk("Deleted", (id) => DeleteItem.mutate({ id }));
+    await runBulk("purchaseDetail.bulkDeleted", (id) => DeleteItem.mutate({ id }));
   }
 
   // sectionId "" → move to no section. UpdateItem returns the changed sectionId,
   // which Houdini normalizes, so each line jumps to its new group at once.
   async function moveSelectedToSection(sectionId: string) {
     if (!selected.size) return;
-    await runBulk("Moved", (id) =>
+    await runBulk("purchaseDetail.bulkMoved", (id) =>
       UpdateItem.mutate({ id, sectionId: sectionId || null }),
     );
   }
@@ -1551,7 +1547,7 @@
     if (chosen.length === 0) {
       feedback = {
         ok: false,
-        text: "Re-sourcing applies only to selected lines with no deliveries yet.",
+        text: t("purchaseDetail.errorResourceNoDeliveries"),
       };
       return;
     }
@@ -1592,24 +1588,24 @@
     if (!purchase) return;
     const useExisting = resourceMode === "existing";
     if (useExisting && !resourceTargetPurchaseId) {
-      feedback = { ok: false, text: "Pick a PO to re-source into." };
+      feedback = { ok: false, text: t("purchaseDetail.errorResourcePickPo") };
       return;
     }
     if (!useExisting && !resourceVendorId) {
-      feedback = { ok: false, text: "Pick a vendor to re-source to." };
+      feedback = { ok: false, text: t("purchaseDetail.errorResourcePickVendor") };
       return;
     }
     for (const r of resourceRows) {
       if (r.sourceIsStock && !r.variantId) {
-        feedback = { ok: false, text: "Pick a replacement product for every line." };
+        feedback = { ok: false, text: t("purchaseDetail.errorResourceReplacement") };
         return;
       }
       if (!r.sourceIsStock && !r.description.trim()) {
-        feedback = { ok: false, text: "Enter a description for every non-stock line." };
+        feedback = { ok: false, text: t("purchaseDetail.errorResourceDescription") };
         return;
       }
       if (!Number.isFinite(r.qty) || r.qty < 1 || r.qty > r.remaining) {
-        feedback = { ok: false, text: "Each quantity must be between 1 and its ordered amount." };
+        feedback = { ok: false, text: t("purchaseDetail.errorResourceQty") };
         return;
       }
     }
@@ -1643,13 +1639,15 @@
       // so its lines update in place — same pattern as every other edit here.
       // Stay put (reconciliation continues) and offer the destination as a link.
       await refetch();
-      const destName = dest?.snapshotVendorName ?? "the vendor";
-      const where = useExisting ? `into the PO for ${destName}` : `to a new PO for ${destName}`;
+      const destName = dest?.snapshotVendorName ?? t("purchaseDetail.theVendor");
+      const where = useExisting
+        ? t("purchaseDetail.resourceIntoPo", { name: destName })
+        : t("purchaseDetail.resourceToNewPo", { name: destName });
       feedback = {
         ok: true,
-        text: `Re-sourced ${n} line${n === 1 ? "" : "s"} ${where}.`,
+        text: t("purchaseDetail.resourced", { count: n, where }),
         href: dest?.id ? `/purchases/${dest.id}` : undefined,
-        linkText: dest?.id ? "Open it →" : undefined,
+        linkText: dest?.id ? t("purchaseDetail.openIt") : undefined,
       };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -1902,7 +1900,7 @@
     feedback = null;
     try {
       const res = await fetch(pdfHref, { credentials: "same-origin" });
-      if (!res.ok) throw new Error(`PDF unavailable (${res.status})`);
+      if (!res.ok) throw new Error(t("purchaseDetail.pdfUnavailable", { status: res.status }));
       const blob = await res.blob();
       const file = new File([blob], `po-${purchase.id}.pdf`, {
         type: "application/pdf",
@@ -1910,14 +1908,16 @@
       if (!navigator.canShare?.({ files: [file] })) {
         feedback = {
           ok: false,
-          text: "This device can't share files. Use Download PDF, then attach it in WhatsApp.",
+          text: t("purchaseDetail.cantShare"),
         };
         return;
       }
-      const caption = `${draft?.subject ?? "Purchase Order"} — see the attached PDF.`;
+      const caption = t("purchaseDetail.seeAttachedPdf", {
+        subject: draft?.subject ?? t("purchaseDetail.purchaseOrder"),
+      });
       await navigator.share({
         files: [file],
-        title: draft?.subject ?? "Purchase Order",
+        title: draft?.subject ?? t("purchaseDetail.purchaseOrder"),
         text: caption,
       });
     } catch (e) {
@@ -1937,7 +1937,7 @@
   async function logSend() {
     const c = composer;
     if (!c || !purchase || !logRecipient) return;
-    const ok = await run("Send", () =>
+    const ok = await run(t("purchaseDetail.savedSend"), () =>
       RecordSend.mutate({
         purchaseId: purchase.id,
         channel: c.channel as never,
@@ -1952,9 +1952,9 @@
   }
 
   async function confirmSend(id: string) {
-    const date = prompt("Expected delivery date (YYYY-MM-DD, optional):", "");
+    const date = prompt(t("purchaseDetail.promptDeliveryDate"), "");
     if (date === null) return; // cancelled
-    const ok = await run("Send", () =>
+    const ok = await run(t("purchaseDetail.savedSend"), () =>
       ConfirmSend.mutate({ id, expectedDeliveryDate: date.trim() || null }),
     );
     if (ok) await refetch();
@@ -1974,7 +1974,7 @@
 
 <svelte:head>
   <title>
-    {purchase ? purchase.snapshotVendorName : "Purchase"} · Retale Console
+    {purchase ? purchase.snapshotVendorName : t("purchaseDetail.purchase")} · Retale Console
   </title>
 </svelte:head>
 
@@ -2023,30 +2023,30 @@
   <a
     href="/purchases"
     class="text-sm text-muted-foreground hover:text-foreground"
-    >← Back to purchases</a
+    >{t("purchaseDetail.backToPurchases")}</a
   >
 
   {#if $PurchaseDetail.fetching && !purchase}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !purchase}
-    <p class="text-sm text-destructive">Purchase not found.</p>
+    <p class="text-sm text-destructive">{t("purchaseDetail.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">{purchase.snapshotVendorName}</h1>
         <p class="text-sm text-muted-foreground">
-          {fmtDate(purchase.date)} · revision {purchase.revision} ·
+          {fmtDate(purchase.date)} · {t("purchaseDetail.revision")} {purchase.revision} ·
           {formatMoney(purchase.totalInvoiceCost)}
         </p>
       </div>
       <div class="flex items-center gap-3">
-        <Badge class={statusClass(purchase.status)}>{statusLabel(purchase.status)}</Badge>
+        <Badge class={statusClass(purchase.status)}>{t(`purchases.status.${purchase.status}`)}</Badge>
         {#if has("delivery.draft") && purchase.status !== "cancelled"}
           <a
             href="/purchases/{purchase.id}/receive"
             class="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent"
           >
-            Receive goods
+            {t("purchaseDetail.receiveGoods")}
           </a>
         {/if}
         {#if canCreate}
@@ -2054,7 +2054,7 @@
             variant="outline"
             size="sm"
             disabled={busy}
-            onclick={clonePurchase}>Clone</Button
+            onclick={clonePurchase}>{t("purchaseDetail.clonePO")}</Button
           >
         {/if}
         {#if canCancel && purchase.status !== "cancelled"}
@@ -2062,7 +2062,7 @@
             variant="outline"
             size="sm"
             disabled={busy}
-            onclick={cancelPurchase}>Cancel</Button
+            onclick={cancelPurchase}>{t("purchaseDetail.cancelPO")}</Button
           >
         {/if}
       </div>
@@ -2081,13 +2081,13 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        This purchase is cancelled — it is read-only.
+        {t("purchaseDetail.cancelledReadOnly")}
       </p>
     {:else if !canEdit}
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        You have read-only access to purchases — editing is disabled.
+        {t("purchaseDetail.readOnlyNotice")}
       </p>
     {/if}
 
@@ -2095,36 +2095,36 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        This purchase has edits not covered by the latest confirmed send.
+        {t("purchaseDetail.unsentEditsNotice")}
       </p>
     {/if}
 
     <!-- Header -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Details</h2>
+      <h2 class="text-sm font-semibold">{t("purchaseDetail.details")}</h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Vendor</span>
+          <span class="text-sm font-medium">{t("common.vendor")}</span>
           <Combobox
             options={vendorOptions}
             bind:value={form.vendorId}
-            placeholder="Search vendor…"
+            placeholder={t("purchases.searchVendor")}
             disabled={!editable}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Ad-hoc vendor name</span>
+          <span class="text-sm font-medium">{t("purchases.adHocVendorName")}</span>
           <Input
             bind:value={form.snapshotVendorName}
             disabled={!editable || form.vendorId !== ""}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Date</span>
+          <span class="text-sm font-medium">{t("common.date")}</span>
           <Input type="date" bind:value={form.date} disabled={!editable} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Send-by date</span>
+          <span class="text-sm font-medium">{t("purchaseDetail.sendByDate")}</span>
           <Input
             type="date"
             bind:value={form.sendDueDate}
@@ -2132,16 +2132,16 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Source document</span>
+          <span class="text-sm font-medium">{t("purchaseDetail.sourceDocument")}</span>
           <Input
             bind:value={form.sourceDocument}
-            placeholder="Vendor quote / invoice ref"
+            placeholder={t("purchases.vendorRef")}
             disabled={!editable}
           />
         </label>
       </div>
       <label class="space-y-1">
-        <span class="text-sm font-medium">Memo</span>
+        <span class="text-sm font-medium">{t("purchaseDetail.memo")}</span>
         <Textarea
           bind:value={form.memo}
           disabled={!editable}
@@ -2150,7 +2150,7 @@
       </label>
       <div class="flex justify-end pt-2">
         <Button disabled={busy || !editable} onclick={saveHeader}>
-          Save details
+          {t("purchaseDetail.saveDetails")}
         </Button>
       </div>
     </section>
@@ -2158,20 +2158,20 @@
     <!-- Items -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between gap-3">
-        <h2 class="text-sm font-semibold">Lines ({items.length})</h2>
+        <h2 class="text-sm font-semibold">{t("purchaseDetail.linesCount", { count: items.length })}</h2>
         <div class="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             disabled={busy || !editable}
-            onclick={() => (newSectionName = "")}>Add section</Button
+            onclick={() => (newSectionName = "")}>{t("purchases.addSection")}</Button
           >
           <Button
             variant="outline"
             size="sm"
             disabled={busy || invoiceBusy || !editable}
             onclick={openInvoicePicker}
-            >{invoiceBusy ? "Reading…" : "Import invoice"}</Button
+            >{invoiceBusy ? t("purchaseDetail.reading") : t("purchaseDetail.importInvoice")}</Button
           >
           <input
             bind:this={invoiceFileInput}
@@ -2184,19 +2184,19 @@
             variant="outline"
             size="sm"
             disabled={busy || !editable}
-            onclick={openBulk}>Add multiple</Button
+            onclick={openBulk}>{t("purchases.addMultiple")}</Button
           >
           <Button
             variant="outline"
             size="sm"
             disabled={busy || !editable}
-            onclick={() => pullModalOpen = true}>Pull from Requisition</Button
+            onclick={() => pullModalOpen = true}>{t("purchases.pullRequisition")}</Button
           >
           <Button
             variant="outline"
             size="sm"
             disabled={busy || !editable}
-            onclick={newItem}>Add line</Button
+            onclick={newItem}>{t("purchases.addLine")}</Button
           >
         </div>
       </div>
@@ -2205,19 +2205,19 @@
         <div class="flex gap-2">
           <Input
             bind:value={newSectionName}
-            placeholder="New section name"
+            placeholder={t("purchases.newSectionName")}
             onkeydown={(e) => e.key === "Enter" && addSection()}
           />
           <Button
             size="sm"
             disabled={busy || !newSectionName.trim()}
-            onclick={addSection}>Add</Button
+            onclick={addSection}>{t("common.add")}</Button
           >
           <Button
             variant="ghost"
             size="sm"
             disabled={busy}
-            onclick={() => (newSectionName = null)}>Cancel</Button
+            onclick={() => (newSectionName = null)}>{t("common.cancel")}</Button
           >
         </div>
       {/if}
@@ -2227,23 +2227,22 @@
           <div class="w-56">
             <Input
               type="search"
-              placeholder="Search lines…"
+              placeholder={t("purchases.searchLines")}
               bind:value={lineSearch}
             />
           </div>
           <div class="w-44">
             <Select bind:value={sectionFilter}>
-              <option value="">All sections</option>
+              <option value="">{t("purchases.allSections")}</option>
               {#each sections as s (s.id)}
                 <option value={s.id}>{s.name}</option>
               {/each}
-              <option value={UNGROUPED}>Ungrouped</option>
+              <option value={UNGROUPED}>{t("purchases.ungrouped")}</option>
             </Select>
           </div>
           {#if filtering && editable}
             <span class="text-xs text-muted-foreground">
-              Reordering is paused while filtering — clear the search/filter to
-              reorder.
+              {t("purchaseDetail.reorderingPaused")}
             </span>
           {/if}
         </div>
@@ -2257,7 +2256,7 @@
           transition:fly={{ y: 12, duration: 150 }}
         >
           <span class="text-sm font-medium">
-            {selectedCount} line{selectedCount === 1 ? "" : "s"} selected
+            {t("purchaseDetail.linesSelected", { count: selectedCount })}
           </span>
           <div class="w-48">
             <Select
@@ -2270,11 +2269,11 @@
                   moveSelectedToSection(v === UNGROUPED ? "" : v);
               }}
             >
-              <option value="__bulk" disabled>Move to section…</option>
+              <option value="__bulk" disabled>{t("purchases.moveToSection")}</option>
               {#each sections as s (s.id)}
                 <option value={s.id}>{s.name}</option>
               {/each}
-              <option value={UNGROUPED}>— No section —</option>
+              <option value={UNGROUPED}>{t("purchaseDetail.noSection")}</option>
             </Select>
           </div>
           {#if purchase.status === "open"}
@@ -2282,7 +2281,7 @@
               variant="outline"
               size="sm"
               disabled={busy}
-              onclick={openResource}>Re-source…</Button
+              onclick={openResource}>{t("purchases.reSource")}</Button
             >
             <Button
               variant="outline"
@@ -2290,29 +2289,29 @@
               disabled={busy}
               onclick={() => showDiscountModal = true}
             >
-              Calculate Discount
+              {t("purchaseDiscount.title")}
             </Button>
           {/if}
           <Button
             variant="destructive"
             size="sm"
             disabled={busy}
-            onclick={deleteSelected}>Delete selected</Button
+            onclick={deleteSelected}>{t("purchases.deleteSelected")}</Button
           >
           <Button
             variant="ghost"
             size="sm"
             disabled={busy}
-            onclick={clearSelection}>Clear</Button
+            onclick={clearSelection}>{t("common.clear")}</Button
           >
         </div>
       {/if}
 
       {#if items.length === 0 && sections.length === 0}
-        <p class="py-6 text-center text-sm text-muted-foreground">No lines yet.</p>
+        <p class="py-6 text-center text-sm text-muted-foreground">{t("purchaseDetail.noLinesYet")}</p>
       {:else if visibleGroups.length === 0}
         <p class="py-6 text-center text-sm text-muted-foreground">
-          No lines match.
+          {t("purchaseDetail.noLinesMatch")}
         </p>
       {/if}
 
@@ -2320,21 +2319,21 @@
         {#if itemDraft}
           <div class="space-y-3 rounded-md border bg-background p-4">
             <h3 class="text-sm font-semibold">
-              {itemDraft.id ? "Edit line" : "New line"}
+              {itemDraft.id ? t("purchaseDetail.editLine") : t("purchaseDetail.newLine")}
             </h3>
             <div class="grid grid-cols-2 gap-3">
               <label class="space-y-1">
-                <span class="text-xs font-medium">Variant (stock line)</span>
+                <span class="text-xs font-medium">{t("purchaseDetail.variantStockLine")}</span>
                 <Combobox
                   id="line-variant"
                   options={variantOptions}
                   bind:value={itemDraft.variantId}
-                  placeholder="Search variant… (leave blank for non-stock line)"
+                  placeholder={t("purchases.searchVariant")}
                   disabled={!editable}
                   onCreate={canCreateProduct && editable
                     ? createProductForLine
                     : undefined}
-                  createLabel={(q) => `Create product “${q}”`}
+                  createLabel={(q) => t("purchaseDetail.createProduct", { name: q })}
                   onChange={(id) => {
                     if (itemDraft && id) itemDraft.unitCostMinor = prefillCost(id);
                     focusLineField("line-qty");
@@ -2344,39 +2343,39 @@
                   <div class="mt-1 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                     <AlertTriangle class="size-4 shrink-0 text-amber-600" />
                     <div class="flex-1 space-y-1">
-                      <p class="font-medium">This variant is already on the order.</p>
+                      <p class="font-medium">{t("purchaseDetail.variantAlreadyOnOrder")}</p>
                       <button
                         type="button"
                         class="text-amber-700 underline hover:text-amber-900"
                         onclick={() => editItem(duplicateExistingLine)}
                       >
-                        Edit existing line instead
+                        {t("purchaseDetail.editExistingLine")}
                       </button>
                     </div>
                   </div>
                 {/if}
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Section</span>
+                <span class="text-xs font-medium">{t("purchaseDetail.section")}</span>
                 <Select bind:value={itemDraft.sectionId} disabled={!editable}>
-                  <option value="">— No section —</option>
+                  <option value="">{t("purchaseDetail.noSection")}</option>
                   {#each sections as s (s.id)}
                     <option value={s.id}>{s.name}</option>
                   {/each}
                 </Select>
               </label>
               <label class="space-y-1 col-span-2">
-                <span class="text-xs font-medium">Description</span>
+                <span class="text-xs font-medium">{t("common.description")}</span>
                 <Input
                   bind:value={itemDraft.description}
                   placeholder={itemDraft.variantId
-                    ? "Optional note"
-                    : "Required for a non-stock line"}
+                    ? t("purchaseDetail.optionalNote")
+                    : t("purchaseDetail.requiredNonStock")}
                   disabled={!editable}
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Qty ordered</span>
+                <span class="text-xs font-medium">{t("purchaseDetail.qtyOrdered")}</span>
                 <NumericInput
                   id="line-qty"
                   bind:value={itemDraft.qtyOrdered}
@@ -2384,7 +2383,7 @@
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Unit cost (Rp)</span>
+                <span class="text-xs font-medium">{t("purchaseDetail.unitCostRp")}</span>
                 <MoneyInput bind:value={itemDraft.unitCostMinor} disabled={!editable} />
               </label>
             </div>
@@ -2393,17 +2392,17 @@
                 <span class="mr-auto text-xs text-muted-foreground">
                   <kbd class="rounded border px-1 font-mono">Ctrl</kbd>+<kbd
                     class="rounded border px-1 font-mono">Enter</kbd
-                  > to {itemDraft.id ? "save" : "add"}
+                  > {itemDraft.id ? t("purchaseDetail.toSave") : t("purchaseDetail.toAdd")}
                 </span>
               {/if}
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onclick={() => (itemDraft = null)}>Cancel</Button
+                onclick={() => (itemDraft = null)}>{t("common.cancel")}</Button
               >
               <Button size="sm" disabled={busy || !editable} onclick={saveItem}>
-                {itemDraft.id ? "Save line" : "Add line"}
+                {itemDraft.id ? t("purchaseDetail.saveLine") : t("purchases.addLine")}
               </Button>
             </div>
           </div>
@@ -2422,7 +2421,7 @@
             <button
               class="text-muted-foreground hover:text-foreground"
               onclick={() => toggleCollapse(g.key)}
-              aria-label={isOpen(g.key) ? "Collapse" : "Expand"}
+              aria-label={isOpen(g.key) ? t("purchaseDetail.collapse") : t("purchaseDetail.expand")}
             >
               {#if isOpen(g.key)}
                 <ChevronDown class="size-4" />
@@ -2443,34 +2442,33 @@
                 size="sm"
                 class="h-7"
                 disabled={busy || !editingSectionName.trim()}
-                onclick={saveRenameSection}>Save</Button
+                onclick={saveRenameSection}>{t("common.save")}</Button
               >
               <Button
                 variant="ghost"
                 size="sm"
                 class="h-7"
                 disabled={busy}
-                onclick={() => (editingSectionId = null)}>Cancel</Button
+                onclick={() => (editingSectionId = null)}>{t("common.cancel")}</Button
               >
             {:else}
               <span class="text-sm font-medium">{g.name}</span>
               <span class="text-xs text-muted-foreground">
-                {g.items.length} line{g.items.length === 1 ? "" : "s"} ·
-                {formatMoney(g.subtotal)}
+                {t("purchaseDetail.groupSummary", { count: g.items.length, amount: formatMoney(g.subtotal) })}
               </span>
             {/if}
             {#if sIdx >= 0 && editingSectionId !== g.key}
               <span class="ml-auto flex items-center gap-0.5">
                 <IconButton
                   icon={Pencil}
-                  label="Rename section"
+                  label={t("purchaseDetail.renameSection")}
                   variant="primary"
                   disabled={busy || !editable}
                   onclick={() => startRenameSection(g.key, g.name)}
                 />
                 <IconButton
                   icon={Trash2}
-                  label="Delete section"
+                  label={t("purchaseDetail.deleteSection")}
                   variant="destructive"
                   disabled={busy || !editable}
                   onclick={() => deleteSection(g.key)}
@@ -2493,15 +2491,15 @@
                           checked={groupChecked(g)}
                           indeterminate={groupIndeterminate(g)}
                           onchange={() => toggleGroupSelect(g)}
-                          aria-label="Select all lines in {g.name}"
+                          aria-label={t("purchaseDetail.selectAllLinesIn", { name: g.name })}
                         />
                       </th>
                     {/if}
-                    <th class="px-4 py-2 font-medium">Line</th>
-                    <th class="px-4 py-2 text-right font-medium">Ordered</th>
-                    <th class="px-4 py-2 text-right font-medium">Delivered</th>
-                    <th class="px-4 py-2 text-right font-medium">Unit cost</th>
-                    <th class="px-4 py-2 text-right font-medium">Line total</th>
+                    <th class="px-4 py-2 font-medium">{t("purchases.line")}</th>
+                    <th class="px-4 py-2 text-right font-medium">{t("purchases.ordered")}</th>
+                    <th class="px-4 py-2 text-right font-medium">{t("purchases.delivered")}</th>
+                    <th class="px-4 py-2 text-right font-medium">{t("purchaseDetail.unitCost")}</th>
+                    <th class="px-4 py-2 text-right font-medium">{t("purchaseDetail.lineTotal")}</th>
                     <th class="px-3"></th>
                   </tr>
                 </thead>
@@ -2524,7 +2522,7 @@
                             class="size-4 cursor-pointer rounded border-input align-middle accent-primary"
                             checked={selected.has(i.id)}
                             onchange={() => toggleSelect(i.id)}
-                            aria-label="Select line"
+                            aria-label={t("purchaseDetail.selectLine")}
                           />
                         </td>
                       {/if}
@@ -2541,7 +2539,7 @@
                           <button
                             type="button"
                             class="-mx-1 rounded px-1 text-left hover:bg-accent"
-                            title="Edit description"
+                            title={t("purchaseDetail.editDescription")}
                             onclick={() => startCellEdit(i, "desc")}
                             >{lineLabel(i)}</button
                           >
@@ -2564,7 +2562,7 @@
                           <button
                             type="button"
                             class="-mx-1 rounded px-1 hover:bg-accent"
-                            title="Edit quantity"
+                            title={t("purchaseDetail.editQuantity")}
                             onclick={() => startCellEdit(i, "qty")}
                             >{i.qtyOrdered}</button
                           >
@@ -2583,12 +2581,12 @@
                         {#if i.qtyInTransit > 0}
                           <span
                             class="block text-xs text-violet-700"
-                            title={`On committed transit notes, not yet arrived` +
+                            title={t("purchaseDetail.transitTitle") +
                               (i.transitFreightMinor > 0
-                                ? ` · ${formatMoney(i.transitFreightMinor)} freight banked`
+                                ? " · " + t("purchaseDetail.freightBanked", { amount: formatMoney(i.transitFreightMinor) })
                                 : "")}
                           >
-                            {i.qtyInTransit} in transit
+                            {t("purchaseDetail.inTransit", { count: i.qtyInTransit })}
                           </span>
                         {/if}
                       </td>
@@ -2606,12 +2604,12 @@
                             <button
                               type="button"
                               class="-mx-1 rounded px-1 hover:bg-accent font-medium text-sky-600"
-                              title="Edit final unit cost"
+                              title={t("purchaseDetail.editFinalUnitCost")}
                               onclick={() => startCellEdit(i, "cost")}
                               >{formatMoney(i.unitCostMinor)}</button
                             >
                             {#if i.discount || i.taxPct}
-                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={`Base: ${formatMoney(i.baseCostMinor)} | Discount: ${i.discount || 'none'} | Tax: ${i.taxPct ? i.taxPct + '%' : 'none'}`}>
+                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={t("purchaseDetail.costBreakdown", { base: formatMoney(i.baseCostMinor), discount: i.discount || t("purchaseDetail.none"), tax: i.taxPct ? i.taxPct + "%" : t("purchaseDetail.none") })}>
                                 {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
                               </span>
                             {/if}
@@ -2620,7 +2618,7 @@
                           <div class="flex flex-col items-end leading-tight">
                             <span>{formatMoney(i.unitCostMinor)}</span>
                             {#if i.discount || i.taxPct}
-                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={`Base: ${formatMoney(i.baseCostMinor)} | Discount: ${i.discount || 'none'} | Tax: ${i.taxPct ? i.taxPct + '%' : 'none'}`}>
+                              <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={t("purchaseDetail.costBreakdown", { base: formatMoney(i.baseCostMinor), discount: i.discount || t("purchaseDetail.none"), tax: i.taxPct ? i.taxPct + "%" : t("purchaseDetail.none") })}>
                                 {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
                               </span>
                             {/if}
@@ -2632,14 +2630,14 @@
                         <span class="inline-flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
                           <IconButton
                             icon={Pencil}
-                            label="Edit line"
+                            label={t("purchaseDetail.editLine")}
                             variant="primary"
                             disabled={busy || !editable}
                             onclick={() => editItem(i)}
                           />
                           <IconButton
                             icon={Trash2}
-                            label="Delete line"
+                            label={t("purchaseDetail.deleteLine")}
                             variant="destructive"
                             disabled={busy || !editable}
                             onclick={() => deleteItem(i.id)}
@@ -2652,7 +2650,7 @@
               </table>
             {:else}
               <p class="px-3 py-3 text-xs text-muted-foreground">
-                No lines in this section.
+                {t("purchaseDetail.noLinesInSection")}
               </p>
             {/if}
             {#if itemDraft && draftGroupKey === g.key}
@@ -2663,7 +2661,7 @@
                   class="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={busy}
                   onclick={() => newItemInSection(g.key)}
-                  >+ Add line to {g.name}</button
+                  >{t("purchaseDetail.addLineTo", { name: g.name })}</button
                 >
               </div>
             {/if}
@@ -2683,12 +2681,12 @@
     <!-- Sends -->
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Send log ({sends.length})</h2>
+        <h2 class="text-sm font-semibold">{t("purchaseDetail.sendLog", { count: sends.length })}</h2>
         <Button
           variant="outline"
           size="sm"
           disabled={busy || !canSend || purchase.status === "cancelled"}
-          onclick={startCompose}>Compose send</Button
+          onclick={startCompose}>{t("purchases.composeSend")}</Button
         >
       </div>
 
@@ -2696,18 +2694,18 @@
         <table class="w-full text-sm">
           <thead class="border-b text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Channel</th>
-              <th class="px-4 py-2 font-medium">Recipient</th>
-              <th class="px-4 py-2 text-right font-medium">Rev</th>
-              <th class="px-4 py-2 font-medium">Status</th>
-              <th class="px-4 py-2 font-medium">Expected</th>
+              <th class="px-4 py-2 font-medium">{t("purchaseDetail.channel")}</th>
+              <th class="px-4 py-2 font-medium">{t("purchaseDetail.recipient")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("purchaseDetail.rev")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.status")}</th>
+              <th class="px-4 py-2 font-medium">{t("purchaseDetail.expected")}</th>
               <th class="px-3"></th>
             </tr>
           </thead>
           <tbody>
             {#each sends as s (s.id)}
               <tr class="border-b last:border-0 even:bg-muted/40">
-                <td class="px-4 py-2">{s.channel}</td>
+                <td class="px-4 py-2">{t(`purchaseDetail.channel.${s.channel}`)}</td>
                 <td class="px-4 py-2">{s.recipient}</td>
                 <td class="px-4 py-2 text-right tabular-nums">{s.revision}</td>
                 <td class="px-4 py-2">
@@ -2716,7 +2714,7 @@
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-sky-100 text-sky-700"}
                   >
-                    {s.status}
+                    {t(`purchaseDetail.sendStatus.${s.status}`)}
                   </Badge>
                 </td>
                 <td class="px-4 py-2">{fmtDate(s.expectedDeliveryDate)}</td>
@@ -2724,7 +2722,7 @@
                   {#if s.status === "prepared" && canSend}
                     <IconButton
                       icon={Check}
-                      label="Confirm sent"
+                      label={t("purchaseDetail.confirmSent")}
                       variant="primary"
                       disabled={busy}
                       onclick={() => confirmSend(s.id)}
@@ -2736,29 +2734,29 @@
           </tbody>
         </table>
       {:else}
-        <p class="text-sm text-muted-foreground">Not sent to the vendor yet.</p>
+        <p class="text-sm text-muted-foreground">{t("purchaseDetail.notSentVendor")}</p>
       {/if}
 
       {#if composer}
         <div class="space-y-3 rounded-md border bg-background p-4">
-          <h3 class="text-sm font-semibold">Compose send</h3>
+          <h3 class="text-sm font-semibold">{t("purchases.composeSend")}</h3>
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Channel</span>
+              <span class="text-xs font-medium">{t("purchaseDetail.channel")}</span>
               <Select bind:value={composer.channel} onchange={preview}>
-                {#each CHANNELS as c (c)}<option value={c}>{c}</option>{/each}
+                {#each CHANNELS as c (c)}<option value={c}>{t(`purchaseDetail.channel.${c}`)}</option>{/each}
               </Select>
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium">
-                Recipient override
-                <span class="text-muted-foreground">(optional)</span>
+                {t("purchaseDetail.recipientOverride")}
+                <span class="text-muted-foreground">{t("common.optional")}</span>
               </span>
               <Input
                 bind:value={composer.recipientOverride}
                 placeholder={composer.channel === "email"
-                  ? "Vendor email"
-                  : "Vendor phone"}
+                  ? t("purchaseDetail.vendorEmail")
+                  : t("purchaseDetail.vendorPhone")}
                 onblur={preview}
               />
             </label>
@@ -2766,40 +2764,40 @@
 
           {#if composer.channel === "whatsapp"}
             <label class="space-y-1">
-              <span class="text-xs font-medium">Format</span>
+              <span class="text-xs font-medium">{t("purchaseDetail.format")}</span>
               <Select bind:value={composer.format}>
-                <option value="text">Message text</option>
-                <option value="pdf">PDF attachment</option>
+                <option value="text">{t("purchases.messageText")}</option>
+                <option value="pdf">{t("purchaseDetail.pdfAttachment")}</option>
               </Select>
             </label>
           {/if}
 
           {#if previewing}
-            <p class="text-sm text-muted-foreground">Rendering preview…</p>
+            <p class="text-sm text-muted-foreground">{t("purchaseDetail.renderingPreview")}</p>
           {:else if draft}
             <div class="space-y-2">
               {#if composer.channel !== "manual"}
                 {@const pdfMode =
                   composer.channel === "whatsapp" && composer.format === "pdf"}
                 <p class="text-xs">
-                  <span class="font-medium">Recipient:</span>
+                  <span class="font-medium">{t("purchaseDetail.recipientColon")}</span>
                   {draft.recipient ?? "—"}
                   {#if pdfMode}
                     <span class="text-muted-foreground"
-                      >— you'll pick the contact in the share sheet</span
+                      >{t("purchaseDetail.pickContactShareSheet")}</span
                     >
                   {:else if !draft.recipientAvailable}
                     <Badge class="ml-1 bg-amber-100 text-amber-800">
                       {draft.recipient
-                        ? "unusable for this channel"
-                        : "none on file — add an override"}
+                        ? t("purchaseDetail.unusableChannel")
+                        : t("purchaseDetail.noneOnFile")}
                     </Badge>
                   {/if}
                 </p>
               {/if}
               {#if composer.channel === "email"}
                 <p class="text-xs">
-                  <span class="font-medium">Subject:</span>
+                  <span class="font-medium">{t("purchaseDetail.subjectColon")}</span>
                   {draft.subject}
                 </p>
               {/if}
@@ -2813,15 +2811,14 @@
             <div class="flex flex-wrap items-center gap-2">
               {#if composer.channel === "manual"}
                 <span class="text-xs text-muted-foreground">
-                  Manual send — copy the message above and send it off-system.
+                  {t("purchaseDetail.manualSendHint")}
                 </span>
               {:else if composer.channel === "whatsapp" && composer.format === "pdf"}
                 <Button size="sm" disabled={busy || sharing} onclick={sharePdf}>
-                  {sharing ? "Preparing PDF…" : "Send PDF to WhatsApp"}
+                  {sharing ? t("purchaseDetail.preparingPdf") : t("purchaseDetail.sendPdfWhatsApp")}
                 </Button>
                 <span class="text-xs text-muted-foreground">
-                  Attaches the PO PDF with a short caption — pick the vendor in
-                  the share sheet.
+                  {t("purchaseDetail.attachPdfHint")}
                 </span>
               {:else if draft.deepLink}
                 <a
@@ -2830,14 +2827,13 @@
                   rel="noopener noreferrer"
                   class="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                 >
-                  Open in {composer.channel === "whatsapp"
-                    ? "WhatsApp"
-                    : "email"}
+                  {t(composer.channel === "whatsapp"
+                    ? "purchaseDetail.openInWhatsApp"
+                    : "purchaseDetail.openInEmail")}
                 </a>
               {:else}
                 <span class="text-xs text-muted-foreground">
-                  Add a usable recipient to enable the
-                  {composer.channel} link.
+                  {t("purchaseDetail.needRecipient", { channel: composer.channel })}
                 </span>
               {/if}
               <a
@@ -2846,35 +2842,33 @@
                 rel="noopener noreferrer"
                 class="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent"
               >
-                Download PDF
+                {t("purchaseDetail.downloadPdf")}
               </a>
               <label class="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <input type="checkbox" bind:checked={pdfShowPrices} />
-                Show prices on PDF
+                {t("purchaseDetail.showPricesOnPdf")}
               </label>
             </div>
           {/if}
 
           <label class="space-y-1">
-            <span class="text-xs font-medium">Send note (optional)</span>
-            <Input bind:value={composer.note} placeholder="Logged with the send" />
+            <span class="text-xs font-medium">{t("purchaseDetail.sendNoteOptional")}</span>
+            <Input bind:value={composer.note} placeholder={t("purchaseDetail.loggedWithSend")} />
           </label>
           <p class="text-xs text-muted-foreground">
-            Opening the link doesn't log anything. Record the send once it's
-            actually away — whatsapp / email log as <em>prepared</em> (confirm
-            later); manual logs as sent at once.
+            {@html t("purchaseDetail.sendLogHint")}
           </p>
           <div class="flex justify-end gap-2">
             <Button
               variant="ghost"
               size="sm"
               disabled={busy}
-              onclick={() => (composer = null)}>Cancel</Button
+              onclick={() => (composer = null)}>{t("common.cancel")}</Button
             >
             <Button
               size="sm"
               disabled={busy || previewing || !logRecipient}
-              onclick={logSend}>Record this send</Button
+              onclick={logSend}>{t("purchases.recordSend")}</Button
             >
           </div>
         </div>
@@ -2893,19 +2887,19 @@
           class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
           role="dialog"
           aria-modal="true"
-          aria-label="Import invoice lines"
+          aria-label={t("purchaseDetail.importInvoiceLines")}
         >
           <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
-            <h2 class="text-sm font-semibold">Import invoice lines</h2>
-            <IconButton icon={X} label="Close" variant="muted" onclick={closeInvoice} />
+            <h2 class="text-sm font-semibold">{t("purchaseDetail.importInvoiceLines")}</h2>
+            <IconButton icon={X} label={t("common.close")} variant="muted" onclick={closeInvoice} />
           </div>
 
           <div class="flex items-center gap-3 border-b px-5 py-2">
             <p class="text-xs text-muted-foreground">
-              Review each line. Unrecognized rows are blank — fill them in or untick them.
+              {t("purchaseDetail.importReviewHint")}
             </p>
             <label class="ml-auto flex items-center gap-2 text-xs">
-              Section
+              {t("purchaseDetail.section")}
               <Select bind:value={importSectionId} class="h-8 w-44">
                 {#each importSectionOptions as o (o.value)}
                   <option value={o.value}>{o.label}</option>
@@ -2921,32 +2915,32 @@
                   <input
                     type="checkbox"
                     bind:checked={r.include}
-                    aria-label="Include line {i + 1}"
+                    aria-label={t("purchaseDetail.includeLine", { n: i + 1 })}
                   />
-                  <span class="text-xs font-medium">Line {i + 1}</span>
+                  <span class="text-xs font-medium">{t("purchaseDetail.lineNumber", { n: i + 1 })}</span>
                   {#if !r.recognized}
                     <span class="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                      unrecognized — please fill manually
+                      {t("purchaseDetail.unrecognized")}
                     </span>
                   {/if}
                   {#if r.raw}
                     <span
                       class="ml-auto max-w-[55%] truncate text-xs text-muted-foreground"
-                      title={r.raw}>scanned: {r.raw}</span
+                      title={r.raw}>{t("purchaseDetail.scanned", { raw: r.raw })}</span
                     >
                   {/if}
                 </div>
                 <Combobox
                   options={variantOptions}
                   bind:value={r.variantId}
-                  placeholder="Search product… (leave blank for a non-stock line)"
+                  placeholder={t("purchaseDetail.searchProductBlank")}
                   onCreate={canCreateProduct
                     ? async (q) => {
                         const id = await createProductForImport(q);
                         if (id) r.variantId = id;
                       }
                     : undefined}
-                  createLabel={(q) => `Create product “${q}”`}
+                  createLabel={(q) => t("purchaseDetail.createProduct", { name: q })}
                   onChange={(id) => {
                     if (id && r.unitCostMinor == null) r.unitCostMinor = prefillCost(id);
                   }}
@@ -2954,11 +2948,11 @@
                 <div class="mt-2 flex gap-2">
                   <Input
                     bind:value={r.description}
-                    placeholder="Description (for a non-stock line)"
+                    placeholder={t("purchaseDetail.descriptionNonStock")}
                     class="flex-1"
                   />
-                  <NumericInput min="1" bind:value={r.qty} class="w-20" aria-label="Quantity" />
-                  <MoneyInput bind:value={r.unitCostMinor} placeholder="Unit cost" class="w-36" />
+                  <NumericInput min="1" bind:value={r.qty} class="w-20" aria-label={t("purchaseDetail.quantity")} />
+                  <MoneyInput bind:value={r.unitCostMinor} placeholder={t("purchaseDetail.unitCost")} class="w-36" />
                 </div>
               </div>
             {/each}
@@ -2966,12 +2960,12 @@
 
           <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
             <span class="text-xs text-muted-foreground">
-              {importIncludedCount} of {importRows.length} selected
+              {t("purchaseDetail.selectedOf", { count: importIncludedCount, total: importRows.length })}
             </span>
             <div class="flex gap-2">
-              <Button variant="outline" size="sm" onclick={closeInvoice}>Cancel</Button>
+              <Button variant="outline" size="sm" onclick={closeInvoice}>{t("common.cancel")}</Button>
               <Button size="sm" disabled={busy || importIncludedCount === 0} onclick={addImported}>
-                Add {importIncludedCount} line{importIncludedCount === 1 ? "" : "s"}
+                {t("purchaseDetail.addLines", { count: importIncludedCount })}
               </Button>
             </div>
           </div>
@@ -2992,19 +2986,19 @@
           class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
           role="dialog"
           aria-modal="true"
-          aria-label="Add multiple lines"
+          aria-label={t("purchaseDetail.addMultipleLines")}
         >
           <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
-            <h2 class="text-sm font-semibold">Add multiple lines</h2>
-            <IconButton icon={X} label="Close" variant="muted" onclick={closeBulk} />
+            <h2 class="text-sm font-semibold">{t("purchaseDetail.addMultipleLines")}</h2>
+            <IconButton icon={X} label={t("common.close")} variant="muted" onclick={closeBulk} />
           </div>
 
           <div class="flex gap-1 border-b px-5">
             <button class={tabClass("reorder")} onclick={() => (bulkTab = "reorder")}>
-              Reorder suggestions
+              {t("purchaseDetail.reorderTab")}
             </button>
             <button class={tabClass("stock")} onclick={() => (bulkTab = "stock")}>
-              By stock
+              {t("purchaseDetail.byStock")}
             </button>
           </div>
 
@@ -3012,25 +3006,25 @@
             {#if bulkTab === "reorder"}
               <div class="mb-3 flex items-center justify-between gap-3">
                 <p class="text-xs text-muted-foreground">
-                  Open suggestions{purchase?.vendorId && !reorderAllVendors
-                    ? " for this vendor"
-                    : ""}. Adding marks them converted.
+                  {purchase?.vendorId && !reorderAllVendors
+                    ? t("purchaseDetail.openSuggestionsVendor")
+                    : t("purchaseDetail.openSuggestions")}
                 </p>
                 {#if purchase?.vendorId}
                   <label class="flex items-center gap-2 text-xs">
                     <input type="checkbox" bind:checked={reorderAllVendors} />
-                    Show all vendors
+                    {t("purchaseDetail.showAllVendors")}
                   </label>
                 {/if}
               </div>
 
               {#if $ReorderSuggestionsQuery.fetching && suggestions.length === 0}
-                <p class="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+                <p class="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
               {:else if reorderRows.length === 0}
                 <p class="py-8 text-center text-sm text-muted-foreground">
-                  No open suggestions{purchase?.vendorId && !reorderAllVendors
-                    ? " for this vendor"
-                    : ""}. Run a scan on the Reorder screen to generate them.
+                  {purchase?.vendorId && !reorderAllVendors
+                    ? t("purchaseDetail.noOpenSuggestionsVendor")
+                    : t("purchaseDetail.noOpenSuggestions")}
                 </p>
               {:else}
                 <table class="w-full text-sm">
@@ -3039,11 +3033,11 @@
                   >
                     <tr>
                       <th class="w-8 py-2"></th>
-                      <th class="py-2 font-medium">Product</th>
-                      <th class="py-2 text-right font-medium">Stock</th>
-                      <th class="py-2 text-right font-medium">Point</th>
-                      <th class="py-2 font-medium">Vendor</th>
-                      <th class="py-2 font-medium">Order qty</th>
+                      <th class="py-2 font-medium">{t("common.product")}</th>
+                      <th class="py-2 text-right font-medium">{t("purchaseDetail.stock")}</th>
+                      <th class="py-2 text-right font-medium">{t("purchaseDetail.point")}</th>
+                      <th class="py-2 font-medium">{t("common.vendor")}</th>
+                      <th class="py-2 font-medium">{t("purchaseDetail.orderQty")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3084,13 +3078,13 @@
               <div class="mb-3">
                 <Input
                   type="search"
-                  placeholder="Filter by product name…"
+                  placeholder={t("purchaseDetail.filterByProduct")}
                   bind:value={stockSearch}
                 />
               </div>
               {#if stockVisible.length === 0}
                 <p class="py-8 text-center text-sm text-muted-foreground">
-                  No variants match.
+                  {t("purchaseDetail.noVariantsMatch")}
                 </p>
               {:else}
                 <table class="w-full text-sm">
@@ -3099,10 +3093,10 @@
                   >
                     <tr>
                       <th class="w-8 py-2"></th>
-                      <th class="py-2 font-medium">Product</th>
-                      <th class="py-2 text-right font-medium">Stock</th>
-                      <th class="py-2 font-medium">Order qty</th>
-                      <th class="py-2 font-medium">Unit cost (Rp)</th>
+                      <th class="py-2 font-medium">{t("common.product")}</th>
+                      <th class="py-2 text-right font-medium">{t("purchaseDetail.stock")}</th>
+                      <th class="py-2 font-medium">{t("purchaseDetail.orderQty")}</th>
+                      <th class="py-2 font-medium">{t("purchaseDetail.unitCostRp")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3137,8 +3131,7 @@
                 </table>
                 {#if stockTruncated}
                   <p class="pt-3 text-center text-xs text-muted-foreground">
-                    Showing the {STOCK_CAP} lowest-stock matches — refine the
-                    filter to see more.
+                    {t("purchaseDetail.showingLowestStock", { count: STOCK_CAP })}
                   </p>
                 {/if}
               {/if}
@@ -3147,11 +3140,11 @@
 
           <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
             <p class="text-sm text-muted-foreground">
-              {bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount} selected
+              {t("common.selected", { count: bulkTab === "reorder" ? reorderSelectedCount : stockSelectedCount })}
             </p>
             <div class="flex items-center gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onclick={closeBulk}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               {#if bulkTab === "reorder"}
                 <Button
@@ -3159,7 +3152,7 @@
                   disabled={busy || !editable || reorderSelectedCount === 0}
                   onclick={() => {}}
                 >
-                  Add {reorderSelectedCount} line{reorderSelectedCount === 1 ? "" : "s"}
+                  {t("purchaseDetail.addLines", { count: reorderSelectedCount })}
                 </Button>
               {:else}
                 <Button
@@ -3167,7 +3160,7 @@
                   disabled={busy || !editable || stockSelectedCount === 0}
                   onclick={addStockSelected}
                 >
-                  Add {stockSelectedCount} line{stockSelectedCount === 1 ? "" : "s"}
+                  {t("purchaseDetail.addLines", { count: stockSelectedCount })}
                 </Button>
               {/if}
             </div>
@@ -3189,19 +3182,16 @@
           class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg border bg-card shadow-xl"
           role="dialog"
           aria-modal="true"
-          aria-label="Re-source lines to another vendor"
+          aria-label={t("purchaseDetail.resourceTitle")}
         >
           <div class="flex items-center justify-between gap-3 border-b px-5 py-3">
-            <h2 class="text-sm font-semibold">Re-source to another vendor</h2>
-            <IconButton icon={X} label="Close" variant="muted" onclick={closeResource} />
+            <h2 class="text-sm font-semibold">{t("purchaseDetail.resourceTitle")}</h2>
+            <IconButton icon={X} label={t("common.close")} variant="muted" onclick={closeResource} />
           </div>
 
           <div class="flex-1 space-y-4 overflow-auto px-5 py-4">
             <p class="text-xs text-muted-foreground">
-              Moves these lines onto another open PO and trims them off this one —
-              add them to a pending PO you've already started, or spin up a new one.
-              Pick the destination vendor's own product for each line; cost defaults
-              to what they last charged.
+              {t("purchaseDetail.resourceHint")}
             </p>
 
             <div class="flex gap-1 border-b">
@@ -3210,41 +3200,41 @@
                 class={resourceTabClass("existing")}
                 onclick={() => (resourceMode = "existing")}
               >
-                Add to existing PO
+                {t("purchaseDetail.addToExistingPo")}
               </button>
               <button
                 type="button"
                 class={resourceTabClass("new")}
                 onclick={() => (resourceMode = "new")}
               >
-                Create new PO
+                {t("purchaseDetail.createNewPo")}
               </button>
             </div>
 
             {#if resourceMode === "existing"}
               <label class="block space-y-1">
-                <span class="text-sm font-medium">Add to open PO</span>
+                <span class="text-sm font-medium">{t("purchaseDetail.addToOpenPo")}</span>
                 <div class="max-w-md">
                   <Combobox
                     options={resourceTargetOptions}
                     bind:value={resourceTargetPurchaseId}
-                    placeholder="Search open purchases…"
+                    placeholder={t("purchaseDetail.searchOpenPurchases")}
                   />
                 </div>
                 {#if resourceTargetOptions.length === 0}
                   <span class="block text-xs text-muted-foreground">
-                    No other open POs — switch to “Create new PO”.
+                    {t("purchaseDetail.noOtherOpenPos")}
                   </span>
                 {/if}
               </label>
             {:else}
               <label class="block space-y-1">
-                <span class="text-sm font-medium">New PO for vendor</span>
+                <span class="text-sm font-medium">{t("purchaseDetail.newPoForVendor")}</span>
                 <div class="max-w-sm">
                   <Combobox
                     options={vendors.map((v) => ({ value: v.id, label: v.name }))}
                     bind:value={resourceVendorId}
-                    placeholder="Search vendor…"
+                    placeholder={t("purchases.searchVendor")}
                   />
                 </div>
               </label>
@@ -3253,10 +3243,10 @@
             <table class="w-full text-sm">
               <thead class="border-b text-left text-xs text-muted-foreground">
                 <tr>
-                  <th class="py-2 font-medium">From line</th>
-                  <th class="py-2 font-medium">Replacement</th>
-                  <th class="py-2 font-medium">Qty</th>
-                  <th class="py-2 font-medium">Unit cost (Rp)</th>
+                  <th class="py-2 font-medium">{t("purchaseDetail.fromLine")}</th>
+                  <th class="py-2 font-medium">{t("purchaseDetail.replacement")}</th>
+                  <th class="py-2 font-medium">{t("common.qty")}</th>
+                  <th class="py-2 font-medium">{t("purchaseDetail.unitCostRp")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -3265,7 +3255,7 @@
                     <td class="py-2 pr-3">
                       <span class="font-medium">{r.sourceLabel}</span>
                       <span class="block text-xs text-muted-foreground">
-                        of {r.remaining} ordered
+                        {t("purchaseDetail.ofOrdered", { count: r.remaining })}
                       </span>
                     </td>
                     <td class="py-2 pr-3">
@@ -3274,14 +3264,14 @@
                           <Combobox
                             options={variantOptions}
                             bind:value={resourceRows[idx].variantId}
-                            placeholder="Search product…"
+                            placeholder={t("purchaseDetail.searchProduct")}
                           />
                         </div>
                       {:else}
                         <div class="w-56">
                           <Input
                             bind:value={resourceRows[idx].description}
-                            placeholder="Line description"
+                            placeholder={t("purchaseDetail.lineDescription")}
                           />
                         </div>
                       {/if}
@@ -3310,11 +3300,11 @@
 
           <div class="flex items-center justify-between gap-3 border-t px-5 py-3">
             <p class="text-sm text-muted-foreground">
-              {resourceRows.length} line{resourceRows.length === 1 ? "" : "s"}
+              {t("purchaseDetail.lineCount", { count: resourceRows.length })}
             </p>
             <div class="flex items-center gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onclick={closeResource}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 size="sm"
@@ -3322,7 +3312,7 @@
                   (resourceMode === "existing" ? !resourceTargetPurchaseId : !resourceVendorId)}
                 onclick={submitResource}
               >
-                Re-source {resourceRows.length} line{resourceRows.length === 1 ? "" : "s"}
+                {t("purchaseDetail.resourceButton", { count: resourceRows.length })}
               </Button>
             </div>
           </div>

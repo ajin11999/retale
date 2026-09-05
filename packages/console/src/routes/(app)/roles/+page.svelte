@@ -6,6 +6,7 @@
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Roles + the permission catalog in one round-trip — the editor groups keys
@@ -169,7 +170,7 @@
 
   async function cloneSelected() {
     if (!selected) return;
-    const name = prompt(`Clone "${selected.name}" as:`, `${selected.name} copy`);
+    const name = prompt(t("roles.clonePrompt", { name: selected.name }), t("roles.copySuffix", { name: selected.name }));
     if (!name) return;
     busy = true;
     error = null;
@@ -191,7 +192,7 @@
 
   async function deleteSelected() {
     if (!selected || selected.isTemplate) return;
-    if (!confirm(`Delete role "${selected.name}"?`)) return;
+    if (!confirm(t("roles.confirmDelete", { name: selected.name }))) return;
     busy = true;
     error = null;
     try {
@@ -241,17 +242,17 @@
   }
 </script>
 
-<svelte:head><title>Roles · Retale Console</title></svelte:head>
+<svelte:head><title>{t("roles.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Roles</h1>
+    <h1 class="text-xl font-semibold">{t("roles.title")}</h1>
     <Button
       size="sm"
       disabled={busy || !canManage}
       onclick={() => (newName = "")}
     >
-      New role
+      {t("roles.newRole")}
     </Button>
   </div>
 
@@ -263,17 +264,17 @@
     <div class="space-y-2 rounded-lg border bg-card p-4">
       <div class="flex items-end gap-2">
         <label class="flex-1 space-y-1">
-          <span class="text-sm font-medium">Role name</span>
-          <Input bind:value={newName} placeholder="e.g. Stockroom" />
+          <span class="text-sm font-medium">{t("roles.roleName")}</span>
+          <Input bind:value={newName} placeholder={t("roles.roleNamePlaceholder")} />
         </label>
         <label class="flex-1 space-y-1">
-          <span class="text-sm font-medium">Description (optional)</span>
+          <span class="text-sm font-medium">{t("roles.descriptionOptional")}</span>
           <Input bind:value={newDescription} />
         </label>
         <Button
           size="sm"
           disabled={busy || !(newName ?? "").trim()}
-          onclick={createRole}>Create</Button
+          onclick={createRole}>{t("common.create")}</Button
         >
         <Button
           variant="ghost"
@@ -282,17 +283,17 @@
           onclick={() => {
             newName = null;
             newDescription = "";
-          }}>Cancel</Button
+          }}>{t("common.cancel")}</Button
         >
       </div>
       <p class="text-xs text-muted-foreground">
-        New roles start with no permissions — assign them after creation.
+        {t("roles.newRoleHint")}
       </p>
     </div>
   {/if}
 
   {#if $RoleAdmin.fetching && roles.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $RoleAdmin.errors?.length}
     <p class="text-sm text-destructive">{$RoleAdmin.errors[0].message}</p>
   {:else}
@@ -318,14 +319,14 @@
                   {/if}
                 </span>
                 {#if r.isTemplate}
-                  <Badge class="bg-muted text-muted-foreground">template</Badge>
+                  <Badge class="bg-muted text-muted-foreground">{t("roles.template")}</Badge>
                 {/if}
               </button>
             </li>
           {/each}
           {#if roles.length === 0}
             <li class="px-4 py-10 text-center text-sm text-muted-foreground">
-              No roles defined.
+              {t("roles.noRoles")}
             </li>
           {/if}
         </ul>
@@ -338,7 +339,7 @@
       <div class="rounded-lg border bg-card p-4">
         {#if !selected}
           <p class="text-sm text-muted-foreground">
-            Select a role to view its permissions.
+            {t("roles.selectRole")}
           </p>
         {:else}
           <div class="mb-3 flex items-start justify-between gap-3">
@@ -351,7 +352,7 @@
               {/if}
               {#if selected.isTemplate}
                 <p class="mt-1 text-xs text-muted-foreground">
-                  Templates are read-only — clone to edit.
+                  {t("roles.templatesReadOnly")}
                 </p>
               {/if}
             </div>
@@ -360,14 +361,14 @@
                 size="sm"
                 variant="outline"
                 disabled={busy || !canManage}
-                onclick={cloneSelected}>Clone</Button
+                onclick={cloneSelected}>{t("common.clone")}</Button
               >
               {#if !selected.isTemplate}
                 <Button
                   size="sm"
                   variant="destructive"
                   disabled={busy || !canManage}
-                  onclick={deleteSelected}>Delete</Button
+                  onclick={deleteSelected}>{t("roles.deleteRole")}</Button
                 >
               {/if}
             </div>
@@ -375,14 +376,14 @@
 
           <div class="mb-3 flex items-center justify-between border-y py-2">
             <span class="text-sm text-muted-foreground">
-              {draft.size} of {catalog.length} permissions
+              {t("roles.permissionCount", { count: draft.size, total: catalog.length })}
             </span>
             <Button
               size="sm"
               disabled={busy || !dirty || selected.isTemplate || !canManage}
               onclick={savePermissions}
             >
-              {dirty ? "Save changes" : "Saved"}
+              {dirty ? t("common.saveChanges") : t("roles.saved")}
             </Button>
           </div>
 
@@ -404,7 +405,7 @@
                     disabled={selected.isTemplate || !canManage}
                     onclick={() => toggleDomain(keys, !allOn)}
                   >
-                    {allOn ? "Clear all" : "Select all"}
+                    {allOn ? t("roles.clearAll") : t("common.selectAll")}
                   </button>
                 </div>
                 <div class="grid grid-cols-2 gap-1">

@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, statusLabel } from "$lib/utils";
+  import { formatMoney } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import IconButton from "$lib/components/ui/icon-button.svelte";
@@ -13,6 +13,7 @@
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -202,7 +203,7 @@
     return out.sort((a, b) => a.label.localeCompare(b.label));
   });
   const variantLabel = (id: string) =>
-    variantOptions.find((v) => v.value === id)?.label ?? "Unknown variant";
+    variantOptions.find((v) => v.value === id)?.label ?? t("products.unknown");
 
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
@@ -324,7 +325,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("common.saved", { label }) };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -352,7 +353,7 @@
 
   async function saveCustomer() {
     if (!customer) return;
-    await run("Customer", () =>
+    await run(t("common.customer"), () =>
       UpdateCustomer.mutate({
         id: customer.id,
         name: form.name.trim(),
@@ -366,7 +367,7 @@
 
   async function toggleArchived() {
     if (!customer) return;
-    const ok = await run("Customer", () =>
+    const ok = await run(t("common.customer"), () =>
       SetCustomerArchived.mutate({
         id: customer.id,
         archived: customer.archivedAt == null,
@@ -378,7 +379,7 @@
   async function saveCreditLimit() {
     if (!customer) return;
     // An empty input clears the limit (null).
-    const ok = await run("Credit limit", () =>
+    const ok = await run(t("customers.creditLimit"), () =>
       SetCreditLimit.mutate({
         id: customer.id,
         creditLimitMinor: creditLimit == null ? null : creditLimit,
@@ -390,10 +391,10 @@
   async function hardDelete() {
     if (!customer) return;
     if (
-      !confirm(`Permanently delete "${customer.name}"? This cannot be undone.`)
+      !confirm(t("customerDetail.confirmDelete", { name: customer.name }))
     )
       return;
-    const ok = await run("Customer", () =>
+    const ok = await run(t("common.customer"), () =>
       HardDeleteCustomer.mutate({ id: customer.id }),
     );
     if (ok) await goto("/customers");
@@ -405,7 +406,7 @@
 
   async function recordPayment() {
     if (!customer || !payAmount || payAmount <= 0) return;
-    const ok = await run("Payment", () =>
+    const ok = await run(t("customerDetail.labelPayment"), () =>
       RecordDebtPayment.mutate({
         customerId: customer.id,
         amountMinor: payAmount as number,
@@ -424,7 +425,7 @@
 
   async function adjustBalance() {
     if (!customer || !adjAmount || !adjNote.trim()) return;
-    const ok = await run("Adjustment", () =>
+    const ok = await run(t("customerDetail.labelAdjustment"), () =>
       AdjustCustomerBalance.mutate({
         customerId: customer.id,
         amountMinor: adjAmount as number,
@@ -446,7 +447,7 @@
   async function savePrice() {
     const d = priceDraft;
     if (!customer || !d || !d.variantId) return;
-    const ok = await run("Price override", () =>
+    const ok = await run(t("customerDetail.labelPriceOverride"), () =>
       SetCustomerPrice.mutate({
         customerId: customer.id,
         variantId: d.variantId,
@@ -460,8 +461,8 @@
   }
 
   async function removePrice(variantId: string) {
-    if (!customer || !confirm("Remove this price override?")) return;
-    const ok = await run("Price override", () =>
+    if (!customer || !confirm(t("customerDetail.confirmRemovePrice"))) return;
+    const ok = await run(t("customerDetail.labelPriceOverride"), () =>
       RemoveCustomerPrice.mutate({ customerId: customer.id, variantId }),
     );
     if (ok) await refetch();
@@ -476,26 +477,26 @@
 </script>
 
 <svelte:head>
-  <title>{customer ? customer.name : "Customer"} · Retale Console</title>
+  <title>{t("customerDetail.pageTitle", { name: customer ? customer.name : t("common.customer") })}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6">
   <a
     href="/customers"
     class="text-sm text-muted-foreground hover:text-foreground"
-    >← Back to customers</a
+    >{t("customerDetail.backToCustomers")}</a
   >
 
   {#if $CustomerDetail.fetching && !customer}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !customer}
-    <p class="text-sm text-destructive">Customer not found.</p>
+    <p class="text-sm text-destructive">{t("customerDetail.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">{customer.name}</h1>
         <p class="text-sm text-muted-foreground">
-          AR balance
+          {t("customers.arBalance")}
           <span
             class="font-medium {overLimit
               ? 'text-destructive'
@@ -505,7 +506,7 @@
           </span>
           {#if overLimit}
             <Badge class="ml-1 bg-destructive/10 text-destructive">
-              over credit limit
+              {t("customerDetail.overCreditLimit")}
             </Badge>
           {/if}
         </p>
@@ -516,17 +517,17 @@
             ? "bg-muted text-muted-foreground"
             : "bg-emerald-100 text-emerald-700"}
         >
-          {customer.archivedAt ? "Archived" : "Active"}
+          {customer.archivedAt ? t("common.archived") : t("common.active")}
         </Badge>
         {#if !customer.archivedAt && canCreateSale}
           <Input
             bind:value={saleNote}
-            placeholder="Sale note (optional)"
+            placeholder={t("customerDetail.saleNote")}
             class="w-52"
             disabled={busy}
           />
           <Button size="sm" disabled={busy} onclick={startSale}>
-            New sale
+            {t("orders.newSale")}
           </Button>
         {/if}
         <Button
@@ -535,7 +536,7 @@
           disabled={busy || !canArchive}
           onclick={toggleArchived}
         >
-          {customer.archivedAt ? "Restore" : "Archive"}
+          {customer.archivedAt ? t("products.restore") : t("products.archive")}
         </Button>
       </div>
     </div>
@@ -550,33 +551,33 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        You have read-only access to customers — editing is disabled.
+        {t("customerDetail.readOnlyNotice")}
       </p>
     {/if}
 
     <!-- Details -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Details</h2>
+      <h2 class="text-sm font-semibold">{t("products.details")}</h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={form.name} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Phone</span>
+          <span class="text-sm font-medium">{t("customers.phone")}</span>
           <Input bind:value={form.phone} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Email</span>
+          <span class="text-sm font-medium">{t("customers.email")}</span>
           <Input bind:value={form.email} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Address</span>
+          <span class="text-sm font-medium">{t("customerDetail.address")}</span>
           <Input bind:value={form.address} disabled={!canEdit} />
         </label>
       </div>
       <label class="space-y-1">
-        <span class="text-sm font-medium">Notes</span>
+        <span class="text-sm font-medium">{t("common.notes")}</span>
         <Textarea
           bind:value={form.notes}
           disabled={!canEdit}
@@ -585,7 +586,7 @@
       </label>
       <div class="flex justify-end pt-2">
         <Button disabled={busy || !canEdit} onclick={saveCustomer}>
-          Save details
+          {t("products.saveDetails")}
         </Button>
       </div>
     </section>
@@ -593,48 +594,48 @@
     <!-- Credit limit -->
     {#if canSetCreditLimit}
       <section class="space-y-2 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">Credit limit</h2>
+        <h2 class="text-sm font-semibold">{t("customers.creditLimit")}</h2>
         <div class="flex items-end gap-2">
           <label class="space-y-1">
-            <span class="text-xs font-medium">Limit (Rp)</span>
+            <span class="text-xs font-medium">{t("customerDetail.limitRp")}</span>
             <MoneyInput
               bind:value={creditLimit}
-              placeholder="Empty = no limit"
+              placeholder={t("customerDetail.emptyNoLimit")}
               class="w-48"
             />
           </label>
           <Button size="sm" disabled={busy} onclick={saveCreditLimit}>
-            Save limit
+            {t("customerDetail.saveLimit")}
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          Leave empty and save to clear the limit.
+          {t("customerDetail.clearLimitHint")}
         </p>
       </section>
     {/if}
 
     <!-- Accounts receivable -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Accounts receivable</h2>
+      <h2 class="text-sm font-semibold">{t("customerDetail.accountsReceivable")}</h2>
 
       {#if canRecordPayment}
         <div class="space-y-2">
           <h3 class="text-xs font-medium text-muted-foreground">
-            Record a debt payment
+            {t("customerDetail.recordDebtPayment")}
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Amount (Rp)</span>
+              <span class="text-xs font-medium">{t("customerDetail.amountRp")}</span>
               <MoneyInput bind:value={payAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
-              <span class="text-xs font-medium">Note (optional)</span>
+              <span class="text-xs font-medium">{t("customerDetail.noteOptional")}</span>
               <Input bind:value={payNote} />
             </label>
             <Button
               size="sm"
               disabled={busy || !payAmount || payAmount <= 0}
-              onclick={recordPayment}>Record payment</Button
+              onclick={recordPayment}>{t("customerDetail.recordPayment")}</Button
             >
           </div>
         </div>
@@ -643,32 +644,32 @@
       {#if canAdjust}
         <div class="space-y-2">
           <h3 class="text-xs font-medium text-muted-foreground">
-            Manual balance adjustment
+            {t("customerDetail.manualAdjustment")}
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Signed amount (Rp)</span>
+              <span class="text-xs font-medium">{t("customerDetail.signedAmountRp")}</span>
               <MoneyInput allowNegative bind:value={adjAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
-              <span class="text-xs font-medium">Note (required)</span>
+              <span class="text-xs font-medium">{t("customerDetail.noteRequired")}</span>
               <Input bind:value={adjNote} />
             </label>
             <Button
               size="sm"
               disabled={busy || !adjAmount || !adjNote.trim()}
-              onclick={adjustBalance}>Adjust</Button
+              onclick={adjustBalance}>{t("customerDetail.adjust")}</Button
             >
           </div>
           <p class="text-xs text-muted-foreground">
-            Positive raises what they owe; negative lowers it.
+            {t("customerDetail.adjustHelp")}
           </p>
         </div>
       {/if}
 
       {#if !canRecordPayment && !canAdjust}
         <p class="text-sm text-muted-foreground">
-          You don't have permission to record payments or adjustments.
+          {t("customerDetail.noPaymentPermission")}
         </p>
       {/if}
     </section>
@@ -677,7 +678,7 @@
     <section class="space-y-3 rounded-lg border bg-card p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold">
-          Price overrides ({prices.length})
+          {t("customerDetail.priceOverrides", { count: prices.length })}
         </h2>
         <Button
           variant="outline"
@@ -685,15 +686,15 @@
           disabled={busy || !canEdit}
           onclick={() => (priceDraft = { variantId: "", priceMinor: 0 })}
         >
-          Add override
+          {t("customerDetail.addOverride")}
         </Button>
       </div>
 
       <table class="w-full text-sm">
         <thead class="border-b text-left text-muted-foreground">
           <tr>
-            <th class="py-1.5 font-medium">Variant</th>
-            <th class="py-1.5 text-right font-medium">Override price</th>
+            <th class="py-1.5 font-medium">{t("products.variant")}</th>
+            <th class="py-1.5 text-right font-medium">{t("customerDetail.overridePrice")}</th>
             <th></th>
           </tr>
         </thead>
@@ -705,7 +706,7 @@
               <td class="py-1.5 text-right">
                 <IconButton
                   icon={Trash2}
-                  label="Remove price"
+                  label={t("customerDetail.removePrice")}
                   variant="destructive"
                   disabled={busy || !canEdit}
                   onclick={() => removePrice(p.variantId)}
@@ -716,7 +717,7 @@
           {#if prices.length === 0}
             <tr>
               <td colspan="3" class="py-6 text-center text-muted-foreground">
-                No price overrides — this customer pays list price.
+                {t("customerDetail.noOverrides")}
               </td>
             </tr>
           {/if}
@@ -728,19 +729,19 @@
 
       {#if priceDraft}
         <div class="space-y-3 rounded-md border bg-background p-4">
-          <h3 class="text-sm font-semibold">New price override</h3>
+          <h3 class="text-sm font-semibold">{t("customerDetail.newOverride")}</h3>
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Variant</span>
+              <span class="text-xs font-medium">{t("products.variant")}</span>
               <Combobox
                 options={variantOptions}
                 bind:value={priceDraft.variantId}
-                placeholder="Search variant…"
+                placeholder={t("customerDetail.searchVariant")}
                 disabled={!canEdit}
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium">Price (Rp)</span>
+              <span class="text-xs font-medium">{t("products.priceRp")}</span>
               <MoneyInput bind:value={priceDraft.priceMinor} disabled={!canEdit} />
             </label>
           </div>
@@ -749,12 +750,12 @@
               variant="ghost"
               size="sm"
               disabled={busy}
-              onclick={() => (priceDraft = null)}>Cancel</Button
+              onclick={() => (priceDraft = null)}>{t("common.cancel")}</Button
             >
             <Button
               size="sm"
               disabled={busy || !canEdit || !priceDraft.variantId}
-              onclick={savePrice}>Save override</Button
+              onclick={savePrice}>{t("customerDetail.saveOverride")}</Button
             >
           </div>
         </div>
@@ -764,18 +765,18 @@
     <!-- Ledger -->
     {#if canViewLedger}
       <section class="space-y-3 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">AR ledger ({ledger.length})</h2>
+        <h2 class="text-sm font-semibold">{t("customerDetail.arLedger", { count: ledger.length })}</h2>
         {#if $CustomerLedger.fetching && ledger.length === 0}
-          <p class="text-sm text-muted-foreground">Loading…</p>
+          <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
         {:else}
           <table class="w-full text-sm">
             <thead class="border-b text-left text-muted-foreground">
               <tr>
-                <th class="py-1.5 pr-4 font-medium">When</th>
-                <th class="py-1.5 pr-4 font-medium">Type</th>
-                <th class="py-1.5 pl-4 text-right font-medium">Amount</th>
-                <th class="py-1.5 pl-4 text-right font-medium">Balance</th>
-                <th class="py-1.5 pl-6 font-medium">Note</th>
+                <th class="py-1.5 pr-4 font-medium">{t("orders.when")}</th>
+                <th class="py-1.5 pr-4 font-medium">{t("common.type")}</th>
+                <th class="py-1.5 pl-4 text-right font-medium">{t("common.amount")}</th>
+                <th class="py-1.5 pl-4 text-right font-medium">{t("common.balance")}</th>
+                <th class="py-1.5 pl-6 font-medium">{t("common.note")}</th>
               </tr>
             </thead>
             <tbody>
@@ -784,7 +785,7 @@
                   <td class="whitespace-nowrap py-1.5 pr-4">
                     {fmtDateTime(e.createdAt)}
                   </td>
-                  <td class="py-1.5 pr-4">{statusLabel(e.type)}</td>
+                  <td class="py-1.5 pr-4">{t(`ledgerType.${e.type}`)}</td>
                   <td
                     class="whitespace-nowrap py-1.5 pl-4 text-right tabular-nums {e.amountMinor <
                     0
@@ -806,7 +807,7 @@
               {#if ledgerRows.length === 0}
                 <tr>
                   <td colspan="5" class="py-6 text-center text-muted-foreground">
-                    No ledger entries.
+                    {t("customerDetail.noLedgerEntries")}
                   </td>
                 </tr>
               {/if}
@@ -822,10 +823,9 @@
     <!-- Danger zone -->
     {#if canHardDelete}
       <section class="space-y-2 rounded-lg border border-destructive/30 p-5">
-        <h2 class="text-sm font-semibold text-destructive">Danger zone</h2>
+        <h2 class="text-sm font-semibold text-destructive">{t("customerDetail.dangerZone")}</h2>
         <p class="text-sm text-muted-foreground">
-          Permanently delete this customer. Refused by the API if it carries a
-          non-zero AR balance.
+          {t("customerDetail.dangerZoneHelp")}
         </p>
         <Button
           variant="outline"
@@ -833,11 +833,11 @@
           disabled={busy || customer.balanceMinor !== 0}
           onclick={hardDelete}
         >
-          Delete customer
+          {t("customerDetail.deleteCustomer")}
         </Button>
         {#if customer.balanceMinor !== 0}
           <p class="text-xs text-muted-foreground">
-            Clear the AR balance first.
+            {t("customerDetail.clearBalanceFirst")}
           </p>
         {/if}
       </section>

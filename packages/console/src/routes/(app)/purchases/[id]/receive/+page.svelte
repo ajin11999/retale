@@ -7,7 +7,8 @@
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
-  import { statusLabel, treePathMap } from "$lib/utils";
+  import { treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // The receiving state that changes as the check is worked: purchase header
@@ -137,7 +138,7 @@
       }
     }
     return (id: string | null | undefined, fallback: string | null | undefined) =>
-      id ? (m.get(id) ?? fallback ?? "Unknown") : (fallback ?? "—");
+      id ? (m.get(id) ?? fallback ?? t("products.unknown")) : (fallback ?? "—");
   });
 
   // ---- Viewer permissions --------------------------------------------------
@@ -188,7 +189,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: label };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -207,7 +208,7 @@
 
   async function startCheck() {
     if (!purchase || !startLocationId) return;
-    const ok = await run("Receiving check", () =>
+    const ok = await run(t("purchaseReceive.savedCheck"), () =>
       StartReceivingCheck.mutate({
         purchaseId: purchase.id,
         targetLocationId: startLocationId,
@@ -220,10 +221,10 @@
     if (!draft) return;
     const qty = qtyDrafts[purchaseItemId];
     if (qty == null || Number.isNaN(qty) || qty < 0) {
-      feedback = { ok: false, text: "Quantity must be ≥ 0." };
+      feedback = { ok: false, text: t("purchaseReceive.errorQty") };
       return;
     }
-    const ok = await run("Line", () =>
+    const ok = await run(t("purchaseReceive.savedLine"), () =>
       SetReceivingCheckLine.mutate({
         deliveryId: draft.id,
         purchaseItemId,
@@ -235,8 +236,8 @@
 
   async function commitCheck() {
     if (!draft) return;
-    if (!confirm("Commit this receiving check? Stock will be received.")) return;
-    const ok = await run("Receiving check", () =>
+    if (!confirm(t("purchaseReceive.confirmCommit"))) return;
+    const ok = await run(t("purchaseReceive.savedCheck"), () =>
       CommitReceivingCheck.mutate({ deliveryId: draft.id }),
     );
     if (ok) await refetch();
@@ -275,8 +276,8 @@
       feedback = {
         ok: true,
         text: filled
-          ? `Filled ${filled} line${filled === 1 ? "" : "s"} to remaining.`
-          : "Every line is already filled.",
+          ? t("purchaseReceive.filledLines", { count: filled })
+          : t("purchaseReceive.allFilled"),
       };
       await refetch();
     } catch (e) {
@@ -298,13 +299,13 @@
       });
       const hits = res.data?.resolveReceivingScan ?? [];
       if (hits.length === 0) {
-        feedback = { ok: false, text: `No line matches "${code}".` };
+        feedback = { ok: false, text: t("purchaseReceive.noLineMatches", { code }) };
         return;
       }
       if (hits.length > 1) {
         feedback = {
           ok: false,
-          text: `"${code}" matches ${hits.length} lines — increment manually.`,
+          text: t("purchaseReceive.multipleMatches", { code, count: hits.length }),
         };
         return;
       }
@@ -329,7 +330,7 @@
             matched?.purchaseItem.variantId,
             matched?.purchaseItem.description,
           );
-          feedback = { ok: true, text: `+1 to ${name}` };
+          feedback = { ok: true, text: t("purchaseReceive.scanAdded", { name }) };
         }
       }
       await refetch();
@@ -353,7 +354,7 @@
 
 <svelte:head>
   <title>
-    Receiving · {purchase ? purchase.snapshotVendorName : "Purchase"} · Retale
+    {t("purchaseReceive.receiving")} · {purchase ? purchase.snapshotVendorName : t("purchaseReceive.purchase")} · Retale
     Console
   </title>
 </svelte:head>
@@ -363,25 +364,25 @@
     href="/purchases/{page.params.id}"
     class="text-sm text-muted-foreground hover:text-foreground"
   >
-    ← Back to purchase
+    {t("purchaseReceive.backToPurchase")}
   </a>
 
   {#if $ReceivingCheck.fetching && !purchase}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !purchase}
-    <p class="text-sm text-destructive">Purchase not found.</p>
+    <p class="text-sm text-destructive">{t("purchaseDetail.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">
-          Receive goods · {purchase.snapshotVendorName}
+          {t("purchaseReceive.receiveGoods", { name: purchase.snapshotVendorName })}
         </h1>
         <p class="text-sm text-muted-foreground">
           {fmtDate(purchase.date)}
         </p>
       </div>
       {#if draft}
-        <Badge class="bg-sky-100 text-sky-700">draft check open</Badge>
+        <Badge class="bg-sky-100 text-sky-700">{t("purchaseReceive.draftCheckOpen")}</Badge>
       {/if}
     </div>
 
@@ -395,45 +396,44 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        You don't have permission to draft receiving checks.
+        {t("purchaseReceive.noDraftPermission")}
       </p>
     {:else if purchase.status === "cancelled"}
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        This purchase is cancelled — receiving is closed.
+        {t("purchaseReceive.cancelledReceivingClosed")}
       </p>
     {:else if purchase.status === "complete"}
       <p
         class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
       >
-        This purchase is fully received — nothing left to receive.
+        {t("purchaseReceive.fullyReceived")}
       </p>
     {:else if !draft}
       <!-- Start panel -->
       <section class="space-y-3 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">Start a receiving check</h2>
+        <h2 class="text-sm font-semibold">{t("purchaseReceive.startCheckTitle")}</h2>
         <p class="text-sm text-muted-foreground">
-          Goods received here are added to the chosen location's stock on
-          commit.
+          {t("purchaseReceive.startCheckHint")}
         </p>
         <div class="flex items-end gap-2">
           <label class="space-y-1 w-56">
-            <span class="text-xs font-medium">Target location</span>
+            <span class="text-xs font-medium">{t("purchaseReceive.targetLocation")}</span>
             <Combobox
               options={locationOptions}
               bind:value={startLocationId}
-              placeholder="Search location…"
+              placeholder={t("purchaseReceive.searchLocation")}
             />
           </label>
           <Button
             disabled={busy || !startLocationId || locations.length === 0}
-            onclick={startCheck}>Start check</Button
+            onclick={startCheck}>{t("purchaseReceive.startCheck")}</Button
           >
         </div>
         {#if locations.length === 0}
           <p class="text-xs text-destructive">
-            No active locations — create one first.
+            {t("purchaseReceive.noActiveLocations")}
           </p>
         {/if}
       </section>
@@ -442,33 +442,33 @@
       <section class="space-y-3 rounded-lg border bg-card p-5">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold">
-            Open check · {draft.targetLocation?.name ?? "—"}
+            {t("purchaseReceive.openCheck", { name: draft.targetLocation?.name ?? "—" })}
           </h2>
           <div class="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               disabled={busy || !hasRemaining}
-              onclick={fillAllRemaining}>Fill all remaining</Button
+              onclick={fillAllRemaining}>{t("purchaseReceive.fillAllRemaining")}</Button
             >
             <Button
               size="sm"
               disabled={busy || !canCommit}
-              onclick={commitCheck}>Commit check</Button
+              onclick={commitCheck}>{t("purchaseReceive.commitCheck")}</Button
             >
           </div>
         </div>
         {#if !canCommit}
           <p class="text-xs text-muted-foreground">
-            You can stage counts; a viewer with delivery.commit must commit.
+            {t("purchaseReceive.stageHint")}
           </p>
         {/if}
         <p class="text-xs text-muted-foreground">
-          Expedition / freight charges? Add
+          {t("purchaseReceive.freightHintBefore")}
           <a href={`/deliveries/${draft.id}`} class="text-primary hover:underline">
-            freight legs in the delivery editor
+            {t("purchaseReceive.freightHintLink")}
           </a>
-          before committing, so they land into the goods' cost.
+          {t("purchaseReceive.freightHintAfter")}
         </p>
 
         <!-- Scan row -->
@@ -480,10 +480,10 @@
           }}
         >
           <label class="flex-1 space-y-1">
-            <span class="text-xs font-medium">Scan / type a code</span>
+            <span class="text-xs font-medium">{t("purchaseReceive.scanTypeCode")}</span>
             <Input
               bind:value={scanCode}
-              placeholder="Barcode, SKU, or vendor code"
+              placeholder={t("purchaseReceive.barcodePlaceholder")}
               autofocus
             />
           </label>
@@ -497,16 +497,16 @@
       </section>
 
       <section class="space-y-3 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">Lines ({lines.length})</h2>
+        <h2 class="text-sm font-semibold">{t("purchaseReceive.lines", { count: lines.length })}</h2>
         <table class="w-full text-sm">
           <thead class="border-b text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">Line</th>
-              <th class="px-4 py-2 text-right font-medium">Ordered</th>
-              <th class="px-4 py-2 text-right font-medium">Delivered</th>
-              <th class="px-4 py-2 text-right font-medium">Remaining</th>
-              <th class="px-4 py-2 text-right font-medium">In check</th>
-              <th class="px-4 py-2 font-medium">After commit</th>
+              <th class="px-4 py-2 font-medium">{t("purchases.line")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("purchases.ordered")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("purchases.delivered")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("purchases.remaining")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("purchaseReceive.inCheck")}</th>
+              <th class="px-4 py-2 font-medium">{t("purchaseReceive.afterCommit")}</th>
             </tr>
           </thead>
           <tbody>
@@ -545,7 +545,7 @@
                 </td>
                 <td class="px-4 py-2">
                   <Badge class={statusClass(l.provisionalStatus)}>
-                    {statusLabel(l.provisionalStatus)}
+                    {t(`purchaseReceive.status.${l.provisionalStatus}`)}
                   </Badge>
                 </td>
               </tr>
@@ -553,15 +553,14 @@
             {#if lines.length === 0}
               <tr>
                 <td colspan="6" class="py-6 text-center text-muted-foreground">
-                  This purchase has no lines.
+                  {t("purchaseReceive.noLines")}
                 </td>
               </tr>
             {/if}
           </tbody>
         </table>
         <p class="text-xs text-muted-foreground">
-          Edits save when the field loses focus. Scanning a code increments the
-          matching line by 1.
+          {t("purchaseReceive.editsSaveHint")}
         </p>
       </section>
     {/if}

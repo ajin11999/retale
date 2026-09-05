@@ -9,6 +9,7 @@
   import DuplicateHint from "$lib/components/ui/duplicate-hint.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -78,11 +79,11 @@
   const sortGlyph = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
-  const KIND_TABS: { value: "all" | "supplier" | "expedition"; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "supplier", label: "Suppliers" },
-    { value: "expedition", label: "Couriers" },
-  ];
+  const KIND_TABS = $derived<{ value: "all" | "supplier" | "expedition"; label: string }[]>([
+    { value: "all", label: t("vendors.all") },
+    { value: "supplier", label: t("vendors.suppliers") },
+    { value: "expedition", label: t("vendors.couriers") },
+  ]);
   const rows = $derived.by(() => {
     const tokens = searchTokens(search.trim());
     const list = vendors.filter((v) => {
@@ -148,29 +149,29 @@
   }
 </script>
 
-<svelte:head><title>Vendors · Retale Console</title></svelte:head>
+<svelte:head><title>{t("vendors.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Vendors</h1>
+    <h1 class="text-xl font-semibold">{t("vendors.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="inline-flex overflow-hidden rounded-md border">
-        {#each KIND_TABS as t (t.value)}
+        {#each KIND_TABS as tab (tab.value)}
           <button
             type="button"
-            class="px-3 py-1.5 text-sm {kindFilter === t.value
+            class="px-3 py-1.5 text-sm {kindFilter === tab.value
               ? 'bg-primary text-primary-foreground'
               : 'bg-card hover:bg-muted'}"
-            onclick={() => (kindFilter = t.value)}
+            onclick={() => (kindFilter = tab.value)}
           >
-            {t.label}
+            {tab.label}
           </button>
         {/each}
       </div>
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search vendors…"
+          placeholder={t("vendors.searchVendors")}
           bind:value={search}
         />
       </div>
@@ -182,7 +183,7 @@
           newName = "";
         }}
       >
-        New vendor
+        {t("vendors.newVendor")}
       </Button>
     </div>
   </div>
@@ -194,8 +195,8 @@
   {#if newName !== null}
     <div class="flex items-end gap-2 rounded-lg border bg-card p-4">
       <label class="relative flex-1 space-y-1">
-        <span class="text-sm font-medium">Vendor name</span>
-        <Input bind:value={newName} placeholder="Vendor name" />
+        <span class="text-sm font-medium">{t("vendors.vendorName")}</span>
+        <Input bind:value={newName} placeholder={t("vendors.vendorName")} />
         <DuplicateHint
           query={newName ?? ""}
           items={vendorCandidates}
@@ -203,31 +204,31 @@
         />
       </label>
       <label class="space-y-1">
-        <span class="text-sm font-medium">Kind</span>
+        <span class="text-sm font-medium">{t("vendors.kind")}</span>
         <select
           bind:value={newKind}
           class="h-9 rounded-md border border-input bg-background px-2 text-sm"
         >
-          <option value="supplier">Supplier</option>
-          <option value="expedition">Expedition / courier</option>
+          <option value="supplier">{t("vendors.supplier")}</option>
+          <option value="expedition">{t("vendors.expeditionCourier")}</option>
         </select>
       </label>
       <Button
         size="sm"
         disabled={busy || !(newName ?? "").trim()}
-        onclick={createVendor}>Create &amp; edit</Button
+        onclick={createVendor}>{t("vendors.createAndEdit")}</Button
       >
       <Button
         variant="ghost"
         size="sm"
         disabled={busy}
-        onclick={() => (newName = null)}>Cancel</Button
+        onclick={() => (newName = null)}>{t("common.cancel")}</Button
       >
     </div>
   {/if}
 
   {#if $VendorList.fetching && vendors.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $VendorList.errors?.length}
     <p class="text-sm text-destructive">{$VendorList.errors[0].message}</p>
   {:else}
@@ -240,18 +241,18 @@
                 class="inline-flex items-center hover:text-foreground"
                 onclick={() => toggleSort("name")}
               >
-                Vendor{sortGlyph("name")}
+                {t("vendors.vendor")}{sortGlyph("name")}
               </button>
             </th>
-            <th class="px-4 py-2 font-medium">Kind</th>
-            <th class="px-4 py-2 font-medium">Phone</th>
-            <th class="px-4 py-2 font-medium">Email</th>
+            <th class="px-4 py-2 font-medium">{t("vendors.kind")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.phone")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.email")}</th>
             <th class="px-4 py-2 text-right font-medium">
               <button
                 class="inline-flex items-center justify-end hover:text-foreground"
                 onclick={() => toggleSort("leadTime")}
               >
-                Lead time{sortGlyph("leadTime")}
+                {t("vendors.leadTime")}{sortGlyph("leadTime")}
               </button>
             </th>
             <th class="px-4 py-2 text-right font-medium">
@@ -259,10 +260,10 @@
                 class="inline-flex items-center justify-end hover:text-foreground"
                 onclick={() => toggleSort("balance")}
               >
-                AP balance{sortGlyph("balance")}
+                {t("vendors.apBalance")}{sortGlyph("balance")}
               </button>
             </th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -282,7 +283,7 @@
                     ? "bg-sky-100 text-sky-700"
                     : "bg-violet-100 text-violet-700"}
                 >
-                  {v.kind === "expedition" ? "Courier" : "Supplier"}
+                  {v.kind === "expedition" ? t("vendors.courier") : t("vendors.supplier")}
                 </Badge>
               </td>
               <td class="px-4 py-2">{v.phone ?? "—"}</td>
@@ -301,7 +302,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {v.archivedAt ? "Archived" : "Active"}
+                  {v.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
             </tr>
@@ -312,7 +313,7 @@
                 colspan="7"
                 class="px-4 py-10 text-center text-muted-foreground"
               >
-                No vendors match.
+                {t("vendors.noVendorsMatch")}
               </td>
             </tr>
           {/if}
@@ -321,7 +322,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} vendor{rows.length === 1 ? "" : "s"}
+        {t("vendors.vendorCount", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

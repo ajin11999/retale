@@ -3,7 +3,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, statusLabel, treePathMap } from "$lib/utils";
+  import { formatMoney, treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -151,25 +152,25 @@
   }
 </script>
 
-<svelte:head><title>Deliveries · Retale Console</title></svelte:head>
+<svelte:head><title>{t("deliveries.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Deliveries</h1>
+    <h1 class="text-xl font-semibold">{t("deliveries.title")}</h1>
     <div class="flex items-center gap-3">
       <Select bind:value={kindFilter} class="w-36">
-        <option value="all">All kinds</option>
-        <option value="transit">Transit</option>
-        <option value="arrival">Arrival</option>
+        <option value="all">{t("deliveries.allKinds")}</option>
+        <option value="transit">{t("deliveries.transit")}</option>
+        <option value="arrival">{t("deliveries.arrival")}</option>
       </Select>
       <Select bind:value={statusFilter} class="w-40">
-        <option value="all">All statuses</option>
-        <option value="draft">Draft</option>
-        <option value="delivered">Delivered</option>
-        <option value="cancelled">Cancelled</option>
+        <option value="all">{t("deliveries.allStatuses")}</option>
+        <option value="draft">{t("deliveries.status.draft")}</option>
+        <option value="delivered">{t("deliveries.status.delivered")}</option>
+        <option value="cancelled">{t("deliveries.status.cancelled")}</option>
       </Select>
       <Button size="sm" disabled={busy || !canDraft} onclick={() => (showNew = true)}>
-        New delivery
+        {t("deliveries.newDelivery")}
       </Button>
     </div>
   </div>
@@ -182,49 +183,48 @@
     <div class="rounded-lg border bg-card p-4">
       <div class="grid grid-cols-[8rem_10rem_1fr_1fr_auto_auto] items-end gap-3">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Kind</span>
+          <span class="text-sm font-medium">{t("deliveries.kind")}</span>
           <Select bind:value={newKind}>
-            <option value="arrival">Arrival</option>
-            <option value="transit">Transit</option>
+            <option value="arrival">{t("deliveries.arrival")}</option>
+            <option value="transit">{t("deliveries.transit")}</option>
           </Select>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Date</span>
+          <span class="text-sm font-medium">{t("common.date")}</span>
           <Input type="date" bind:value={newDate} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Biller (optional)</span>
-          <Input bind:value={newBiller} placeholder="e.g. PT Sumber Sejahtera" />
+          <span class="text-sm font-medium">{t("deliveries.billerOptional")}</span>
+          <Input bind:value={newBiller} placeholder={t("deliveries.billerPlaceholder")} />
         </label>
         {#if newKind === "arrival"}
           <label class="space-y-1">
-            <span class="text-sm font-medium">Target location</span>
+            <span class="text-sm font-medium">{t("deliveries.targetLocation")}</span>
             <Combobox
               options={locationOptions}
               bind:value={newTargetLocationId}
-              placeholder="Search location…"
+              placeholder={t("deliveries.searchLocation")}
             />
           </label>
         {:else}
           <p class="self-center text-xs text-muted-foreground">
-            A transit note banks freight against the PO lines it carries — no
-            stock moves until the goods arrive.
+            {t("deliveries.transitHint")}
           </p>
         {/if}
         <Button
           size="sm"
           disabled={busy || !newDate || (newKind === "arrival" && !newTargetLocationId)}
-          onclick={createDelivery}>Create draft</Button
+          onclick={createDelivery}>{t("deliveries.createDraft")}</Button
         >
         <Button variant="ghost" size="sm" disabled={busy} onclick={resetNew}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $DeliveryList.fetching && deliveries.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $DeliveryList.errors?.length}
     <p class="text-sm text-destructive">{$DeliveryList.errors[0].message}</p>
   {:else}
@@ -232,13 +232,13 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Date</th>
-            <th class="px-4 py-2 font-medium">Biller</th>
-            <th class="px-4 py-2 font-medium">Target</th>
-            <th class="px-4 py-2 font-medium">Tied to PO</th>
-            <th class="px-4 py-2 text-right font-medium">Lines</th>
-            <th class="px-4 py-2 text-right font-medium">Total cost</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("common.date")}</th>
+            <th class="px-4 py-2 font-medium">{t("deliveries.biller")}</th>
+            <th class="px-4 py-2 font-medium">{t("deliveries.target")}</th>
+            <th class="px-4 py-2 font-medium">{t("deliveries.tiedToPo")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("deliveries.lines")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("deliveries.totalCost")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -252,7 +252,7 @@
                   {fmtDate(d.date)}
                 </a>
                 {#if d.kind === "transit"}
-                  <Badge class="ml-1 bg-violet-100 text-violet-700">Transit</Badge>
+                  <Badge class="ml-1 bg-violet-100 text-violet-700">{t("deliveries.transit")}</Badge>
                 {/if}
               </td>
               <td class="px-4 py-2">{d.biller ?? "—"}</td>
@@ -261,7 +261,7 @@
                   ? locationPaths.get(d.targetLocationId)
                   : null) ??
                   d.targetLocation?.name ??
-                  (d.kind === "transit" ? "in transit" : "—")}</td
+                  (d.kind === "transit" ? t("deliveries.inTransit") : "—")}</td
               >
               <td class="px-4 py-2">
                 {#if d.purchaseId}
@@ -277,14 +277,14 @@
               </td>
               <td class="px-4 py-2 text-right tabular-nums">
                 {#if d.lineCount === 0}
-                  <span class="text-xs text-muted-foreground">empty</span>
+                  <span class="text-xs text-muted-foreground">{t("deliveries.empty")}</span>
                 {:else}
                   {d.lineCount}
                 {/if}
               </td>
               <td class="px-4 py-2 text-right tabular-nums">{formatMoney(d.totalCostMinor)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusBadge(d.status)}>{statusLabel(d.status)}</Badge>
+                <Badge class={statusBadge(d.status)}>{t(`deliveries.status.${d.status}`)}</Badge>
                 {#if d.deliveredAt}
                   <span class="ml-1 block text-xs text-muted-foreground">
                     {fmtDate(d.deliveredAt)}
@@ -296,7 +296,7 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
-                No deliveries to show.
+                {t("deliveries.noDeliveries")}
               </td>
             </tr>
           {/if}
@@ -305,7 +305,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} deliver{rows.length === 1 ? "y" : "ies"}
+        {t("deliveries.count", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

@@ -5,6 +5,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import { treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -36,7 +37,7 @@
   const locations = $derived($LocsData.data?.locations ?? []);
 
   const locationPaths = $derived(treePathMap(locations));
-  const locationName = (id: string) => locationPaths.get(id) ?? "Unknown";
+  const locationName = (id: string) => locationPaths.get(id) ?? t("products.unknown");
 
   const locationOptions = $derived(
     locations.map((l: any) => ({ value: l.id, label: locationName(l.id) })),
@@ -49,7 +50,7 @@
 
   async function createDraft() {
     if (!targetLocationId) {
-      error = "Pick a destination location.";
+      error = t("transfers.pickDestination");
       return;
     }
     busy = true;
@@ -75,12 +76,12 @@
   }
 </script>
 
-<svelte:head><title>New transfer · Retale Console</title></svelte:head>
+<svelte:head><title>{t("transfers.newTransferPageTitle")}</title></svelte:head>
 
 <div class="mx-auto max-w-xl space-y-4 pt-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">New transfer</h1>
-    <Button variant="outline" size="sm" onclick={() => goto("/transfers")}>Cancel</Button>
+    <h1 class="text-xl font-semibold">{t("transfers.newTransferTitle")}</h1>
+    <Button variant="outline" size="sm" onclick={() => goto("/transfers")}>{t("common.cancel")}</Button>
   </div>
 
   {#if error}
@@ -89,26 +90,26 @@
 
   <div class="space-y-4 rounded-lg border bg-card p-5">
     <p class="text-sm text-muted-foreground">
-      Create a blank draft transfer. You can add lines from multiple source locations on the next page.
+      {t("transfers.newTransferSubtitle")}
     </p>
 
     <label class="block space-y-1">
-      <span class="text-sm font-medium">Destination location</span>
+      <span class="text-sm font-medium">{t("transfers.destinationLocation")}</span>
       <Combobox
         options={locationOptions}
         bind:value={targetLocationId}
-        placeholder="Search location…"
+        placeholder={t("transfers.searchLocation")}
       />
     </label>
 
     <label class="block space-y-1">
-      <span class="text-sm font-medium">Notes (optional)</span>
-      <Input bind:value={notes} placeholder="e.g. Weekly restock" />
+      <span class="text-sm font-medium">{t("transfers.notesOptional")}</span>
+      <Input bind:value={notes} placeholder={t("transfers.notesPlaceholder")} />
     </label>
 
     <div class="flex justify-end pt-2">
       <Button disabled={busy} onclick={createDraft}>
-        Create draft
+        {t("transfers.createDraft")}
       </Button>
     </div>
   </div>

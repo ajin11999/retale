@@ -1,6 +1,7 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import Button from "$lib/components/ui/button.svelte";
+  import { t } from "$lib/i18n";
   import { X } from "@lucide/svelte";
 
   let {
@@ -166,7 +167,7 @@
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
     <div class="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-card shadow-lg ring-1 ring-border">
       <div class="flex shrink-0 items-center justify-between border-b p-4">
-        <h2 class="text-lg font-semibold">Calculate Discount</h2>
+        <h2 class="text-lg font-semibold">{t("purchaseDiscount.title")}</h2>
         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground" onclick={() => open = false}>
           <X class="h-5 w-5" />
         </Button>
@@ -176,37 +177,37 @@
         <!-- Sidebar Controls -->
         <div class="w-full md:w-64 space-y-6 flex-shrink-0">
           <div class="space-y-3">
-            <h3 class="text-sm font-semibold">Discount Type</h3>
+            <h3 class="text-sm font-semibold">{t("purchaseDiscount.discountType")}</h3>
             <div class="flex bg-muted p-1 rounded-md">
               <button 
                 class="flex-1 text-sm py-1.5 rounded-sm {discountType === 'percentage' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:bg-background/50'}"
                 onclick={() => discountType = 'percentage'}
               >
-                Percentage
+                {t("purchaseDiscount.percentage")}
               </button>
               <button 
                 class="flex-1 text-sm py-1.5 rounded-sm {discountType === 'fixed' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:bg-background/50'}"
                 onclick={() => discountType = 'fixed'}
               >
-                Fixed Amount
+                {t("purchaseDiscount.fixedAmount")}
               </button>
             </div>
           </div>
 
           {#if discountType === 'percentage'}
             <div class="space-y-1">
-              <label class="text-sm font-medium">Multi-layer Discount</label>
+              <label class="text-sm font-medium">{t("purchaseDiscount.multiLayerDiscount")}</label>
               <input 
                 type="text" 
                 class="w-full border rounded-md px-3 py-2 text-sm bg-background" 
                 bind:value={discountString} 
-                placeholder="e.g. 10+2.5" 
+                placeholder={t("purchaseDiscount.placeholderMulti")} 
               />
-              <p class="text-xs text-muted-foreground">Chain discounts with a plus sign.</p>
+              <p class="text-xs text-muted-foreground">{t("purchaseDiscount.chainHint")}</p>
             </div>
           {:else}
             <div class="space-y-1">
-              <label class="text-sm font-medium">Global Flat Discount</label>
+              <label class="text-sm font-medium">{t("purchaseDiscount.globalFlatDiscount")}</label>
               <div class="relative">
                 <span class="absolute left-3 top-2 text-sm text-muted-foreground">Rp</span>
                 <input 
@@ -217,12 +218,12 @@
                   min="0"
                 />
               </div>
-              <p class="text-xs text-muted-foreground">Distributed proportionally by subtotal.</p>
+              <p class="text-xs text-muted-foreground">{t("purchaseDiscount.proportionalHint")}</p>
             </div>
           {/if}
 
           <div class="space-y-1">
-            <label class="text-sm font-medium">Tax %</label>
+            <label class="text-sm font-medium">{t("purchaseDiscount.taxPct")}</label>
             <div class="relative">
               <input 
                 type="number" 
@@ -239,18 +240,18 @@
         <!-- Preview Table -->
         <div class="flex-1 border rounded-lg overflow-hidden flex flex-col bg-muted/10">
           <div class="bg-muted/30 px-4 py-2 border-b font-medium text-sm flex justify-between">
-            <span>Preview Items ({selectedItems.length})</span>
-            <span class="text-muted-foreground">Base Total: {totalBaseAmount.toLocaleString()}</span>
+            <span>{t("purchaseDiscount.previewItems", { count: selectedItems.length })}</span>
+            <span class="text-muted-foreground">{t("purchaseDiscount.baseTotal", { amount: totalBaseAmount.toLocaleString() })}</span>
           </div>
           <div class="flex-1 overflow-y-auto">
             <table class="w-full text-sm">
               <thead class="border-b bg-muted/10 text-left text-muted-foreground sticky top-0 backdrop-blur-md">
                 <tr>
-                  <th class="px-4 py-2 font-medium">Item</th>
-                  <th class="px-4 py-2 font-medium text-right">Qty</th>
-                  <th class="px-4 py-2 font-medium text-right">Base Cost</th>
-                  <th class="px-4 py-2 font-medium text-right">New Unit Cost</th>
-                  <th class="px-4 py-2 font-medium text-right">New Subtotal</th>
+                  <th class="px-4 py-2 font-medium">{t("purchaseDiscount.item")}</th>
+                  <th class="px-4 py-2 font-medium text-right">{t("common.qty")}</th>
+                  <th class="px-4 py-2 font-medium text-right">{t("purchaseDiscount.baseCost")}</th>
+                  <th class="px-4 py-2 font-medium text-right">{t("purchaseDiscount.newUnitCost")}</th>
+                  <th class="px-4 py-2 font-medium text-right">{t("purchaseDiscount.newSubtotal")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -266,7 +267,7 @@
                 {#if computedUpdates.length === 0}
                   <tr>
                     <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">
-                      No items selected.
+                      {t("purchaseDiscount.noItems")}
                     </td>
                   </tr>
                 {/if}
@@ -274,16 +275,16 @@
             </table>
           </div>
           <div class="bg-muted/30 px-4 py-3 border-t font-semibold text-right flex justify-end items-center gap-4">
-            <span class="text-sm text-muted-foreground">New Total:</span>
+            <span class="text-sm text-muted-foreground">{t("purchaseDiscount.newTotal")}</span>
             <span class="text-lg text-primary">{newTotalAmount.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
       <div class="flex shrink-0 items-center justify-end gap-3 border-t bg-muted/20 p-4">
-        <Button variant="outline" disabled={busy} onclick={() => open = false}>Cancel</Button>
+        <Button variant="outline" disabled={busy} onclick={() => open = false}>{t("common.cancel")}</Button>
         <Button disabled={busy || selectedItems.length === 0} onclick={save}>
-          {busy ? "Applying..." : "Apply Discount"}
+          {busy ? t("purchaseDiscount.applying") : t("purchaseDiscount.apply")}
         </Button>
       </div>
     </div>

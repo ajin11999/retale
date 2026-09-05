@@ -9,6 +9,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -171,16 +172,16 @@
     iso ? new Date(iso).toLocaleDateString("en-CA") : "—";
 </script>
 
-<svelte:head><title>Users · Retale Console</title></svelte:head>
+<svelte:head><title>{t("users.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Users</h1>
+    <h1 class="text-xl font-semibold">{t("users.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search users…"
+          placeholder={t("users.searchUsers")}
           bind:value={search}
         />
       </div>
@@ -189,7 +190,7 @@
         disabled={busy || !canManage}
         onclick={() => (showNew = true)}
       >
-        New user
+        {t("users.newUser")}
       </Button>
     </div>
   </div>
@@ -202,26 +203,26 @@
     <div class="space-y-3 rounded-lg border bg-card p-4">
       <div class="grid grid-cols-2 gap-3">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Username</span>
+          <span class="text-sm font-medium">{t("users.username")}</span>
           <Input bind:value={newUsername} autocomplete="off" />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Display name</span>
+          <span class="text-sm font-medium">{t("users.displayName")}</span>
           <Input bind:value={newName} autocomplete="off" />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Initial password</span>
+          <span class="text-sm font-medium">{t("users.initialPassword")}</span>
           <Input type="password" bind:value={newPassword} autocomplete="new-password" />
         </label>
         <label class="flex items-center gap-2 pt-6">
           <input type="checkbox" bind:checked={newIsRoot} />
-          <span class="text-sm">Root (bypasses every permission check)</span>
+          <span class="text-sm">{t("users.rootHint")}</span>
         </label>
       </div>
 
       {#if !newIsRoot}
         <div>
-          <p class="mb-1 text-sm font-medium">Roles</p>
+          <p class="mb-1 text-sm font-medium">{t("users.roles")}</p>
           <div class="flex flex-wrap gap-1">
             {#each roles as r (r.id)}
               {@const on = newRoleIds.has(r.id)}
@@ -242,7 +243,7 @@
               </button>
             {/each}
             {#if roles.length === 0}
-              <span class="text-xs text-muted-foreground">No roles defined yet.</span>
+              <span class="text-xs text-muted-foreground">{t("users.noRoles")}</span>
             {/if}
           </div>
         </div>
@@ -250,7 +251,7 @@
 
       <div class="flex justify-end gap-2">
         <Button variant="ghost" size="sm" disabled={busy} onclick={resetNewForm}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           size="sm"
@@ -258,14 +259,14 @@
             !newUsername.trim() ||
             !newName.trim() ||
             !newPassword}
-          onclick={createUser}>Create user</Button
+          onclick={createUser}>{t("users.createUser")}</Button
         >
       </div>
     </div>
   {/if}
 
   {#if $UserAdmin.fetching && users.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $UserAdmin.errors?.length}
     <p class="text-sm text-destructive">{$UserAdmin.errors[0].message}</p>
   {:else}
@@ -273,12 +274,12 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Name</th>
-            <th class="px-4 py-2 font-medium">Username</th>
-            <th class="px-4 py-2 font-medium">Roles</th>
-            <th class="px-4 py-2 font-medium">2FA</th>
-            <th class="px-4 py-2 font-medium">Created</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("common.name")}</th>
+            <th class="px-4 py-2 font-medium">{t("users.username")}</th>
+            <th class="px-4 py-2 font-medium">{t("users.roles")}</th>
+            <th class="px-4 py-2 font-medium">{t("users.twoFa")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.created")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -287,14 +288,14 @@
               <td class="px-4 py-2 font-medium">
                 {u.name}
                 {#if u.isRoot}
-                  <Badge class="ml-1 bg-primary/10 text-primary">root</Badge>
+                  <Badge class="ml-1 bg-primary/10 text-primary">{t("users.root")}</Badge>
                 {/if}
               </td>
               <td class="px-4 py-2 font-mono text-xs">{u.username}</td>
               <td class="px-4 py-2">
                 {#if u.isRoot}
                   <span class="text-xs text-muted-foreground">
-                    All permissions
+                    {t("users.allPermissions")}
                   </span>
                 {:else if editingRolesFor === u.id}
                   <div class="flex flex-wrap gap-1">
@@ -315,7 +316,7 @@
                     <button
                       type="button"
                       class="text-xs text-muted-foreground hover:underline"
-                      onclick={() => (editingRolesFor = null)}>Done</button
+                      onclick={() => (editingRolesFor = null)}>{t("common.done")}</button
                     >
                   </div>
                 {:else}
@@ -332,7 +333,7 @@
                     {#if canManage}
                       <IconButton
                         icon={Pencil}
-                        label="Edit roles"
+                        label={t("users.editRoles")}
                         variant="primary"
                         class="ml-1"
                         onclick={() => (editingRolesFor = u.id)}
@@ -343,9 +344,9 @@
               </td>
               <td class="px-4 py-2">
                 {#if u.twoFactorEnabled}
-                  <Badge class="bg-emerald-100 text-emerald-700">enabled</Badge>
+                  <Badge class="bg-emerald-100 text-emerald-700">{t("users.enabled")}</Badge>
                 {:else}
-                  <span class="text-xs text-muted-foreground">off</span>
+                  <span class="text-xs text-muted-foreground">{t("users.off")}</span>
                 {/if}
               </td>
               <td class="px-4 py-2 text-muted-foreground">
@@ -357,7 +358,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {u.archivedAt ? "Archived" : "Active"}
+                  {u.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
             </tr>
@@ -365,7 +366,7 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                No users match.
+                {t("users.noUsersMatch")}
               </td>
             </tr>
           {/if}
@@ -374,7 +375,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} user{rows.length === 1 ? "" : "s"}
+        {t("users.count", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

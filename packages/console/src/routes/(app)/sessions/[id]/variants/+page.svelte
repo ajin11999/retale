@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import { formatMoney } from "$lib/utils";
   import Input from "$lib/components/ui/input.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -63,28 +64,32 @@
   );
 </script>
 
-<svelte:head><title>Variant sales · Retale Console</title></svelte:head>
+<svelte:head><title>{t("sessions.variantSalesPageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <a
     href={`/sessions/${page.params.id}`}
     class="text-sm text-primary hover:underline"
   >
-    ← Back to session
+    {t("sessions.backToSession")}
   </a>
 
   {#if $SessionVariants.fetching && rows.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $SessionVariants.errors?.length}
     <p class="text-sm text-destructive">{$SessionVariants.errors[0].message}</p>
   {:else}
     <div>
       <h1 class="text-xl font-semibold">
-        Variant sales{session ? ` · session ${session.id.slice(-8)}` : ""}
+        {session
+          ? t("sessions.variantSalesSession", { id: session.id.slice(-8) })
+          : t("sessions.variantSales")}
       </h1>
       {#if session}
         <p class="text-sm text-muted-foreground">
-          Opened {fmt(session.openedAt)} · closed {fmt(session.closedAt)}
+          {t("sessions.openedAt", { date: fmt(session.openedAt) })}{session.closedAt
+            ? ` · ${t("sessions.closedAt", { date: fmt(session.closedAt) })}`
+            : ""}
         </p>
       {/if}
     </div>
@@ -93,13 +98,13 @@
       <div class="w-full max-w-sm">
         <Input
           type="search"
-          placeholder="Search by name, variant, or SKU…"
+          placeholder={t("sessions.searchVariants")}
           bind:value={search}
         />
       </div>
       {#if search.trim()}
         <span class="whitespace-nowrap text-xs text-muted-foreground">
-          {filtered.length} of {rows.length} results
+          {t("sessions.resultsCount", { count: filtered.length, total: rows.length })}
         </span>
       {/if}
     </div>
@@ -108,13 +113,13 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Product</th>
-            <th class="px-4 py-2 font-medium">SKU</th>
-            <th class="px-4 py-2 text-right font-medium">Qty sold</th>
-            <th class="px-4 py-2 text-right font-medium">Revenue</th>
-            <th class="px-4 py-2 text-right font-medium">Cost</th>
-            <th class="px-4 py-2 text-right font-medium">Margin</th>
-            <th class="px-4 py-2 text-right font-medium">Margin %</th>
+            <th class="px-4 py-2 font-medium">{t("common.product")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.sku")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.qtySold")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.revenue")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.cost")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.margin")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.marginPct")}</th>
           </tr>
         </thead>
         <tbody>
@@ -146,19 +151,19 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
-                No variants sold in this session.
+                {t("sessions.noVariantsSold")}
               </td>
             </tr>
           {:else if filtered.length === 0}
             <tr>
               <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
-                No variants match "{search.trim()}".
+                {t("sessions.noVariantsMatch", { query: search.trim() })}
               </td>
             </tr>
           {:else}
             {@const margin = totals.revenue - totals.cost}
             <tr class="border-t bg-muted/30 font-medium">
-              <td class="px-4 py-2" colspan="2">Total</td>
+              <td class="px-4 py-2" colspan="2">{t("common.total")}</td>
               <td class="px-4 py-2 text-right">{totals.qty}</td>
               <td class="px-4 py-2 text-right">{formatMoney(totals.revenue)}</td>
               <td class="px-4 py-2 text-right">{formatMoney(totals.cost)}</td>

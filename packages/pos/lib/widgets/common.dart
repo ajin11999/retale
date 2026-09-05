@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../graphql/graphql_service.dart';
+import '../i18n/i18n_service.dart';
 
 /// Turn any thrown error into a human-readable line.
 String describeError(Object error) =>
@@ -32,10 +33,13 @@ class ErrorRetry extends StatelessWidget {
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Retry')),
+            FilledButton(onPressed: onRetry, child: Text(tr('common.retry'))),
             if (onSignOut != null) ...[
               const SizedBox(height: 8),
-              TextButton(onPressed: onSignOut, child: const Text('Log out')),
+              TextButton(
+                onPressed: onSignOut,
+                child: Text(tr('common.logout')),
+              ),
             ],
           ],
         ),

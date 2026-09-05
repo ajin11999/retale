@@ -3,7 +3,8 @@
   import { page } from "$app/state";
   import { Trash2 } from "@lucide/svelte";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -339,7 +340,7 @@
         });
       } else {
         if (!aNote.trim()) {
-          error = "Adjustments require a note.";
+          error = t("trackingDetail.adjustNoteRequired");
           return;
         }
         res = await AdjustBalance.mutate({
@@ -352,7 +353,7 @@
         error = res.errors[0].message;
         return;
       }
-      info = "Recorded.";
+      info = t("trackingDetail.recorded");
       action = null;
       await Detail.fetch({ policy: CachePolicy.NetworkOnly });
     } catch (e) {
@@ -421,7 +422,7 @@
         v.currentTrackingAccountId &&
         v.currentTrackingAccountId !== account.id,
     );
-    if (reassign && !confirm(`Detach this variant?`)) return;
+    if (reassign && !confirm(t("trackingDetail.confirmDetach"))) return;
     const next = linkedVariants
       .map((v) => v.variantId)
       .filter((id) => id !== variantId);
@@ -476,11 +477,11 @@
   });
 </script>
 
-<svelte:head><title>Tracking account · Retale Console</title></svelte:head>
+<svelte:head><title>{t("trackingDetail.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <a href="/tracking" class="text-sm text-primary hover:underline">
-    ← All tracking accounts
+    {t("trackingDetail.backToAccounts")}
   </a>
 
   {#if error}
@@ -491,11 +492,11 @@
   {/if}
 
   {#if $Detail.fetching && !account}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Detail.errors?.length}
     <p class="text-sm text-destructive">{$Detail.errors[0].message}</p>
   {:else if !account}
-    <p class="text-sm text-muted-foreground">Account not found.</p>
+    <p class="text-sm text-muted-foreground">{t("trackingDetail.notFound")}</p>
   {:else}
     <!-- Header -->
     <div class="rounded-lg border bg-card p-4">
@@ -504,33 +505,33 @@
           {#if editing}
             <div class="grid grid-cols-2 gap-3">
               <label class="space-y-1">
-                <span class="text-sm font-medium">Name</span>
+                <span class="text-sm font-medium">{t("common.name")}</span>
                 <Input bind:value={eName} />
               </label>
               <label class="space-y-1">
-                <span class="text-sm font-medium">Code</span>
+                <span class="text-sm font-medium">{t("trackingDetail.code")}</span>
                 <Input bind:value={eCode} />
               </label>
               <label class="space-y-1">
-                <span class="text-sm font-medium">Account category</span>
+                <span class="text-sm font-medium">{t("tracking.accountCategory")}</span>
                 <Input bind:value={eAccCat} />
               </label>
               <label class="space-y-1">
-                <span class="text-sm font-medium">Counter category</span>
+                <span class="text-sm font-medium">{t("tracking.counterCategory")}</span>
                 <Input bind:value={eCounterCat} />
               </label>
               <label class="col-span-2 space-y-1">
-                <span class="text-sm font-medium">Notes</span>
+                <span class="text-sm font-medium">{t("common.notes")}</span>
                 <Textarea bind:value={eNotes} />
               </label>
             </div>
             <div class="mt-3 flex gap-2">
-              <Button size="sm" disabled={busy} onclick={saveHeader}>Save</Button>
+              <Button size="sm" disabled={busy} onclick={saveHeader}>{t("common.save")}</Button>
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={busy}
-                onclick={() => (editing = false)}>Cancel</Button
+                onclick={() => (editing = false)}>{t("common.cancel")}</Button
               >
             </div>
           {:else}
@@ -546,28 +547,28 @@
           {/if}
         </div>
         <div class="flex flex-col items-end gap-2">
-          <p class="text-xs text-muted-foreground">Balance</p>
+          <p class="text-xs text-muted-foreground">{t("common.balance")}</p>
           <p class="text-2xl font-semibold">{formatMoney(account.balanceMinor)}</p>
           {#if account.archivedAt}
-            <Badge class="bg-muted text-muted-foreground">Archived</Badge>
+            <Badge class="bg-muted text-muted-foreground">{t("common.archived")}</Badge>
           {:else}
-            <Badge class="bg-emerald-100 text-emerald-700">Active</Badge>
+            <Badge class="bg-emerald-100 text-emerald-700">{t("common.active")}</Badge>
           {/if}
         </div>
       </div>
 
       <div class="mt-3 flex flex-wrap gap-2 border-t pt-3">
         {#if !editing && canEdit}
-          <Button size="sm" variant="outline" onclick={startEdit}>Edit</Button>
+          <Button size="sm" variant="outline" onclick={startEdit}>{t("common.edit")}</Button>
         {/if}
         {#if canPayout}
           <Button size="sm" disabled={busy} onclick={() => startAction("payout")}>
-            Record payout
+            {t("trackingDetail.recordPayout")}
           </Button>
         {/if}
         {#if canDeposit}
           <Button size="sm" disabled={busy} onclick={() => startAction("deposit")}>
-            Record deposit
+            {t("trackingDetail.recordDeposit")}
           </Button>
         {/if}
         {#if canAdjust}
@@ -575,7 +576,7 @@
             size="sm"
             variant="outline"
             disabled={busy}
-            onclick={() => startAction("adjust")}>Adjust balance</Button
+            onclick={() => startAction("adjust")}>{t("tracking.adjustBalance")}</Button
           >
         {/if}
         {#if canArchive}
@@ -585,46 +586,46 @@
             disabled={busy}
             onclick={toggleArchived}
           >
-            {account.archivedAt ? "Restore" : "Archive"}
+            {account.archivedAt ? t("trackingDetail.restore") : t("trackingDetail.archive")}
           </Button>
         {/if}
       </div>
 
       {#if action}
         <div class="mt-3 space-y-2 rounded-md border bg-muted/40 p-3">
-          <p class="text-sm font-medium capitalize">{action}</p>
+          <p class="text-sm font-medium capitalize">{action === "payout" ? t("trackingDetail.action.payout") : action === "deposit" ? t("trackingDetail.action.deposit") : t("trackingDetail.action.adjust")}</p>
           {#if action === "adjust"}
             <p class="text-xs text-muted-foreground">
-              Signed minor units — negative reduces the balance. A note is required.
+              {t("trackingDetail.adjustHint")}
             </p>
           {:else}
             <p class="text-xs text-muted-foreground">
-              Positive minor units. {action === "payout"
-                ? "Paid out of the drawer."
-                : "Cash advanced into the account."}
+              {t("trackingDetail.positiveUnits")} {action === "payout"
+                ? t("trackingDetail.payoutHint")
+                : t("trackingDetail.depositHint")}
             </p>
           {/if}
           <div class="flex items-end gap-2">
             <label class="flex-1 space-y-1">
               <span class="text-xs font-medium">
-                {action === "adjust" ? "Signed amount (Rp)" : "Amount (Rp)"}
+                {action === "adjust" ? t("trackingDetail.signedAmount") : t("trackingDetail.amountRp")}
               </span>
               <MoneyInput bind:value={aAmount} allowNegative={action === "adjust"} />
             </label>
             <label class="flex-[2] space-y-1">
               <span class="text-xs font-medium">
-                Note {action === "adjust" ? "(required)" : "(optional)"}
+                {action === "adjust" ? t("trackingDetail.noteRequired") : t("trackingDetail.noteOptional")}
               </span>
               <Input bind:value={aNote} />
             </label>
             <Button size="sm" disabled={busy || aAmount == null} onclick={submitAction}>
-              Submit
+              {t("trackingDetail.submit")}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               disabled={busy}
-              onclick={() => (action = null)}>Cancel</Button
+              onclick={() => (action = null)}>{t("common.cancel")}</Button
             >
           </div>
         </div>
@@ -634,15 +635,15 @@
     <!-- Target variants -->
     <div class="rounded-lg border bg-card p-4">
       <div class="mb-2 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Target variants</h2>
+        <h2 class="text-sm font-semibold">{t("trackingDetail.targetVariants")}</h2>
         <span class="text-xs text-muted-foreground">
-          Selling any of these attributes its pre-tax revenue here.
+          {t("trackingDetail.targetVariantsHint")}
         </span>
       </div>
 
       {#if linkedVariants.length === 0}
         <p class="text-sm text-muted-foreground">
-          No variants linked yet.
+          {t("trackingDetail.noVariantsLinked")}
         </p>
       {:else}
         <ul class="divide-y rounded-md border">
@@ -661,7 +662,7 @@
               </span>
               <IconButton
                 icon={Trash2}
-                label="Remove link"
+                label={t("trackingDetail.removeLink")}
                 variant="destructive"
                 disabled={busy || !canEdit}
                 onclick={() => removeVariantLink(v.variantId)}
@@ -672,7 +673,7 @@
         {#if linkedVariants.length > pageSize}
           <div class="mt-2 flex items-center justify-between">
             <p class="text-sm text-muted-foreground">
-              {linkedVariants.length} variant{linkedVariants.length === 1 ? "" : "s"}
+              {t("trackingDetail.variantCount", { count: linkedVariants.length })}
             </p>
             <Pagination bind:page={variantsPage} {pageSize} totalItems={linkedVariants.length} />
           </div>
@@ -681,11 +682,11 @@
 
       {#if canEdit}
         <div class="mt-3 space-y-1">
-          <span class="text-xs font-medium">Add variant</span>
+          <span class="text-xs font-medium">{t("trackingDetail.addVariant")}</span>
           <div class="relative">
             <Input
               type="search"
-              placeholder="Search by product, SKU, or label…"
+              placeholder={t("tracking.searchByProduct")}
               bind:value={variantSearch}
               disabled={busy}
               onfocus={() => (pickerOpen = true)}
@@ -715,7 +716,7 @@
                       </span>
                       {#if v.currentTrackingAccountId}
                         <span class="ml-2 text-xs text-amber-700">
-                          → currently {v.currentTrackingAccountName ?? "another account"}
+                          {t("trackingDetail.currently", { name: v.currentTrackingAccountName ?? t("trackingDetail.anotherAccount") })}
                         </span>
                       {/if}
                     </button>
@@ -726,14 +727,13 @@
               <div
                 class="absolute z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
               >
-                No matches.
+                {t("trackingDetail.noMatches")}
               </div>
             {/if}
           </div>
         </div>
         <p class="mt-1 text-xs text-muted-foreground">
-          Linking a variant currently attached to another account reassigns it
-          here.
+          {t("trackingDetail.linkReassignsHint")}
         </p>
       {/if}
     </div>
@@ -741,21 +741,21 @@
     <!-- Ledger -->
     <div class="space-y-3">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-sm font-semibold">Ledger</h2>
+        <h2 class="text-sm font-semibold">{t("trackingDetail.ledger")}</h2>
         <div class="flex flex-wrap items-center gap-2">
           <Input
             type="search"
-            placeholder="Search note or ref…"
+            placeholder={t("tracking.searchNoteOrRef")}
             bind:value={ledgerSearch}
             class="w-48 text-xs"
           />
           <Select bind:value={ledgerTypeFilter} class="w-40 text-xs">
-            <option value="all">All types</option>
-            <option value="attribution">Attribution</option>
-            <option value="payout">Payout</option>
-            <option value="deposit">Deposit</option>
-            <option value="adjustment">Adjustment</option>
-            <option value="opening_balance">Opening balance</option>
+            <option value="all">{t("tracking.allTypes")}</option>
+            <option value="attribution">{t("tracking.attribution")}</option>
+            <option value="payout">{t("tracking.payout")}</option>
+            <option value="deposit">{t("tracking.deposit")}</option>
+            <option value="adjustment">{t("tracking.adjustment")}</option>
+            <option value="opening_balance">{t("tracking.openingBalance")}</option>
           </Select>
         </div>
       </div>
@@ -763,19 +763,19 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">When</th>
-              <th class="px-4 py-2 font-medium">Type</th>
-              <th class="px-4 py-2 font-medium">Reference</th>
-              <th class="px-4 py-2 font-medium">Note</th>
-              <th class="px-4 py-2 text-right font-medium">Amount</th>
-              <th class="px-4 py-2 text-right font-medium">Balance</th>
+              <th class="px-4 py-2 font-medium">{t("trackingDetail.when")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.type")}</th>
+              <th class="px-4 py-2 font-medium">{t("trackingDetail.reference")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.note")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("common.amount")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("common.balance")}</th>
             </tr>
           </thead>
           <tbody>
             {#each paginatedLedger as e (e.id)}
               <tr class="border-b last:border-0">
                 <td class="px-4 py-2">{fmtDateTime(e.createdAt)}</td>
-                <td class="px-4 py-2 capitalize">{statusLabel(e.type)}</td>
+                <td class="px-4 py-2 capitalize">{t(`tracking.${e.type === "opening_balance" ? "openingBalance" : e.type}`)}</td>
                 <td class="px-4 py-2 text-xs">
                   {#if e.refType === "order_item" || e.refType === "order"}
                     <a
@@ -809,9 +809,9 @@
               <tr>
                 <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
                   {#if ledger.length === 0}
-                    No ledger entries yet.
+                    {t("trackingDetail.noLedgerEntries")}
                   {:else}
-                    No matching ledger entries found.
+                    {t("trackingDetail.noMatchingLedger")}
                   {/if}
                 </td>
               </tr>
@@ -822,9 +822,9 @@
       {#if filteredLedger.length > 0}
         <div class="mt-2 flex items-center justify-between">
           <p class="text-sm text-muted-foreground">
-            {filteredLedger.length} ledger {filteredLedger.length === 1 ? "entry" : "entries"}
+            {t("trackingDetail.ledgerCount", { count: filteredLedger.length })}
             {#if filteredLedger.length !== ledger.length}
-              (filtered from {ledger.length})
+              {t("trackingDetail.filteredFrom", { count: ledger.length })}
             {/if}
           </p>
           <Pagination bind:page={ledgerPage} {pageSize} totalItems={filteredLedger.length} />

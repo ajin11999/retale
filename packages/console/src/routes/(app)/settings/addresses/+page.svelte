@@ -9,6 +9,7 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -116,7 +117,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("common.saved", { label }) };
       await View.fetch({ policy: CachePolicy.NetworkOnly });
       return true;
     } catch (e) {
@@ -137,7 +138,7 @@
 
   async function create() {
     if (!nLabel.trim() || !nLine.trim()) return;
-    const ok = await run("Address", () =>
+    const ok = await run(t("addresses.address"), () =>
       CreateAddress.mutate({
         label: nLabel.trim(),
         recipientName: nRecipient.trim() || null,
@@ -176,7 +177,7 @@
   async function saveRow(id: string) {
     const d = drafts[id];
     if (!d || !d.label.trim() || !d.line.trim()) return;
-    await run("Address", () =>
+    await run(t("addresses.address"), () =>
       UpdateAddress.mutate({
         id,
         label: d.label.trim(),
@@ -189,29 +190,28 @@
   }
 
   async function makeDefault(id: string) {
-    await run("Default", () => SetDefaultAddress.mutate({ id }));
+    await run(t("addresses.defaultLabel"), () => SetDefaultAddress.mutate({ id }));
   }
   async function toggleArchived(id: string, archived: boolean) {
-    await run("Address", () => SetAddressArchived.mutate({ id, archived }));
+    await run(t("addresses.address"), () => SetAddressArchived.mutate({ id, archived }));
   }
   async function remove(id: string, label: string) {
-    if (!confirm(`Permanently delete "${label}"? Vendors using it revert to the default address.`))
+    if (!confirm(t("addresses.confirmDelete", { name: label })))
       return;
-    await run("Address", () => DeleteAddress.mutate({ id }));
+    await run(t("addresses.address"), () => DeleteAddress.mutate({ id }));
   }
 </script>
 
-<svelte:head><title>Ship-to addresses · Retale Console</title></svelte:head>
+<svelte:head><title>{t("addresses.pageTitle")}</title></svelte:head>
 
 <div class="max-w-2xl space-y-4">
   <div>
     <a href="/settings" class="text-sm text-muted-foreground hover:text-foreground"
-      >← Back to settings</a
+      >{t("addresses.backToSettings")}</a
     >
-    <h1 class="mt-2 text-xl font-semibold">Ship-to addresses</h1>
+    <h1 class="mt-2 text-xl font-semibold">{t("addresses.title")}</h1>
     <p class="text-sm text-muted-foreground">
-      Your own locations, printed as “Ship To” on purchase orders. Each vendor
-      can default to one; the address flagged <em>default</em> is the fallback.
+      {t("addresses.subtitle")}
     </p>
   </div>
 
@@ -223,12 +223,12 @@
 
   {#if !canManage}
     <p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-      You don't have permission to manage addresses.
+      {t("addresses.noPermission")}
     </p>
   {/if}
 
   {#if $View.fetching && addresses.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $View.errors?.length}
     <p class="text-sm text-destructive">{$View.errors[0].message}</p>
   {:else}
@@ -243,17 +243,17 @@
           <div class="flex items-center gap-2">
             <h2 class="text-sm font-semibold">{a.label}</h2>
             {#if a.isDefault}
-              <Badge class="bg-primary/10 text-primary">default</Badge>
+              <Badge class="bg-primary/10 text-primary">{t("addresses.default")}</Badge>
             {/if}
             {#if a.archivedAt}
-              <Badge class="bg-muted text-muted-foreground">archived</Badge>
+              <Badge class="bg-muted text-muted-foreground">{t("common.archived")}</Badge>
             {/if}
           </div>
           <div class="flex items-center gap-0.5">
             {#if !a.isDefault && !a.archivedAt}
               <IconButton
                 icon={Star}
-                label="Set as default"
+                label={t("addresses.setAsDefault")}
                 variant="primary"
                 disabled={busy || !canManage}
                 onclick={() => makeDefault(a.id)}
@@ -261,7 +261,7 @@
             {/if}
             <IconButton
               icon={a.archivedAt ? ArchiveRestore : Archive}
-              label={a.archivedAt ? "Restore" : "Archive"}
+              label={a.archivedAt ? t("addresses.restore") : t("addresses.archive")}
               disabled={busy || !canManage}
               onclick={() => toggleArchived(a.id, a.archivedAt == null)}
             />
@@ -270,37 +270,37 @@
 
         <div class="grid grid-cols-2 gap-3">
           <label class="space-y-1">
-            <span class="text-xs font-medium">Label</span>
+            <span class="text-xs font-medium">{t("addresses.label")}</span>
             <Input bind:value={d.label} disabled={!canManage} />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Recipient / PIC</span>
+            <span class="text-xs font-medium">{t("addresses.recipientPic")}</span>
             <Input bind:value={d.recipientName} disabled={!canManage} />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Phone</span>
+            <span class="text-xs font-medium">{t("settings.phone")}</span>
             <Input bind:value={d.phone} disabled={!canManage} />
           </label>
         </div>
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Address</span>
+          <span class="text-xs font-medium">{t("addresses.address")}</span>
           <Textarea bind:value={d.line} disabled={!canManage} class="min-h-16" />
         </label>
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Notes</span>
+          <span class="text-xs font-medium">{t("common.notes")}</span>
           <Input bind:value={d.notes} disabled={!canManage} />
         </label>
 
         <div class="flex items-center justify-between">
           <IconButton
             icon={Trash2}
-            label="Delete address"
+            label={t("addresses.deleteAddress")}
             variant="destructive"
             disabled={busy || !canManage}
             onclick={() => remove(a.id, a.label)}
           />
           <Button size="sm" disabled={busy || !canManage || !d.label.trim() || !d.line.trim()}
-            onclick={() => saveRow(a.id)}>Save</Button
+            onclick={() => saveRow(a.id)}>{t("common.save")}</Button
           >
         </div>
       </section>
@@ -308,42 +308,42 @@
     {/each}
 
     {#if addresses.length === 0}
-      <p class="text-sm text-muted-foreground">No addresses yet.</p>
+      <p class="text-sm text-muted-foreground">{t("addresses.noAddresses")}</p>
     {/if}
 
     <!-- Add new -->
     {#if canManage}
       <section class="space-y-3 rounded-lg border border-dashed bg-card p-4">
-        <h2 class="text-sm font-semibold">Add an address</h2>
+        <h2 class="text-sm font-semibold">{t("addresses.addAddress")}</h2>
         <div class="grid grid-cols-2 gap-3">
           <label class="space-y-1">
-            <span class="text-xs font-medium">Label</span>
-            <Input bind:value={nLabel} placeholder="e.g. Main Store" />
+            <span class="text-xs font-medium">{t("addresses.label")}</span>
+            <Input bind:value={nLabel} placeholder={t("addresses.labelPlaceholder")} />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Recipient / PIC</span>
+            <span class="text-xs font-medium">{t("addresses.recipientPic")}</span>
             <Input bind:value={nRecipient} />
           </label>
           <label class="space-y-1">
-            <span class="text-xs font-medium">Phone</span>
+            <span class="text-xs font-medium">{t("settings.phone")}</span>
             <Input bind:value={nPhone} />
           </label>
         </div>
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Address</span>
-          <Textarea bind:value={nLine} class="min-h-16" placeholder="Street, area, city, postal code" />
+          <span class="text-xs font-medium">{t("addresses.address")}</span>
+          <Textarea bind:value={nLine} class="min-h-16" placeholder={t("addresses.linePlaceholder")} />
         </label>
         <label class="block space-y-1">
-          <span class="text-xs font-medium">Notes</span>
+          <span class="text-xs font-medium">{t("common.notes")}</span>
           <Input bind:value={nNotes} />
         </label>
         <div class="flex items-center justify-between">
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" bind:checked={nDefault} />
-            Make this the default ship-to
+            {t("addresses.makeDefault")}
           </label>
           <Button size="sm" disabled={busy || !nLabel.trim() || !nLine.trim()} onclick={create}>
-            Add address
+            {t("addresses.addAddress")}
           </Button>
         </div>
       </section>

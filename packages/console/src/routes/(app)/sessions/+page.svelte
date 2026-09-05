@@ -6,6 +6,7 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -66,23 +67,23 @@
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
 
   function statusOf(s: { closedAt: string | null; forceClosed: boolean }) {
-    if (!s.closedAt) return { label: "Open", class: "bg-emerald-100 text-emerald-700" };
-    if (s.forceClosed) return { label: "Force-closed", class: "bg-amber-100 text-amber-800" };
-    return { label: "Closed", class: "bg-muted text-muted-foreground" };
+    if (!s.closedAt) return { label: t("sessions.status.open"), class: "bg-emerald-100 text-emerald-700" };
+    if (s.forceClosed) return { label: t("sessions.status.forceClosed"), class: "bg-amber-100 text-amber-800" };
+    return { label: t("sessions.status.closed"), class: "bg-muted text-muted-foreground" };
   }
 </script>
 
-<svelte:head><title>Sessions · Retale Console</title></svelte:head>
+<svelte:head><title>{t("sessions.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">POS sessions</h1>
+    <h1 class="text-xl font-semibold">{t("sessions.title")}</h1>
     <div class="w-56">
       <select
         bind:value={posFilter}
         class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
       >
-        <option value="">All registers</option>
+        <option value="">{t("sessions.allRegisters")}</option>
         {#each pointsOfSale as p (p.id)}
           <option value={p.id}>{p.code} — {p.name}</option>
         {/each}
@@ -92,10 +93,10 @@
 
   {#if !canView}
     <p class="text-sm text-muted-foreground">
-      You don't have permission to view sessions.
+      {t("sessions.noViewPermission")}
     </p>
   {:else if $SessionList.fetching && sessions.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $SessionList.errors?.length}
     <p class="text-sm text-destructive">{$SessionList.errors[0].message}</p>
   {:else}
@@ -103,13 +104,13 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">POS</th>
-            <th class="px-4 py-2 font-medium">Opened</th>
-            <th class="px-4 py-2 font-medium">Closed</th>
-            <th class="px-4 py-2 text-right font-medium">Opening</th>
-            <th class="px-4 py-2 text-right font-medium">Closing</th>
-            <th class="px-4 py-2 text-right font-medium">Variance</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("sessions.pos")}</th>
+            <th class="px-4 py-2 font-medium">{t("sessions.opened")}</th>
+            <th class="px-4 py-2 font-medium">{t("sessions.closed")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.opening")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.closing")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("sessions.variance")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -161,7 +162,7 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
-                No sessions to show.
+                {t("sessions.noSessions")}
               </td>
             </tr>
           {/if}
@@ -170,7 +171,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} session{rows.length === 1 ? "" : "s"}
+        {t("sessions.count", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

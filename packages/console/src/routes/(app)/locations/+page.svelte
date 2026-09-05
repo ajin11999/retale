@@ -13,6 +13,7 @@
   import Pagination from "$lib/components/ui/pagination.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -227,7 +228,7 @@
   // { value, label } parent options: a leading "Top level" row, then each
   // allowed parent (descendants of the edited node are excluded) by full path.
   const parentComboOptions = $derived([
-    { value: "", label: "— Top level —" },
+    { value: "", label: t("categories.topLevel") },
     ...parentOptions.map((n) => ({
       value: n.id,
       label: pathById.get(n.id) ?? n.name,
@@ -269,7 +270,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("common.saved", { label }) };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -282,7 +283,7 @@
   async function saveLocation() {
     const d = draft;
     if (!d || !d.name.trim()) return;
-    const ok = await run("Location", () =>
+    const ok = await run(t("products.location"), () =>
       d.id
         ? UpdateLocation.mutate({
             id: d.id,
@@ -307,21 +308,16 @@
   }
 
   async function toggleArchived(n: Node) {
-    const ok = await run("Location", () =>
+    const ok = await run(t("products.location"), () =>
       SetLocationArchived.mutate({ id: n.id, archived: !n.archived }),
     );
     if (ok) await LocationList.fetch({ policy: CachePolicy.NetworkOnly });
   }
 
   async function hardDelete(n: Node) {
-    if (
-      !confirm(
-        `Permanently delete "${n.name}"? Refused by the API if it has child ` +
-          `locations or holds stock.`,
-      )
-    )
+    if (!confirm(t("locations.confirmDelete", { name: n.name })))
       return;
-    const ok = await run("Location", () =>
+    const ok = await run(t("products.location"), () =>
       HardDeleteLocation.mutate({ id: n.id }),
     );
     if (ok) {
@@ -331,21 +327,21 @@
   }
 </script>
 
-<svelte:head><title>Locations · Retale Console</title></svelte:head>
+<svelte:head><title>{t("locations.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Locations</h1>
+    <h1 class="text-xl font-semibold">{t("locations.title")}</h1>
     <div class="flex items-center gap-2">
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search locations…"
+          placeholder={t("locations.searchLocations")}
           bind:value={search}
         />
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={newLocation}>
-        New location
+        {t("locations.newLocation")}
       </Button>
     </div>
   </div>
@@ -360,35 +356,35 @@
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      You have read-only access to locations — editing is disabled.
+      {t("locations.readOnlyNotice")}
     </p>
   {/if}
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">
-        {draft.id ? "Edit location" : "New location"}
+        {draft.id ? t("locations.editLocation") : t("locations.newLocation")}
       </h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={draft.name} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Parent</span>
+          <span class="text-sm font-medium">{t("categories.parent")}</span>
           <Combobox
             options={parentComboOptions}
             bind:value={draft.parentId}
-            placeholder="Search parent location…"
+            placeholder={t("locations.searchParent")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Code</span>
+          <span class="text-sm font-medium">{t("locations.code")}</span>
           <Input bind:value={draft.code} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Sort order</span>
+          <span class="text-sm font-medium">{t("locations.sortOrder")}</span>
           <NumericInput
             bind:value={draft.sortOrder}
             disabled={!canEdit}
@@ -396,7 +392,7 @@
         </label>
       </div>
       <label class="space-y-1">
-        <span class="text-sm font-medium">Notes</span>
+        <span class="text-sm font-medium">{t("common.notes")}</span>
         <Textarea
           bind:value={draft.notes}
           disabled={!canEdit}
@@ -408,21 +404,21 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button
           size="sm"
           disabled={busy || !canEdit || !draft.name.trim()}
           onclick={saveLocation}
         >
-          {draft.id ? "Save location" : "Create location"}
+          {draft.id ? t("locations.saveLocation") : t("locations.createLocation")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $LocationList.fetching && locations.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $LocationList.errors?.length}
     <p class="text-sm text-destructive">{$LocationList.errors[0].message}</p>
   {:else}
@@ -430,9 +426,9 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Location</th>
-            <th class="px-4 py-2 font-medium">Code</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("nav.locations")}</th>
+            <th class="px-4 py-2 font-medium">{t("locations.code")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
             <th class="px-4 py-2"></th>
           </tr>
         </thead>
@@ -455,7 +451,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {n.archived ? "Archived" : "Active"}
+                  {n.archived ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
@@ -463,28 +459,28 @@
                   {#if canViewStock}
                     <IconButton
                       icon={Boxes}
-                      label="Stock"
+                      label={t("products.stock")}
                       disabled={busy}
                       onclick={() => goto(`/stock?location=${n.id}`)}
                     />
                   {/if}
                   <IconButton
                     icon={Pencil}
-                    label="Edit"
+                    label={t("common.edit")}
                     variant="primary"
                     disabled={busy || !canEdit}
                     onclick={() => editLocation(n)}
                   />
                   <IconButton
                     icon={n.archived ? ArchiveRestore : Archive}
-                    label={n.archived ? "Restore" : "Archive"}
+                    label={n.archived ? t("addresses.restore") : t("addresses.archive")}
                     disabled={busy || !canArchive}
                     onclick={() => toggleArchived(n)}
                   />
                   {#if canHardDelete}
                     <IconButton
                       icon={Trash2}
-                      label="Delete"
+                      label={t("common.delete")}
                       variant="destructive"
                       disabled={busy}
                       onclick={() => hardDelete(n)}
@@ -497,7 +493,7 @@
           {#if visibleTree.length === 0}
             <tr>
               <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No locations match." : "No locations yet."}
+                {search.trim() ? t("locations.noMatch") : t("locations.noLocations")}
               </td>
             </tr>
           {/if}
@@ -506,7 +502,7 @@
     </div>
     <div class="mt-2 flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {visibleTree.length} location{visibleTree.length === 1 ? "" : "s"}
+        {t("locations.locationCount", { count: visibleTree.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={visibleTree.length} />
     </div>

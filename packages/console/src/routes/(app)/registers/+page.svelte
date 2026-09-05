@@ -10,6 +10,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -189,7 +190,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: "Register saved." };
+      feedback = { ok: true, text: t("registers.saved") };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -236,13 +237,12 @@
   }
 
   async function hardDelete(r: (typeof registers)[number]) {
-    if (
-      !confirm(
-        `Permanently delete "${r.code} — ${r.name}"? Refused by the API if any ` +
-          `session references it.`,
+      if (
+        !confirm(
+          t("registers.confirmDelete", { code: `${r.code} — ${r.name}` }),
+        )
       )
-    )
-      return;
+        return;
     const ok = await run(() => HardDeletePos.mutate({ id: r.id }));
     if (ok) {
       if (draft?.id === r.id) draft = null;
@@ -251,21 +251,21 @@
   }
 </script>
 
-<svelte:head><title>Registers · Retale Console</title></svelte:head>
+<svelte:head><title>{t("registers.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Registers</h1>
+    <h1 class="text-xl font-semibold">{t("registers.title")}</h1>
     <div class="flex items-center gap-2">
       <div class="w-64">
-        <Input type="search" placeholder="Search registers…" bind:value={search} />
+        <Input type="search" placeholder={t("registers.searchRegisters")} bind:value={search} />
       </div>
       <Button
         size="sm"
         disabled={busy || !canCreate || locationOptions.length === 0}
         onclick={newRegister}
       >
-        New register
+        {t("registers.newRegister")}
       </Button>
     </div>
   </div>
@@ -280,7 +280,7 @@
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      You have read-only access to registers — editing is disabled.
+      {t("registers.readOnlyNotice")}
     </p>
   {/if}
 
@@ -288,44 +288,44 @@
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      Create a location first — every register must belong to one.
+      {t("registers.createLocationFirst")}
     </p>
   {/if}
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">
-        {draft.id ? "Edit register" : "New register"}
+        {draft.id ? t("registers.editRegister") : t("registers.newRegister")}
       </h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Code</span>
+          <span class="text-sm font-medium">{t("registers.code")}</span>
           <Input
             bind:value={draft.code}
-            placeholder="POS-01"
+            placeholder={t("registers.codePlaceholder")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input
             bind:value={draft.name}
-            placeholder="Front register"
+            placeholder={t("registers.namePlaceholder")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Location</span>
+          <span class="text-sm font-medium">{t("registers.location")}</span>
           <Combobox
             options={locationOptions}
             bind:value={draft.locationId}
-            placeholder="Search location…"
+            placeholder={t("registers.searchLocation")}
             disabled={!canEdit}
           />
         </label>
       </div>
       <label class="space-y-1">
-        <span class="text-sm font-medium">Notes</span>
+        <span class="text-sm font-medium">{t("common.notes")}</span>
         <Textarea
           bind:value={draft.notes}
           disabled={!canEdit}
@@ -337,21 +337,21 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button
           size="sm"
           disabled={busy || !canEdit || !draftValid}
           onclick={saveRegister}
         >
-          {draft.id ? "Save register" : "Create register"}
+          {draft.id ? t("registers.saveRegister") : t("registers.createRegister")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $RegisterList.fetching && registers.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $RegisterList.errors?.length}
     <p class="text-sm text-destructive">{$RegisterList.errors[0].message}</p>
   {:else}
@@ -359,10 +359,10 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Code</th>
-            <th class="px-4 py-2 font-medium">Name</th>
-            <th class="px-4 py-2 font-medium">Location</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("registers.code")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.name")}</th>
+            <th class="px-4 py-2 font-medium">{t("registers.location")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
             <th class="px-4 py-2"></th>
           </tr>
         </thead>
@@ -373,7 +373,7 @@
                 <a
                   href={`/sessions?pos=${r.id}`}
                   class="font-mono text-xs text-primary hover:underline"
-                  title="View this register's sessions"
+                   title={t("registers.viewSessions")}
                 >
                   {r.code}
                 </a>
@@ -382,7 +382,7 @@
                 <a
                   href={`/sessions?pos=${r.id}`}
                   class="font-medium text-primary hover:underline"
-                  title="View this register's sessions"
+                   title={t("registers.viewSessions")}
                 >
                   {r.name}
                 </a>
@@ -396,28 +396,28 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {r.archivedAt ? "Archived" : "Active"}
+                  {r.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
                 <span class="inline-flex items-center gap-0.5">
                   <IconButton
                     icon={Pencil}
-                    label="Edit"
+                    label={t("common.edit")}
                     variant="primary"
                     disabled={busy || !canEdit}
                     onclick={() => editRegister(r)}
                   />
                   <IconButton
                     icon={r.archivedAt ? ArchiveRestore : Archive}
-                    label={r.archivedAt ? "Restore" : "Archive"}
+                    label={r.archivedAt ? t("registers.restore") : t("registers.archive")}
                     disabled={busy || !canArchive}
                     onclick={() => toggleArchived(r)}
                   />
                   {#if canHardDelete}
                     <IconButton
                       icon={Trash2}
-                      label="Delete"
+                      label={t("common.delete")}
                       variant="destructive"
                       disabled={busy}
                       onclick={() => hardDelete(r)}
@@ -430,7 +430,7 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No registers match." : "No registers yet."}
+                {search.trim() ? t("registers.noMatch") : t("registers.noRegisters")}
               </td>
             </tr>
           {/if}
@@ -438,7 +438,7 @@
       </table>
     </div>
     <p class="text-sm text-muted-foreground">
-      {rows.length} register{rows.length === 1 ? "" : "s"}
+      {t("registers.count", { count: rows.length })}
     </p>
   {/if}
 </div>

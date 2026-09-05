@@ -9,7 +9,8 @@
   import IconButton from "$lib/components/ui/icon-button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import { Trash2, X } from "@lucide/svelte";
-  import { statusLabel, treePathMap } from "$lib/utils";
+  import { treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen.
@@ -111,7 +112,7 @@
   const products = $derived($TransferDetail.data?.products ?? []);
 
   const locationPaths = $derived(treePathMap(locations));
-  const locationName = (id: string) => locationPaths.get(id) ?? "Unknown";
+  const locationName = (id: string) => locationPaths.get(id) ?? t("products.unknown");
   
   const locationOptions = $derived(
     locations
@@ -127,7 +128,7 @@
         return `${p.name} · ${suffix}`;
       }
     }
-    return "Unknown variant";
+    return t("transferDetail.unknownVariant");
   };
 
   interface VariantOption {
@@ -180,32 +181,32 @@
 
   async function dispatch() {
     if (!transfer) return;
-    if (!confirm("Dispatch this transfer? Stock leaves the source locations now.")) return;
+    if (!confirm(t("transferDetail.confirmDispatch"))) return;
     if (await run(() => DispatchTransfer.mutate({ id: transfer.id }))) {
-      feedback = { ok: true, text: "Transfer dispatched." };
+      feedback = { ok: true, text: t("transferDetail.dispatchSuccess") };
       await refetch();
     }
   }
 
   async function receive() {
     if (!transfer) return;
-    if (!confirm("Receive this transfer? Stock lands at the target location now.")) return;
+    if (!confirm(t("transferDetail.confirmReceive"))) return;
     if (await run(() => ReceiveTransfer.mutate({ id: transfer.id }))) {
-      feedback = { ok: true, text: "Transfer received." };
+      feedback = { ok: true, text: t("transferDetail.receiveSuccess") };
       await refetch();
     }
   }
 
   async function cancel() {
     if (!transfer) return;
-    const reason = prompt("Cancellation reason:");
+    const reason = prompt(t("transferDetail.cancelReasonPrompt"));
     if (reason === null) return;
     if (!reason.trim()) {
-      feedback = { ok: false, text: "A cancellation reason is required." };
+      feedback = { ok: false, text: t("transferDetail.cancelReasonRequired") };
       return;
     }
     if (await run(() => CancelTransfer.mutate({ id: transfer.id, reason: reason.trim() }))) {
-      feedback = { ok: true, text: "Transfer cancelled." };
+      feedback = { ok: true, text: t("transferDetail.cancelSuccess") };
       await refetch();
     }
   }
@@ -239,7 +240,7 @@
       }
       newSectionSourceId = "";
     } else if (transfer?.targetLocationId === newSectionSourceId) {
-      alert("Source cannot be the same as destination.");
+      alert(t("transferDetail.sameSourceError"));
     }
   }
 
@@ -344,34 +345,34 @@
     if (!items || items.length === 0) return "—";
     const uniqueSources = Array.from(new Set(items.map((i) => i.sourceLocationId)));
     if (uniqueSources.length === 1) return locationName(uniqueSources[0] as string);
-    return "Multiple";
+    return t("transfers.multiple");
   }
 </script>
 
-<svelte:head><title>Transfer · Retale Console</title></svelte:head>
+<svelte:head><title>{t("transferDetail.pageTitle")}</title></svelte:head>
 
 <div class="mx-auto max-w-2xl space-y-6">
   <a
     href="/transfers"
     class="text-sm text-muted-foreground hover:text-foreground"
-    >← Back to transfers</a
+    >{t("transferDetail.backToTransfers")}</a
   >
 
   {#if $TransferDetail.fetching && !transfer}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !transfer}
-    <p class="text-sm text-destructive">Transfer not found.</p>
+    <p class="text-sm text-destructive">{t("transferDetail.notFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">
-          Transfer to {locationName(transfer.targetLocationId)}
+          {t("transferDetail.transferTo", { location: locationName(transfer.targetLocationId) })}
         </h1>
         <p class="text-sm text-muted-foreground">
-          Created {fmtDateTime(transfer.createdAt)}
+          {t("transferDetail.created", { date: fmtDateTime(transfer.createdAt) })}
         </p>
       </div>
-      <Badge class={statusClass(transfer.status)}>{statusLabel(transfer.status)}</Badge>
+      <Badge class={statusClass(transfer.status)}>{t(`transfers.status.${transfer.status}`)}</Badge>
     </div>
 
     {#if feedback}
@@ -384,63 +385,63 @@
     <div class="flex gap-2">
       {#if transfer.status === "draft"}
         <Button size="sm" disabled={busy || !canDispatch} onclick={dispatch}>
-          Dispatch
+          {t("transferDetail.dispatch")}
         </Button>
         <Button
           variant="outline"
           size="sm"
           disabled={busy || !canCancel}
-          onclick={cancel}>Cancel</Button
+          onclick={cancel}>{t("common.cancel")}</Button
         >
       {:else if transfer.status === "in_transit"}
         <Button size="sm" disabled={busy || !canReceive} onclick={receive}>
-          Receive
+          {t("transferDetail.receive")}
         </Button>
         <Button
           variant="outline"
           size="sm"
           disabled={busy || !canCancel}
-          onclick={cancel}>Cancel</Button
+          onclick={cancel}>{t("common.cancel")}</Button
         >
       {:else}
         <p class="text-sm text-muted-foreground">
-          This transfer is {transfer.status} — no further actions.
+          {t("transferDetail.noFurtherActions", { status: t(`transfers.status.${transfer.status}`) })}
         </p>
       {/if}
     </div>
 
     <!-- Timeline -->
     <section class="space-y-1 rounded-lg border bg-card p-5 text-sm">
-      <h2 class="mb-2 text-sm font-semibold">Timeline & Details</h2>
+      <h2 class="mb-2 text-sm font-semibold">{t("transferDetail.timelineDetails")}</h2>
       <div class="flex justify-between">
-        <span class="text-muted-foreground">Destination</span>
+        <span class="text-muted-foreground">{t("transferDetail.destination")}</span>
         <span class="font-medium">{locationName(transfer.targetLocationId)}</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-muted-foreground">Sources</span>
+        <span class="text-muted-foreground">{t("transferDetail.sources")}</span>
         <span>{formatSources(transfer.items)}</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-muted-foreground">Dispatched</span>
+        <span class="text-muted-foreground">{t("transferDetail.dispatched")}</span>
         <span>{fmtDateTime(transfer.dispatchedAt)}</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-muted-foreground">Received</span>
+        <span class="text-muted-foreground">{t("transferDetail.received")}</span>
         <span>{fmtDateTime(transfer.receivedAt)}</span>
       </div>
       {#if transfer.cancelledAt}
         <div class="flex justify-between">
-          <span class="text-muted-foreground">Cancelled</span>
+          <span class="text-muted-foreground">{t("transferDetail.cancelled")}</span>
           <span>{fmtDateTime(transfer.cancelledAt)}</span>
         </div>
         {#if transfer.cancellationReason}
           <p class="pt-1 text-muted-foreground">
-            Reason: {transfer.cancellationReason}
+            {t("transferDetail.reason", { reason: transfer.cancellationReason })}
           </p>
         {/if}
       {/if}
       {#if transfer.notes}
-        <p class="pt-2 text-muted-foreground">Notes: {transfer.notes}</p>
+        <p class="pt-2 text-muted-foreground">{t("transferDetail.notes", { notes: transfer.notes })}</p>
       {/if}
     </section>
 
@@ -449,10 +450,10 @@
       {#each sourceSections as section (section.sourceLocationId)}
         <div class="rounded-lg border bg-card p-5 shadow-sm space-y-4">
           <div class="flex items-center justify-between border-b pb-3">
-            <h3 class="text-base font-semibold">From {locationName(section.sourceLocationId)}</h3>
+            <h3 class="text-base font-semibold">{t("transferDetail.fromLocation", { location: locationName(section.sourceLocationId) })}</h3>
             {#if transfer.status === "draft" && canEdit}
               <Button size="sm" variant="outline" onclick={() => doBulkTransfer(section.sourceLocationId)}>
-                Bulk transfer
+                {t("transferDetail.bulkTransfer")}
               </Button>
             {/if}
           </div>
@@ -461,8 +462,8 @@
             <table class="w-full text-sm">
               <thead class="text-left text-muted-foreground">
                 <tr>
-                  <th class="py-1.5 font-medium">Variant</th>
-                  <th class="py-1.5 text-right font-medium">Quantity</th>
+                  <th class="py-1.5 font-medium">{t("interchangeGroups.variant")}</th>
+                  <th class="py-1.5 text-right font-medium">{t("common.quantity")}</th>
                   {#if transfer.status === "draft" && canEdit}
                     <th class="py-1.5 w-10"></th>
                   {/if}
@@ -477,7 +478,7 @@
                       <td class="py-1.5 text-right">
                         <IconButton
                           icon={Trash2}
-                          label="Remove line"
+                          label={t("transferDetail.removeLine")}
                           variant="destructive"
                           disabled={busy}
                           onclick={() => removeLine(i.id)}
@@ -489,7 +490,7 @@
               </tbody>
             </table>
           {:else}
-            <p class="text-sm text-muted-foreground py-2">No items from this location yet.</p>
+            <p class="text-sm text-muted-foreground py-2">{t("transferDetail.noItemsFromLocation")}</p>
           {/if}
 
           {#if transfer.status === "draft" && canEdit}
@@ -498,7 +499,7 @@
                 <Combobox
                   options={variantOptions}
                   bind:value={addVariantIds[section.sourceLocationId]}
-                  placeholder="Search variant to add…"
+                  placeholder={t("transfers.searchVariantToAdd")}
                 />
               </div>
               <NumericInput bind:value={addQtys[section.sourceLocationId]} class="w-24" />
@@ -507,7 +508,7 @@
                 disabled={busy || !addVariantIds[section.sourceLocationId] || (addQtys[section.sourceLocationId] || 1) <= 0} 
                 onclick={() => addLine(section.sourceLocationId)}
               >
-                Add line
+                {t("transferDetail.addLine")}
               </Button>
             </div>
           {/if}
@@ -519,17 +520,17 @@
           class="rounded-lg border border-dashed bg-card/50 p-5 space-y-3"
           onsubmit={(e) => { e.preventDefault(); addSection(); }}
         >
-          <h3 class="text-sm font-semibold">Add new source location</h3>
-          <p class="text-xs text-muted-foreground">Transfer items from another location to {locationName(transfer.targetLocationId)}.</p>
+          <h3 class="text-sm font-semibold">{t("transferDetail.addNewSource")}</h3>
+          <p class="text-xs text-muted-foreground">{t("transferDetail.transferSubtitle", { location: locationName(transfer.targetLocationId) })}</p>
           <div class="flex gap-2">
             <div class="flex-1 max-w-sm">
               <Combobox
                 options={locationOptions.filter(l => l.value !== transfer.targetLocationId)}
                 bind:value={newSectionSourceId}
-                placeholder="Search source location…"
+                placeholder={t("transfers.searchSourceLocation")}
               />
             </div>
-            <Button type="submit" size="sm" disabled={!newSectionSourceId}>Add source</Button>
+            <Button type="submit" size="sm" disabled={!newSectionSourceId}>{t("transfers.addSource")}</Button>
           </div>
         </form>
       {/if}
@@ -542,30 +543,30 @@
     <div class="bg-card w-full max-w-3xl rounded-lg shadow-lg flex flex-col max-h-[90vh]">
       <!-- Header -->
       <div class="px-6 py-4 border-b flex justify-between items-center">
-        <h2 class="text-lg font-semibold">Bulk Transfer from {locationName(bulkSourceId)}</h2>
-        <IconButton icon={X} onclick={() => (bulkSourceId = null)} label="Close" />
+        <h2 class="text-lg font-semibold">{t("transferDetail.bulkTransferFrom", { location: locationName(bulkSourceId) })}</h2>
+        <IconButton icon={X} onclick={() => (bulkSourceId = null)} label={t("common.close")} />
       </div>
       <!-- Body -->
       <div class="p-6 overflow-y-auto flex-1 space-y-4">
         {#if bulkItemsLoading}
-          <p class="text-muted-foreground text-sm">Loading stock levels...</p>
+          <p class="text-muted-foreground text-sm">{t("transferDetail.loadingStockLevels")}</p>
         {:else if bulkItems.length === 0}
-          <p class="text-muted-foreground text-sm">No stock found at this location.</p>
+          <p class="text-muted-foreground text-sm">{t("transferDetail.noStockFound")}</p>
         {:else}
           <div class="flex justify-between items-center">
-            <Input bind:value={bulkSearchQuery} placeholder="Search variants..." class="max-w-xs" />
+            <Input bind:value={bulkSearchQuery} placeholder={t("transfers.searchVariants")} class="max-w-xs" />
             <div class="space-x-2">
-              <Button size="sm" variant="outline" onclick={() => bulkItems.forEach(i => i.selected = true)}>Select All</Button>
-              <Button size="sm" variant="outline" onclick={() => bulkItems.forEach(i => i.selected = false)}>Deselect All</Button>
+              <Button size="sm" variant="outline" onclick={() => bulkItems.forEach(i => i.selected = true)}>{t("common.selectAll")}</Button>
+              <Button size="sm" variant="outline" onclick={() => bulkItems.forEach(i => i.selected = false)}>{t("common.deselectAll")}</Button>
             </div>
           </div>
           <table class="w-full text-sm mt-4">
             <thead class="text-left border-b text-muted-foreground">
               <tr>
                 <th class="py-2 w-10"></th>
-                <th class="py-2 font-medium">Variant</th>
-                <th class="py-2 font-medium text-right">On Hand</th>
-                <th class="py-2 font-medium text-right w-32">Transfer Qty</th>
+                <th class="py-2 font-medium">{t("interchangeGroups.variant")}</th>
+                <th class="py-2 font-medium text-right">{t("stock.onHand")}</th>
+                <th class="py-2 font-medium text-right w-32">{t("transferDetail.transferQty")}</th>
               </tr>
             </thead>
             <tbody>
@@ -583,7 +584,7 @@
               {/each}
               {#if filteredBulkItems.length === 0}
                 <tr>
-                  <td colspan="4" class="py-4 text-center text-muted-foreground">No matches for "{bulkSearchQuery}"</td>
+                  <td colspan="4" class="py-4 text-center text-muted-foreground">{t("transferDetail.noMatches", { query: bulkSearchQuery })}</td>
                 </tr>
               {/if}
             </tbody>
@@ -592,9 +593,9 @@
       </div>
       <!-- Footer -->
       <div class="px-6 py-4 border-t flex justify-end gap-2 bg-muted/20">
-        <Button variant="ghost" disabled={busy} onclick={() => (bulkSourceId = null)}>Cancel</Button>
+        <Button variant="ghost" disabled={busy} onclick={() => (bulkSourceId = null)}>{t("common.cancel")}</Button>
         <Button disabled={busy || !bulkItems.some(i => i.selected)} onclick={submitBulkTransfer}>
-          Add selected
+          {t("transferDetail.addSelected")}
         </Button>
       </div>
     </div>

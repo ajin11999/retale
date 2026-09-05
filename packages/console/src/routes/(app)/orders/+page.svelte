@@ -3,11 +3,12 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../+layout.server";
-  import { formatMoney, matchesTokens, searchTokens, statusLabel } from "$lib/utils";
+  import { formatMoney, matchesTokens, searchTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -152,23 +153,23 @@
   }
 </script>
 
-<svelte:head><title>Orders · Retale Console</title></svelte:head>
+<svelte:head><title>{t("orders.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Orders</h1>
+    <h1 class="text-xl font-semibold">{t("orders.title")}</h1>
     <div class="flex items-center gap-3">
       <select
         bind:value={statusFilter}
         class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
       >
-        <option value="all">All statuses</option>
-        <option value="closed">Closed</option>
-        <option value="open">Open</option>
-        <option value="cancelled">Cancelled</option>
+        <option value="all">{t("orders.allStatuses")}</option>
+        <option value="closed">{t("orders.status.closed")}</option>
+        <option value="open">{t("orders.status.open")}</option>
+        <option value="cancelled">{t("orders.status.cancelled")}</option>
       </select>
       <div class="w-64">
-        <Input type="search" placeholder="Number or customer…" bind:value={search} />
+        <Input type="search" placeholder={t("orders.searchPlaceholder")} bind:value={search} />
       </div>
       <Button
         size="sm"
@@ -178,7 +179,7 @@
           custSearch = "";
         }}
       >
-        New sale
+        {t("orders.newSale")}
       </Button>
     </div>
   </div>
@@ -191,11 +192,11 @@
     <div class="space-y-2 rounded-lg border bg-card p-4">
       <div class="flex items-end gap-2">
         <label class="flex-1 space-y-1">
-          <span class="text-xs font-medium">Customer for the new sale</span>
+          <span class="text-xs font-medium">{t("orders.customerForSale")}</span>
           <div class="relative">
             <Input
               type="search"
-              placeholder="Search by name or phone…"
+              placeholder={t("orders.searchByNamePhone")}
               bind:value={custSearch}
               onkeydown={onPickerKey}
               autocomplete="off"
@@ -231,7 +232,7 @@
               <div
                 class="absolute z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
               >
-                No customers match.
+                {t("customers.noCustomersMatch")}
               </div>
             {/if}
           </div>
@@ -242,21 +243,21 @@
           disabled={busy}
           onclick={() => (pickerOpen = false)}
         >
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
       <p class="text-xs text-muted-foreground">
-        Press Enter to pick the highlighted customer; the sale opens on its order page.
+        {t("orders.pickHint")}
       </p>
     </div>
   {/if}
 
   {#if !canView}
     <p class="text-sm text-muted-foreground">
-      You don't have permission to view orders.
+      {t("orders.noViewPermission")}
     </p>
   {:else if $OrderList.fetching && orders.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $OrderList.errors?.length}
     <p class="text-sm text-destructive">{$OrderList.errors[0].message}</p>
   {:else}
@@ -264,11 +265,11 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Number</th>
-            <th class="px-4 py-2 font-medium">Customer</th>
-            <th class="px-4 py-2 font-medium">When</th>
-            <th class="px-4 py-2 text-right font-medium">Total</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("orders.number")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.customer")}</th>
+            <th class="px-4 py-2 font-medium">{t("orders.when")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("common.total")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
@@ -288,14 +289,14 @@
               </td>
               <td class="px-4 py-2 text-right">{formatMoney(o.totalMinor)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusBadge(o.status)}>{statusLabel(o.status)}</Badge>
+                <Badge class={statusBadge(o.status)}>{t(`orders.status.${o.status}`)}</Badge>
               </td>
             </tr>
           {/each}
           {#if rows.length === 0}
             <tr>
               <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
-                No orders match.
+                {t("orders.noOrdersMatch")}
               </td>
             </tr>
           {/if}
@@ -304,7 +305,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} order{rows.length === 1 ? "" : "s"}
+        {t("orders.count", { count: rows.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={rows.length} />
     </div>

@@ -6,7 +6,7 @@
   import { X } from "@lucide/svelte";
   import type { Viewer } from "../+layout.server";
   import { refetchOnVisible } from "$lib/refetch-on-visible.svelte";
-  import { statusLabel } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -80,7 +80,7 @@
   // Searchable Combobox options for the per-row vendor assignment; the leading
   // empty row leaves a suggestion unassigned.
   const vendorOptions = $derived([
-    { value: "", label: "— Unassigned —" },
+    { value: "", label: t("reorder.unassigned") },
     ...vendors.map((v) => ({ value: v.id, label: v.name })),
   ]);
 
@@ -145,7 +145,7 @@
       statusFilter = "open";
       feedback = {
         ok: true,
-        text: `Scan complete — ${res.data?.runReorderScan.length ?? 0} suggestion(s).`,
+        text: t("reorder.scanComplete", { count: res.data?.runReorderScan.length ?? 0 }),
       };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -165,7 +165,7 @@
     busy = true;
     feedback = null;
     try {
-      const name = `Requisition from Reorder Scan ${fmtDate(new Date().toISOString())}`;
+      const name = t("reorder.requisitionName", { date: fmtDate(new Date().toISOString()) });
       const res = await ConvertSuggestions.mutate({ name, lines });
       if (res.errors?.length) {
         feedback = { ok: false, text: res.errors[0].message };
@@ -174,7 +174,7 @@
       await ReorderSuggestions.fetch({ policy: CachePolicy.NetworkOnly });
       feedback = {
         ok: true,
-        text: `Created draft requisition — see the Requisitions screen.`,
+        text: t("reorder.createdDraft"),
       };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -209,30 +209,28 @@
         : "bg-muted text-muted-foreground";
 </script>
 
-<svelte:head><title>Reorder suggestions · Retale Console</title></svelte:head>
+<svelte:head><title>{t("reorder.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Reorder suggestions</h1>
+    <h1 class="text-xl font-semibold">{t("reorder.title")}</h1>
     <div class="flex items-center gap-3">
       <div class="w-40">
         <Select bind:value={statusFilter}>
-          {#each STATUSES as s (s)}<option value={s}>{statusLabel(s)}</option>{/each}
+          {#each STATUSES as s (s)}<option value={s}>{t(`reorder.status.${s}`)}</option>{/each}
         </Select>
       </div>
       <Button variant="outline" size="sm" onclick={() => goto('/reorder/budget')}>
-        Budget Sandbox
+        {t("reorder.budgetSandbox")}
       </Button>
       <Button size="sm" disabled={busy || !canAct} onclick={runScan}>
-        Run scan
+        {t("reorder.runScan")}
       </Button>
     </div>
   </div>
 
   <p class="text-sm text-muted-foreground">
-    A scan rebuilds the open suggestion set from current stock. Review the
-    quantities, then convert the lines you want into a draft
-    requisition.
+    {t("reorder.scanHelp")}
   </p>
 
   {#if feedback}
@@ -242,7 +240,7 @@
   {/if}
 
   {#if $ReorderSuggestions.fetching && suggestions.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $ReorderSuggestions.errors?.length}
     <p class="text-sm text-destructive">
       {$ReorderSuggestions.errors[0].message}
@@ -253,13 +251,13 @@
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
             {#if statusFilter === "open"}<th class="w-8 px-4 py-2"></th>{/if}
-            <th class="px-4 py-2 font-medium">Product</th>
-            <th class="px-4 py-2 text-right font-medium">Stock</th>
-            <th class="px-4 py-2 text-right font-medium">Reorder point</th>
-            <th class="px-4 py-2 font-medium">Order qty</th>
-            <th class="px-4 py-2 font-medium">Vendor</th>
+            <th class="px-4 py-2 font-medium">{t("common.product")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("reorder.stock")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("reorder.reorderPoint")}</th>
+            <th class="px-4 py-2 font-medium">{t("reorder.orderQty")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.vendor")}</th>
             {#if statusFilter !== "open"}
-              <th class="px-4 py-2 font-medium">Status</th>
+              <th class="px-4 py-2 font-medium">{t("common.status")}</th>
             {/if}
             <th class="px-4 py-2"></th>
           </tr>
@@ -307,14 +305,14 @@
               </td>
               {#if statusFilter !== "open"}
                 <td class="px-4 py-2">
-                  <Badge class={statusClass(s.status)}>{statusLabel(s.status)}</Badge>
+                  <Badge class={statusClass(s.status)}>{t(`reorder.status.${s.status}`)}</Badge>
                 </td>
               {/if}
               <td class="px-4 py-2 text-right">
                 {#if statusFilter === "open"}
                   <IconButton
                     icon={X}
-                    label="Dismiss"
+                    label={t("reorder.dismiss")}
                     variant="destructive"
                     disabled={busy || !canAct}
                     onclick={() => dismiss(s.id)}
@@ -333,8 +331,8 @@
                 colspan="7"
                 class="px-4 py-10 text-center text-muted-foreground"
               >
-                No {statusFilter} suggestions.
-                {#if statusFilter === "open"}Run a scan to generate them.{/if}
+                {t("reorder.noSuggestions", { status: t("reorder.status." + statusFilter) })}
+                {#if statusFilter === "open"}{t("reorder.runScanToGenerate")}{/if}
               </td>
             </tr>
           {/if}
@@ -345,14 +343,14 @@
     {#if statusFilter === "open" && rows.length > 0}
       <div class="flex items-center justify-between">
         <p class="text-sm text-muted-foreground">
-          {selectedCount} selected
+          {t("common.selected", { count: selectedCount })}
         </p>
         <Button
           size="sm"
           disabled={busy || !canAct || selectedCount === 0}
           onclick={convertSelected}
         >
-          Convert {selectedCount} to draft requisition
+          {t("reorder.convertToRequisition", { count: selectedCount })}
         </Button>
       </div>
     {/if}

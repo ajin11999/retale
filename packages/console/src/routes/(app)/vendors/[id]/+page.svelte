@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, statusLabel, searchTokens, matchesTokens } from "$lib/utils";
+  import { formatMoney, searchTokens, matchesTokens } from "$lib/utils";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Combobox from "$lib/components/ui/combobox.svelte";
@@ -12,6 +12,7 @@
   import MoneyInput from "$lib/components/ui/money-input.svelte";
   import Select from "$lib/components/ui/select.svelte";
   import Textarea from "$lib/components/ui/textarea.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -367,7 +368,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("common.saved", { label }) };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -392,7 +393,7 @@
 
   async function saveVendor() {
     if (!vendor) return;
-    await run("Vendor", () =>
+    await run(t("common.vendor"), () =>
       UpdateVendor.mutate({
         id: vendor.id,
         name: form.name.trim(),
@@ -412,7 +413,7 @@
 
   async function toggleArchived() {
     if (!vendor) return;
-    const ok = await run("Vendor", () =>
+    const ok = await run(t("common.vendor"), () =>
       SetVendorArchived.mutate({
         id: vendor.id,
         archived: vendor.archivedAt == null,
@@ -424,12 +425,10 @@
   async function hardDelete() {
     if (!vendor) return;
     if (
-      !confirm(
-        `Permanently delete "${vendor.name}"? This cannot be undone.`,
-      )
+      !confirm(t("vendorDetail.confirmDelete", { name: vendor.name }))
     )
       return;
-    const ok = await run("Vendor", () =>
+    const ok = await run(t("common.vendor"), () =>
       HardDeleteVendor.mutate({ id: vendor.id }),
     );
     if (ok) await goto("/vendors");
@@ -441,7 +440,7 @@
 
   async function recordPayment() {
     if (!vendor || !payAmount || payAmount <= 0) return;
-    const ok = await run("Payment", () =>
+    const ok = await run(t("vendorDetail.labelPayment"), () =>
       RecordVendorPayment.mutate({
         vendorId: vendor.id,
         amountMinor: payAmount as number,
@@ -506,20 +505,22 @@
       dues.length === 0
         ? ""
         : dues[0] === dues[dues.length - 1]
-          ? ` (due ${dues[0]})`
-          : ` (due ${dues[0]}…${dues[dues.length - 1]})`;
-    const note = `Payment for ${selectedCount} charge${
-      selectedCount === 1 ? "" : "s"
-    }${range}`;
+          ? t("vendorDetail.dueSingle", { date: dues[0] })
+          : t("vendorDetail.dueRange", { from: dues[0], to: dues[dues.length - 1] });
+    const note = t("vendorDetail.payChargesNote", {
+      count: selectedCount,
+      range,
+    });
     if (
       !confirm(
-        `Record a payment of ${formatMoney(selectedTotal)} for ${selectedCount} selected charge${
-          selectedCount === 1 ? "" : "s"
-        }?`,
+        t("vendorDetail.confirmPaySelected", {
+          amount: formatMoney(selectedTotal),
+          count: selectedCount,
+        }),
       )
     )
       return;
-    const ok = await run("Payment", () =>
+    const ok = await run(t("vendorDetail.labelPayment"), () =>
       RecordVendorPayment.mutate({
         vendorId: vendor.id,
         amountMinor: selectedTotal,
@@ -542,7 +543,7 @@
 
   async function addCode() {
     if (!vendor || !codeVariantId || !codeText.trim()) return;
-    const ok = await run("Code", () =>
+    const ok = await run(t("vendorDetail.labelCode"), () =>
       SetVendorVariantCode.mutate({
         vendorId: vendor.id,
         variantId: codeVariantId,
@@ -560,7 +561,7 @@
 
   async function togglePreferred(c: (typeof codes)[number]) {
     if (!vendor) return;
-    const ok = await run("Code", () =>
+    const ok = await run(t("vendorDetail.labelCode"), () =>
       SetVendorVariantCode.mutate({
         vendorId: vendor.id,
         variantId: c.variantId,
@@ -572,8 +573,8 @@
   }
 
   async function removeCode(id: string) {
-    if (!vendor || !confirm("Remove this vendor code mapping?")) return;
-    const ok = await run("Code", () =>
+    if (!vendor || !confirm(t("vendorDetail.confirmRemoveCode"))) return;
+    const ok = await run(t("vendorDetail.labelCode"), () =>
       DeleteVendorVariantCode.mutate({ id }),
     );
     if (ok) await VendorCodes.fetch({ policy: CachePolicy.NetworkOnly, variables: { vendorId: vendor.id } });
@@ -638,7 +639,7 @@
 
   async function adjustBalance() {
     if (!vendor || !adjAmount || !adjNote.trim()) return;
-    const ok = await run("Adjustment", () =>
+    const ok = await run(t("vendorDetail.labelAdjustment"), () =>
       AdjustVendorBalance.mutate({
         vendorId: vendor.id,
         amountMinor: adjAmount as number,
@@ -656,28 +657,28 @@
 </script>
 
 <svelte:head>
-  <title>{vendor ? vendor.name : "Vendor"} · Retale Console</title>
+  <title>{vendor ? t("vendorDetail.pageTitle", { name: vendor.name }) : t("vendors.vendor")} · Retale Console</title>
 </svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6">
   <a href="/vendors" class="text-sm text-muted-foreground hover:text-foreground"
-    >← Back to vendors</a
+    >{t("vendorDetail.backToVendors")}</a
   >
 
   {#if $VendorDetail.fetching && !vendor}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if !vendor}
-    <p class="text-sm text-destructive">Vendor not found.</p>
+    <p class="text-sm text-destructive">{t("vendorDetail.vendorNotFound")}</p>
   {:else}
     <div class="flex items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">{vendor.name}</h1>
         <p class="text-sm text-muted-foreground">
-          AP balance
+          {t("vendors.apBalance")}
           <span class="font-medium text-foreground"
             >{formatMoney(vendor.balanceMinor)}</span
           >
-          {vendor.balanceMinor > 0 ? "(we owe)" : ""}
+          {vendor.balanceMinor > 0 ? t("vendorDetail.weOwe") : ""}
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -686,7 +687,7 @@
             ? "bg-muted text-muted-foreground"
             : "bg-emerald-100 text-emerald-700"}
         >
-          {vendor.archivedAt ? "Archived" : "Active"}
+          {vendor.archivedAt ? t("common.archived") : t("common.active")}
         </Badge>
         <Button
           variant="outline"
@@ -694,7 +695,7 @@
           disabled={busy || !canArchive}
           onclick={toggleArchived}
         >
-          {vendor.archivedAt ? "Restore" : "Archive"}
+          {vendor.archivedAt ? t("addresses.restore") : t("addresses.archive")}
         </Button>
       </div>
     </div>
@@ -709,63 +710,63 @@
       <p
         class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
       >
-        You have read-only access to vendors — editing is disabled.
+        {t("vendorDetail.readOnlyNotice")}
       </p>
     {/if}
 
     <!-- Details -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Details</h2>
+      <h2 class="text-sm font-semibold">{t("vendorDetail.details")}</h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={form.name} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Kind</span>
+          <span class="text-sm font-medium">{t("vendors.kind")}</span>
           <Select bind:value={form.kind} disabled={!canEdit}>
             {#each KINDS as k (k)}
-              <option value={k}>{k === "expedition" ? "Expedition / courier" : "Supplier"}</option>
+              <option value={k}>{k === "expedition" ? t("vendors.expeditionCourier") : t("vendors.supplier")}</option>
             {/each}
           </Select>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Phone</span>
+          <span class="text-sm font-medium">{t("common.phone")}</span>
           <Input bind:value={form.phone} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Email</span>
+          <span class="text-sm font-medium">{t("common.email")}</span>
           <Input bind:value={form.email} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Tax ID</span>
+          <span class="text-sm font-medium">{t("vendorDetail.taxId")}</span>
           <Input bind:value={form.taxId} disabled={!canEdit} />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Lead time (days)</span>
+          <span class="text-sm font-medium">{t("vendorDetail.leadTimeDays")}</span>
           <NumericInput
             bind:value={form.leadTimeDays}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Payment terms (days)</span>
+          <span class="text-sm font-medium">{t("vendorDetail.paymentTermsDays")}</span>
           <NumericInput
             bind:value={form.paymentTermsDays}
             disabled={!canEdit}
           />
           <span class="text-xs text-muted-foreground">
-            Net days from receipt; sets each charge's AP due date.
+            {t("vendorDetail.paymentTermsHelp")}
           </span>
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Preferred send channel</span>
+          <span class="text-sm font-medium">{t("vendorDetail.preferredSendChannel")}</span>
           <Select
             bind:value={form.preferredSendChannel}
             disabled={!canEdit}
           >
             {#each CHANNELS as c (c)}
-              <option value={c}>{c === "" ? "— No preference —" : c}</option>
+              <option value={c}>{c === "" ? t("vendorDetail.noPreference") : c}</option>
             {/each}
           </Select>
         </label>
@@ -773,28 +774,28 @@
       <!-- `block` matters on these section-level labels: a bare <label> is
            inline, so consecutive ones would flow onto the same line. -->
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Address</span>
+        <span class="text-sm font-medium">{t("addresses.address")}</span>
         <Input bind:value={form.address} disabled={!canEdit} />
       </label>
       {#if canPickShipTo}
         <label class="block space-y-1">
-          <span class="text-sm font-medium">Default ship-to (our address)</span>
+          <span class="text-sm font-medium">{t("vendorDetail.defaultShipTo")}</span>
           <Select bind:value={form.defaultShipToAddressId} disabled={!canEdit}>
-            <option value="">— Use default address —</option>
+            <option value="">{t("vendorDetail.useDefaultAddress")}</option>
             {#each shipToAddresses as a (a.id)}
-              <option value={a.id}>{a.label}{a.isDefault ? " (default)" : ""}</option>
+              <option value={a.id}>{a.label}{a.isDefault ? ` (${t("addresses.default")})` : ""}</option>
             {/each}
           </Select>
           <span class="text-xs text-muted-foreground">
-            Printed as “Ship To” on this vendor's purchase orders.
+            {t("vendorDetail.defaultShipToHelp")}
             {#if canManageAddresses}
-              <a href="/settings/addresses" class="underline">Manage addresses</a>
+              <a href="/settings/addresses" class="underline">{t("vendorDetail.manageAddresses")}</a>
             {/if}
           </span>
         </label>
       {/if}
       <label class="block space-y-1">
-        <span class="text-sm font-medium">Notes</span>
+        <span class="text-sm font-medium">{t("common.notes")}</span>
         <Textarea
           bind:value={form.notes}
           disabled={!canEdit}
@@ -803,33 +804,33 @@
       </label>
       <div class="flex justify-end pt-2">
         <Button disabled={busy || !canEdit} onclick={saveVendor}>
-          Save details
+          {t("vendorDetail.saveDetails")}
         </Button>
       </div>
     </section>
 
     <!-- AP balance -->
     <section class="space-y-4 rounded-lg border bg-card p-5">
-      <h2 class="text-sm font-semibold">Accounts payable</h2>
+      <h2 class="text-sm font-semibold">{t("vendorDetail.accountsPayable")}</h2>
 
       {#if canRecordPayment}
         <div class="space-y-2">
           <h3 class="text-xs font-medium text-muted-foreground">
-            Record a payment
+            {t("vendorDetail.recordPayment")}
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Amount (Rp)</span>
+              <span class="text-xs font-medium">{t("vendorDetail.amountRp")}</span>
               <MoneyInput bind:value={payAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
-              <span class="text-xs font-medium">Note (optional)</span>
+              <span class="text-xs font-medium">{t("vendorDetail.noteOptional")}</span>
               <Input bind:value={payNote} />
             </label>
             <Button
               size="sm"
               disabled={busy || !payAmount || payAmount <= 0}
-              onclick={recordPayment}>Record payment</Button
+              onclick={recordPayment}>{t("vendorDetail.recordPaymentBtn")}</Button
             >
           </div>
         </div>
@@ -838,32 +839,32 @@
       {#if canAdjust}
         <div class="space-y-2">
           <h3 class="text-xs font-medium text-muted-foreground">
-            Manual balance adjustment
+            {t("vendorDetail.manualAdjustment")}
           </h3>
           <div class="flex items-end gap-2">
             <label class="space-y-1">
-              <span class="text-xs font-medium">Signed amount (Rp)</span>
+              <span class="text-xs font-medium">{t("vendorDetail.signedAmountRp")}</span>
               <MoneyInput allowNegative bind:value={adjAmount} class="w-40" />
             </label>
             <label class="flex-1 space-y-1">
-              <span class="text-xs font-medium">Note (required)</span>
+              <span class="text-xs font-medium">{t("vendorDetail.noteRequired")}</span>
               <Input bind:value={adjNote} />
             </label>
             <Button
               size="sm"
               disabled={busy || !adjAmount || !adjNote.trim()}
-              onclick={adjustBalance}>Adjust</Button
+              onclick={adjustBalance}>{t("vendorDetail.adjustBtn")}</Button
             >
           </div>
           <p class="text-xs text-muted-foreground">
-            Positive raises what we owe; negative lowers it.
+            {t("vendorDetail.adjustHelp")}
           </p>
         </div>
       {/if}
 
       {#if !canRecordPayment && !canAdjust}
         <p class="text-sm text-muted-foreground">
-          You don't have permission to record payments or adjustments.
+          {t("vendorDetail.noPaymentPermission")}
         </p>
       {/if}
     </section>
@@ -871,15 +872,14 @@
     <!-- Ledger -->
     {#if canViewLedger}
       <section class="space-y-3 rounded-lg border bg-card p-5">
-        <h2 class="text-sm font-semibold">AP ledger ({ledger.length})</h2>
+        <h2 class="text-sm font-semibold">{t("vendorDetail.apLedger", { count: ledger.length })}</h2>
         {#if canRecordPayment && selectableLedger.length > 0}
           <p class="text-xs text-muted-foreground">
-            Tick outstanding charges to pay their total in one payment. AP is a
-            running balance, so charges aren't individually marked paid.
+            {t("vendorDetail.apLedgerHelp")}
           </p>
         {/if}
         {#if $VendorLedger.fetching && ledger.length === 0}
-          <p class="text-sm text-muted-foreground">Loading…</p>
+          <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
         {:else}
           <table class="w-full text-sm">
             <thead class="border-b text-left text-muted-foreground">
@@ -888,18 +888,18 @@
                   <th class="w-8 py-1.5">
                     <input
                       type="checkbox"
-                      aria-label="Select all charges"
+                      aria-label={t("vendorDetail.selectAllCharges")}
                       checked={allChargesChecked}
                       disabled={busy || selectableLedger.length === 0}
                       onchange={toggleAllCharges}
                     />
                   </th>
                 {/if}
-                <th class="py-1.5 pr-4 font-medium">When</th>
-                <th class="py-1.5 pr-4 font-medium">Type</th>
-                <th class="py-1.5 text-right font-medium">Amount</th>
-                <th class="py-1.5 pl-4 font-medium">Due</th>
-                <th class="py-1.5 pl-4 font-medium">Note</th>
+                <th class="py-1.5 pr-4 font-medium">{t("vendorDetail.when")}</th>
+                <th class="py-1.5 pr-4 font-medium">{t("vendorDetail.type")}</th>
+                <th class="py-1.5 text-right font-medium">{t("vendorDetail.amount")}</th>
+                <th class="py-1.5 pl-4 font-medium">{t("vendorDetail.due")}</th>
+                <th class="py-1.5 pl-4 font-medium">{t("vendorDetail.note")}</th>
               </tr>
             </thead>
             <tbody>
@@ -914,7 +914,7 @@
                       {#if e.amountMinor > 0}
                         <input
                           type="checkbox"
-                          aria-label="Select charge"
+                          aria-label={t("vendorDetail.selectCharge")}
                           checked={selectedCharges.has(e.id)}
                           disabled={busy}
                           onchange={() => toggleCharge(e.id)}
@@ -923,7 +923,7 @@
                     </td>
                   {/if}
                   <td class="py-1.5 pr-4">{fmtDateTime(e.createdAt)}</td>
-                  <td class="py-1.5 pr-4">{statusLabel(e.type)}</td>
+                  <td class="py-1.5 pr-4">{t(`ledgerType.${e.type}`)}</td>
                   <td
                     class="py-1.5 text-right {e.amountMinor < 0
                       ? 'text-emerald-700'
@@ -941,7 +941,7 @@
                     colspan={canRecordPayment ? 6 : 5}
                     class="py-6 text-center text-muted-foreground"
                   >
-                    No ledger entries.
+                    {t("vendorDetail.noLedgerEntries")}
                   </td>
                 </tr>
               {/if}
@@ -953,20 +953,19 @@
               class="flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
             >
               <span class="text-sm">
-                {selectedCount} charge{selectedCount === 1 ? "" : "s"} selected ·
-                <span class="font-medium">{formatMoney(selectedTotal)}</span>
+                {t("vendorDetail.chargesSelected", { count: selectedCount, amount: formatMoney(selectedTotal) })}
               </span>
               <div class="flex items-center gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
                   disabled={busy}
-                  onclick={clearCharges}>Clear</Button
+                  onclick={clearCharges}>{t("common.clear")}</Button
                 >
                 <Button
                   size="sm"
                   disabled={busy || selectedTotal <= 0}
-                  onclick={paySelectedCharges}>Pay selected</Button
+                  onclick={paySelectedCharges}>{t("vendorDetail.paySelected")}</Button
                 >
               </div>
             </div>
@@ -980,26 +979,25 @@
       <section class="space-y-3 rounded-lg border bg-card p-5">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold">
-            Vendor variant codes ({codes.length})
+            {t("vendorDetail.variantCodes", { count: codes.length })}
           </h2>
           <Button variant="outline" size="sm" onclick={openBulkDialog}>
-            Bulk map…
+            {t("vendorDetail.bulkMap")}
           </Button>
         </div>
         <p class="text-xs text-muted-foreground">
-          The vendor's own part numbers for our variants — fed into the
-          receiving scan and the reorder forecast.
+          {t("vendorDetail.variantCodesHelp")}
         </p>
 
         {#if $VendorCodes.fetching && codes.length === 0}
-          <p class="text-sm text-muted-foreground">Loading…</p>
+          <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
         {:else}
           <table class="w-full text-sm">
             <thead class="border-b text-left text-muted-foreground">
               <tr>
-                <th class="py-1.5 font-medium">Variant</th>
-                <th class="py-1.5 font-medium">Vendor code</th>
-                <th class="py-1.5 font-medium">Preferred</th>
+                <th class="py-1.5 font-medium">{t("interchangeGroups.variant")}</th>
+                <th class="py-1.5 font-medium">{t("vendorDetail.vendorCode")}</th>
+                <th class="py-1.5 font-medium">{t("vendorDetail.preferred")}</th>
                 <th class="py-1.5"></th>
               </tr>
             </thead>
@@ -1032,7 +1030,7 @@
                         onchange={() => togglePreferred(c)}
                       />
                       {#if c.isPreferred}
-                        <Badge class="bg-primary/10 text-primary">preferred</Badge>
+                        <Badge class="bg-primary/10 text-primary">{t("vendorDetail.preferred")}</Badge>
                       {/if}
                     </label>
                   </td>
@@ -1042,7 +1040,7 @@
                       size="sm"
                       class="text-destructive"
                       disabled={busy}
-                      onclick={() => removeCode(c.id)}>Remove</Button
+                      onclick={() => removeCode(c.id)}>{t("common.remove")}</Button
                     >
                   </td>
                 </tr>
@@ -1050,7 +1048,7 @@
               {#if codes.length === 0}
                 <tr>
                   <td colspan="4" class="py-6 text-center text-muted-foreground">
-                    No vendor codes mapped yet.
+                    {t("vendorDetail.noCodesMapped")}
                   </td>
                 </tr>
               {/if}
@@ -1058,33 +1056,33 @@
           </table>
 
           <div class="rounded-md border bg-muted/40 p-3">
-            <p class="mb-2 text-xs font-medium">Add a mapping</p>
+            <p class="mb-2 text-xs font-medium">{t("vendorDetail.addMapping")}</p>
             <div class="grid grid-cols-[1fr_10rem_auto_auto] items-end gap-2">
               <label class="space-y-1">
-                <span class="text-xs font-medium">Variant</span>
+                <span class="text-xs font-medium">{t("interchangeGroups.variant")}</span>
                 <Combobox
                   options={availableVariantOptions}
                   bind:value={codeVariantId}
-                  placeholder="Search variant…"
+                  placeholder={t("vendorDetail.searchVariant")}
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium">Vendor code</span>
-                <Input bind:value={codeText} placeholder="e.g. ABC-1234" />
+                <span class="text-xs font-medium">{t("vendorDetail.vendorCode")}</span>
+                <Input bind:value={codeText} placeholder={t("vendorDetail.codePlaceholder")} />
               </label>
               <label class="flex items-center gap-1 pb-2 text-xs">
                 <input type="checkbox" bind:checked={codePreferred} />
-                Preferred
+                {t("vendorDetail.preferred")}
               </label>
               <Button
                 size="sm"
                 disabled={busy || !codeVariantId || !codeText.trim()}
-                onclick={addCode}>Add</Button
+                onclick={addCode}>{t("common.add")}</Button
               >
             </div>
             {#if availableVariants.length === 0 && allProducts.length > 0}
               <p class="mt-2 text-xs text-muted-foreground">
-                Every variant already has a code for this vendor.
+                {t("vendorDetail.allVariantsMapped")}
               </p>
             {/if}
           </div>
@@ -1100,15 +1098,14 @@
         >
           <div class="flex h-[80vh] max-h-[600px] flex-col">
             <div class="border-b p-4">
-              <h3 class="text-lg font-semibold">Bulk map variant codes</h3>
+              <h3 class="text-lg font-semibold">{t("vendorDetail.bulkMapTitle")}</h3>
               <p class="mt-1 text-sm text-muted-foreground">
-                Search for variants and enter vendor codes. Empty fields will be
-                ignored.
+                {t("vendorDetail.bulkMapSubtitle")}
               </p>
               <div class="mt-4">
                 <Input
                   bind:value={bulkSearch}
-                  placeholder="Search variants…"
+                  placeholder={t("products.searchProducts")}
                   type="search"
                 />
               </div>
@@ -1126,14 +1123,14 @@
                   <div class="w-48">
                     <Input
                       bind:value={bulkCodes[v.id]}
-                      placeholder="Vendor code"
+                      placeholder={t("vendorDetail.vendorCode")}
                       disabled={bulkBusy}
                     />
                   </div>
                 </div>
               {:else}
                 <p class="py-4 text-center text-sm text-muted-foreground">
-                  No variants match your search.
+                  {t("vendorDetail.noVariantsMatch")}
                 </p>
               {/each}
             </div>
@@ -1142,10 +1139,10 @@
               <Button
                 variant="ghost"
                 disabled={bulkBusy}
-                onclick={closeBulkDialog}>Cancel</Button
+                onclick={closeBulkDialog}>{t("common.cancel")}</Button
               >
               <Button disabled={bulkBusy} onclick={saveBulkCodes}>
-                {bulkBusy ? "Saving…" : "Save mappings"}
+                {bulkBusy ? t("common.saving") : t("vendorDetail.saveMappings")}
               </Button>
             </div>
           </div>
@@ -1156,10 +1153,9 @@
     <!-- Danger zone -->
     {#if canHardDelete}
       <section class="space-y-2 rounded-lg border border-destructive/30 p-5">
-        <h2 class="text-sm font-semibold text-destructive">Danger zone</h2>
+        <h2 class="text-sm font-semibold text-destructive">{t("vendorDetail.dangerZone")}</h2>
         <p class="text-sm text-muted-foreground">
-          Permanently delete this vendor. Refused by the API if it carries a
-          non-zero AP balance.
+          {t("vendorDetail.dangerZoneHelp")}
         </p>
         <Button
           variant="outline"
@@ -1167,11 +1163,11 @@
           disabled={busy || vendor.balanceMinor !== 0}
           onclick={hardDelete}
         >
-          Delete vendor
+          {t("vendorDetail.deleteVendor")}
         </Button>
         {#if vendor.balanceMinor !== 0}
           <p class="text-xs text-muted-foreground">
-            Clear the AP balance first.
+            {t("vendorDetail.clearBalanceFirst")}
           </p>
         {/if}
       </section>

@@ -2,6 +2,7 @@
   import { enhance } from "$app/forms";
   import Button from "$lib/components/ui/button.svelte";
   import Input from "$lib/components/ui/input.svelte";
+  import { t } from "$lib/i18n";
   import type { ActionData } from "./$types";
 
   let { form }: { form: ActionData } = $props();
@@ -26,7 +27,7 @@
   };
 </script>
 
-<svelte:head><title>Sign in · Retale Console</title></svelte:head>
+<svelte:head><title>{t("login.pageTitle")}</title></svelte:head>
 
 <div class="flex min-h-screen items-center justify-center px-4">
   <div class="w-full max-w-sm rounded-lg border bg-card p-6 shadow-sm">
@@ -37,9 +38,7 @@
     {#if twoFactor}
       <!-- Step 2 — two-factor code -->
       <p class="mb-5 text-sm text-muted-foreground">
-        Signing in as <span class="font-medium text-foreground"
-          >{twoFactor.username}</span
-        >. Enter your authentication code.
+        {t("login.twoFactorSubtitle", { username: twoFactor.username })}
       </p>
 
       <form method="POST" action="?/twoFactor" use:enhance={onsubmit} class="space-y-3">
@@ -47,7 +46,7 @@
         <input type="hidden" name="username" value={twoFactor.username} />
 
         <div class="space-y-1">
-          <label for="code" class="text-sm font-medium">Authentication code</label>
+          <label for="code" class="text-sm font-medium">{t("login.authCode")}</label>
           <Input
             id="code"
             name="code"
@@ -57,7 +56,7 @@
             required
           />
           <p class="text-xs text-muted-foreground">
-            6-digit code from your authenticator app, or a recovery code.
+            {t("login.authCodeHint")}
           </p>
         </div>
 
@@ -66,7 +65,7 @@
         {/if}
 
         <Button type="submit" class="w-full" disabled={submitting}>
-          {submitting ? "Verifying…" : "Verify"}
+          {submitting ? t("login.verifying") : t("login.verify")}
         </Button>
       </form>
 
@@ -74,17 +73,17 @@
         class="mt-3 text-sm text-muted-foreground hover:text-foreground"
         onclick={() => (form = null)}
       >
-        ← Use a different account
+        {t("login.differentAccount")}
       </button>
     {:else}
       <!-- Step 1 — username + password -->
       <p class="mb-5 text-sm text-muted-foreground">
-        Sign in to manage your store.
+        {t("login.subtitle")}
       </p>
 
       <form method="POST" action="?/password" use:enhance={onsubmit} class="space-y-3">
         <div class="space-y-1">
-          <label for="username" class="text-sm font-medium">Username</label>
+          <label for="username" class="text-sm font-medium">{t("login.username")}</label>
           <Input
             id="username"
             name="username"
@@ -94,7 +93,7 @@
           />
         </div>
         <div class="space-y-1">
-          <label for="password" class="text-sm font-medium">Password</label>
+          <label for="password" class="text-sm font-medium">{t("login.password")}</label>
           <Input
             id="password"
             name="password"
@@ -109,7 +108,7 @@
         {/if}
 
         <Button type="submit" class="w-full" disabled={submitting}>
-          {submitting ? "Signing in…" : "Sign in"}
+          {submitting ? t("login.signingIn") : t("login.signIn")}
         </Button>
       </form>
     {/if}

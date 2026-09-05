@@ -1,6 +1,7 @@
 <script lang="ts">
   import { graphql } from "$houdini";
   import { formatMoney } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import Button from "$lib/components/ui/button.svelte";
   import { Printer, X, Eye, FileText, DollarSign, Barcode, User, Share2, Download, Folder } from "@lucide/svelte";
   import { PDFDocument } from "pdf-lib";
@@ -144,7 +145,7 @@
     if (ungItems.length > 0) {
       out.push({
         id: UNGROUPED,
-        name: sections.length > 0 ? "General Items" : "",
+        name: sections.length > 0 ? t("rfqs.generalItems") : "",
         items: ungItems,
       });
     }
@@ -208,7 +209,7 @@
   // Generate A4/Letter/Legal PDF document Blob matching the exact HTML view 1:1 using modern-screenshot + pdf-lib
   async function generatePdfBlob(): Promise<Blob> {
     const el = document.getElementById("printable-document");
-    if (!el) throw new Error("Printable document element not found");
+    if (!el) throw new Error(t("rfqPrint.elementNotFound"));
 
     // Capture DOM layout as high-resolution canvas with full oklch() / Tailwind v4 support
     const canvas = await domToCanvas(el, {
@@ -297,7 +298,7 @@
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      feedback = { ok: true, text: `Downloaded rfq-${rfq.rfqNumber}.pdf successfully.` };
+      feedback = { ok: true, text: t("rfqPrint.downloaded", { file: `rfq-${rfq.rfqNumber}.pdf` }) };
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
     }
@@ -315,15 +316,15 @@
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: `RFQ ${rfq.rfqNumber}`,
-          text: `Request for Quotation ${rfq.rfqNumber} — see attached PDF.`,
+          title: t("rfqPrint.shareTitle", { number: rfq.rfqNumber }),
+          text: t("rfqPrint.shareText", { number: rfq.rfqNumber }),
         });
-        feedback = { ok: true, text: "PDF shared successfully." };
+        feedback = { ok: true, text: t("rfqPrint.shared") };
       } else {
         await downloadPdf();
         feedback = {
           ok: true,
-          text: `PDF downloaded (${fileName}). Attach it in your WhatsApp, Email, or Chat application to send.`,
+          text: t("rfqPrint.sharedViaDownload", { file: fileName }),
         };
       }
     } catch (e) {
@@ -336,7 +337,7 @@
 </script>
 
 <svelte:head>
-  <title>{rfq ? `Print ${rfq.rfqNumber}` : "Print RFQ"} · Retale Console</title>
+  <title>{rfq ? `${t("rfqPrint.print")} ${rfq.rfqNumber}` : t("rfqPrint.printRfq")} · Retale Console</title>
 </svelte:head>
 
 <!-- Sticky Printing Options & Send PDF Control Bar (Hidden when printing) -->
@@ -346,20 +347,20 @@
     <div class="flex items-center gap-5 flex-wrap">
       <div class="flex items-center gap-2">
         <Eye class="size-4 text-primary" />
-        <span class="font-semibold text-sm">Printing Options:</span>
+        <span class="font-semibold text-sm">{t("rfqPrint.printingOptions")}</span>
       </div>
 
       <!-- Paper Size Selector (Default: A4) -->
       <div class="flex items-center gap-1.5 text-xs font-medium">
         <FileText class="size-3.5 text-muted-foreground" />
-        <span>Paper:</span>
+        <span>{t("rfqPrint.paper")}</span>
         <select
           bind:value={paperSize}
           class="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium shadow-sm focus:outline-none focus:ring-1 focus:ring-primary"
         >
-          <option value="A4">A4 (210 × 297 mm)</option>
-          <option value="Letter">Letter (8.5 × 11 in)</option>
-          <option value="Legal">Legal (8.5 × 14 in)</option>
+          <option value="A4">{t("rfqPrint.a4")}</option>
+          <option value="Letter">{t("rfqPrint.letterSize")}</option>
+          <option value="Legal">{t("rfqPrint.legalSize")}</option>
         </select>
       </div>
 
@@ -370,7 +371,7 @@
           class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
         />
         <User class="size-3.5 text-muted-foreground" />
-        <span>Show Vendor Name</span>
+        <span>{t("rfqPrint.showVendorName")}</span>
       </label>
 
       {#if sections.length > 0}
@@ -381,7 +382,7 @@
             class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
           />
           <Folder class="size-3.5 text-muted-foreground" />
-          <span>Show Sections</span>
+          <span>{t("rfqPrint.showSections")}</span>
         </label>
       {/if}
 
@@ -392,7 +393,7 @@
           class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
         />
         <FileText class="size-3.5 text-muted-foreground" />
-        <span>Show Note / Memo</span>
+        <span>{t("rfqPrint.showNoteMemo")}</span>
       </label>
 
       <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
@@ -402,7 +403,7 @@
           class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
         />
         <DollarSign class="size-3.5 text-muted-foreground" />
-        <span>Show Target Cost &amp; Totals</span>
+        <span>{t("rfqPrint.showTargetCost")}</span>
       </label>
 
       <label class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none">
@@ -412,7 +413,7 @@
           class="size-4 rounded border-gray-300 text-primary focus:ring-primary"
         />
         <Barcode class="size-3.5 text-muted-foreground" />
-        <span>Show Barcode</span>
+        <span>{t("rfqPrint.showBarcode")}</span>
       </label>
     </div>
 
@@ -425,15 +426,15 @@
         onclick={sharePdf}
       >
         <Share2 class="mr-1.5 size-4" />
-        {sharing ? "Preparing PDF…" : "Send PDF Attachment"}
+        {sharing ? t("rfqPrint.preparingPdf") : t("rfqPrint.sendPdf")}
       </Button>
 
       <Button size="sm" variant="outline" onclick={downloadPdf}>
-        <Download class="mr-1.5 size-4" /> Download PDF
+        <Download class="mr-1.5 size-4" /> {t("rfqPrint.downloadPdf")}
       </Button>
 
       <Button size="sm" variant="outline" onclick={() => window.print()}>
-        <Printer class="mr-1.5 size-4" /> Print
+        <Printer class="mr-1.5 size-4" /> {t("rfqPrint.printBtn")}
       </Button>
 
       <Button size="sm" variant="ghost" onclick={() => window.close()}>
@@ -445,7 +446,7 @@
   {#if feedback}
     <div class="rounded border px-3 py-1.5 text-xs flex items-center justify-between {feedback.ok ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}">
       <span>{feedback.text}</span>
-      <button onclick={() => feedback = null} class="text-xs font-semibold ml-2 hover:underline">Dismiss</button>
+      <button onclick={() => feedback = null} class="text-xs font-semibold ml-2 hover:underline">{t("rfqPrint.dismiss")}</button>
     </div>
   {/if}
 </div>
@@ -456,10 +457,10 @@
   style="--paper-size-css: {paperSize === 'Letter' ? 'letter portrait' : paperSize === 'Legal' ? 'legal portrait' : 'A4 portrait'};"
 >
   {#if $RfqDetail.fetching && !rfq}
-    <div class="p-12 text-center text-base text-muted-foreground">Loading RFQ print preview…</div>
+    <div class="p-12 text-center text-base text-muted-foreground">{t("rfqPrint.loading")}</div>
   {:else if $RfqDetail.errors?.length || !rfq}
     <div class="p-12 text-center text-base text-destructive">
-      {$RfqDetail.errors?.[0]?.message ?? "RFQ not found"}
+      {$RfqDetail.errors?.[0]?.message ?? t("rfqPrint.notFound")}
     </div>
   {:else}
     <div
@@ -470,14 +471,14 @@
       <!-- Document Header -->
       <div class="flex items-start justify-between border-b pb-4">
         <div class="space-y-2">
-          <h1 class="text-3xl font-extrabold tracking-tight">REQUEST FOR QUOTATION</h1>
+          <h1 class="text-3xl font-extrabold tracking-tight">{t("rfqs.requestForQuotation")}</h1>
           
           <!-- Business Logo under RFQ heading text -->
           <div class="py-1">
             {#if businessSettings?.logoUrl}
               <img
                 src={`/settings/logo?v=${encodeURIComponent(businessSettings.updatedAt ?? "")}`}
-                alt={businessSettings.name ?? "Business Logo"}
+                alt={businessSettings.name ?? t("rfqPrint.businessLogo")}
                 class="h-10 w-auto max-w-[180px] object-contain"
               />
             {:else}
@@ -487,7 +488,7 @@
 
           {#if showVendor && rfq.snapshotVendorName}
             <p class="text-base font-semibold text-foreground">
-              Vendor: <span class="text-primary font-bold">{rfq.snapshotVendorName}</span>
+              {t("rfqPrint.vendorColon")} <span class="text-primary font-bold">{rfq.snapshotVendorName}</span>
             </p>
           {/if}
         </div>
@@ -495,14 +496,14 @@
         <div class="text-right space-y-0.5">
           <h2 class="text-2xl font-bold font-mono text-primary">{rfq.rfqNumber}</h2>
           <p class="text-sm text-muted-foreground">
-            Date: <span class="font-medium text-foreground">{rfq.date}</span>
+            {t("rfqPrint.dateColon")} <span class="font-medium text-foreground">{rfq.date}</span>
           </p>
           <p class="text-xs text-muted-foreground">
-            Printed: <span class="font-medium text-foreground">{printedAt}</span>
+            {t("rfqPrint.printedColon")} <span class="font-medium text-foreground">{printedAt}</span>
           </p>
           {#if rfq.dueDate}
             <p class="text-sm text-muted-foreground">
-              Due Date: <span class="font-medium text-foreground">{rfq.dueDate}</span>
+              {t("rfqPrint.dueDateColon")} <span class="font-medium text-foreground">{rfq.dueDate}</span>
             </p>
           {/if}
         </div>
@@ -511,7 +512,7 @@
       <!-- Optional Memo / Internal Note (Shown only when toggled) -->
       {#if showNote && rfq.memo?.trim()}
         <div class="rounded-md border bg-muted/30 p-3.5 space-y-1 text-sm">
-          <p class="font-bold uppercase tracking-wider text-muted-foreground text-xs">Internal Memo / Notes</p>
+          <p class="font-bold uppercase tracking-wider text-muted-foreground text-xs">{t("rfqPrint.internalMemoNotes")}</p>
           <p class="text-foreground whitespace-pre-wrap">{rfq.memo.trim()}</p>
         </div>
       {/if}
@@ -522,11 +523,11 @@
           <thead class="bg-muted/80 text-muted-foreground font-bold text-sm uppercase">
             <tr>
               <th class="w-14 px-3.5 py-2.5 text-center">#</th>
-              <th class="px-3.5 py-2.5">Product / Item Code</th>
+              <th class="px-3.5 py-2.5">{t("rfqPrint.productItemCode")}</th>
               <th class="w-28 px-3.5 py-2.5 text-right">Qty</th>
               {#if showCosts}
-                <th class="w-40 px-3.5 py-2.5 text-right">Target Cost</th>
-                <th class="w-44 px-3.5 py-2.5 text-right">Target Total</th>
+                <th class="w-40 px-3.5 py-2.5 text-right">{t("rfqPrint.targetCost")}</th>
+                <th class="w-44 px-3.5 py-2.5 text-right">{t("rfqPrint.targetTotal")}</th>
               {/if}
             </tr>
           </thead>
@@ -555,7 +556,7 @@
                     <p class="font-bold text-[1.35rem] text-foreground leading-snug break-words">{disp.name}</p>
                     {#if showBarcode && disp.barcode}
                       <p class="text-sm text-muted-foreground font-mono mt-0.5 break-all" style="color: #6b7280;">
-                        Barcode: {disp.barcode}
+                        {t("rfqPrint.barcodeColon", { code: disp.barcode })}
                       </p>
                     {/if}
                   </td>
@@ -577,7 +578,7 @@
             {:else}
               <tr>
                 <td colspan={showCosts ? 5 : 3} class="px-4 py-8 text-center text-muted-foreground text-base">
-                  No line items present.
+                  {t("rfqPrint.noLineItems")}
                 </td>
               </tr>
             {/each}
@@ -587,13 +588,13 @@
           {#if showCosts && items.length > 0}
             <tfoot class="bg-muted/40 font-medium">
               <tr>
-                <td colspan="4" class="px-3.5 py-2 text-right text-xs uppercase text-muted-foreground">Subtotal</td>
+                <td colspan="4" class="px-3.5 py-2 text-right text-xs uppercase text-muted-foreground">{t("rfqPrint.subtotal")}</td>
                 <td class="px-3.5 py-2 text-right tabular-nums font-mono font-semibold text-base">
                   {formatMoney(totalTargetCost)}
                 </td>
               </tr>
               <tr class="font-bold">
-                <td colspan="4" class="px-3.5 py-2.5 text-right text-sm uppercase text-foreground">Total Target Cost</td>
+                <td colspan="4" class="px-3.5 py-2.5 text-right text-sm uppercase text-foreground">{t("rfqPrint.totalTargetCost")}</td>
                 <td class="px-3.5 py-2.5 text-right tabular-nums font-mono text-2xl text-primary">
                   {formatMoney(totalTargetCost)}
                 </td>
@@ -606,7 +607,7 @@
       <!-- Terms and Conditions Section (if available) -->
       {#if rfq.termsAndConditions?.trim()}
         <div class="pt-4 border-t space-y-1">
-          <p class="text-xs font-bold uppercase tracking-wider text-muted-foreground">Terms &amp; Conditions</p>
+          <p class="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("rfqPrint.termsConditions")}</p>
           <p class="text-sm text-muted-foreground whitespace-pre-wrap">{rfq.termsAndConditions.trim()}</p>
         </div>
       {/if}

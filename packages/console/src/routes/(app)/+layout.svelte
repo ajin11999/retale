@@ -326,16 +326,16 @@
           class="mb-6 flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
         >
           <div>
-            <span class="font-semibold">Two-factor authentication required:</span>
+            <span class="font-semibold">{t("layout.twoFactorRequired")}</span>
             <span>
-              Root users must enroll in 2FA before store operations can be performed.
+              {t("layout.twoFactorMessage")}
             </span>
           </div>
           <a
             href="/account"
             class="whitespace-nowrap rounded bg-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-300"
           >
-            Enable 2FA &rarr;
+            {t("layout.enable2fa")}
           </a>
         </div>
       {/if}

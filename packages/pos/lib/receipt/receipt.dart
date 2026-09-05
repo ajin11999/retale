@@ -1,5 +1,6 @@
 import 'package:intl/intl.dart';
 
+import '../i18n/i18n_service.dart';
 import '../models/money.dart';
 
 /// Business identity printed at the top of a receipt.
@@ -67,21 +68,21 @@ class Receipt {
   static String formatDate(DateTime dt) => _dateFmt.format(dt.toLocal());
 
   /// Build from a fetched `orderDetail` map (drops voided / zero-qty lines).
-  factory Receipt.fromOrderDetail(
-    Map<String, dynamic> order,
-    StoreInfo store,
-  ) {
-    final lines = (order['items'] as List<dynamic>)
-        .cast<Map<String, dynamic>>()
-        .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
-        .map((it) => ReceiptLine(
-              name: it['displayName'] as String,
-              qty: (it['qty'] as num).toInt(),
-              unitPriceMinor: it['snapshotPriceMinor'] as num,
-              lineTotalMinor: it['lineTotalMinor'] as num,
-              unit: it['snapshotUnit'] as String?,
-            ))
-        .toList();
+  factory Receipt.fromOrderDetail(Map<String, dynamic> order, StoreInfo store) {
+    final lines =
+        (order['items'] as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+            .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
+            .map(
+              (it) => ReceiptLine(
+                name: it['displayName'] as String,
+                qty: (it['qty'] as num).toInt(),
+                unitPriceMinor: it['snapshotPriceMinor'] as num,
+                lineTotalMinor: it['lineTotalMinor'] as num,
+                unit: it['snapshotUnit'] as String?,
+              ),
+            )
+            .toList();
     final paid = (order['payments'] as List<dynamic>)
         .cast<Map<String, dynamic>>()
         .fold<num>(0, (sum, p) => sum + (p['amountMinor'] as num));
@@ -96,7 +97,8 @@ class Receipt {
       paidMinor: paid > 0 ? paid : null,
       changeMinor: paid > total ? paid - total : null,
       onAccountMinor: paid < total ? total - paid : null,
-      customerName: customer?['name'] as String? ??
+      customerName:
+          customer?['name'] as String? ??
           order['snapshotCustomerName'] as String?,
     );
   }
@@ -106,10 +108,12 @@ class Receipt {
   String toMessage() {
     final b = StringBuffer()..writeln('*${store.name}*');
     b.writeln();
-    if (displayNumber != null) b.writeln('Receipt $displayNumber');
+    if (displayNumber != null) {
+      b.writeln(tr('receipt.receiptNumber', {'number': displayNumber}));
+    }
     if (createdAt != null) b.writeln(formatDate(createdAt!));
     if (customerName != null && customerName!.trim().isNotEmpty) {
-      b.writeln('Customer: $customerName');
+      b.writeln(tr('receipt.customerLine', {'name': customerName}));
     }
     b.writeln('--------------------------------');
     for (final line in lines) {
@@ -117,19 +121,28 @@ class Receipt {
           line.unit == null ? '${line.qty}' : '${line.qty} ${line.unit}';
       b.writeln('$qty × ${line.name}');
       b.writeln(
-          '   ${Money.format(line.unitPriceMinor)}   =   ${Money.format(line.lineTotalMinor)}');
+        '   ${Money.format(line.unitPriceMinor)}   =   ${Money.format(line.lineTotalMinor)}',
+      );
     }
     b.writeln('--------------------------------');
-    b.writeln('*Total: ${Money.format(totalMinor)}*');
-    if (paidMinor != null) b.writeln('Cash: ${Money.format(paidMinor!)}');
+    b.writeln(
+      '*${tr('receipt.totalLine', {'value': Money.format(totalMinor)})}*',
+    );
+    if (paidMinor != null) {
+      b.writeln(tr('receipt.cashLine', {'value': Money.format(paidMinor!)}));
+    }
     if (changeMinor != null && changeMinor! > 0) {
-      b.writeln('Change: ${Money.format(changeMinor!)}');
+      b.writeln(
+        tr('receipt.changeLine', {'value': Money.format(changeMinor!)}),
+      );
     }
     if (onAccountMinor != null && onAccountMinor! > 0) {
-      b.writeln('On account: ${Money.format(onAccountMinor!)}');
+      b.writeln(
+        tr('receipt.onAccountLine', {'value': Money.format(onAccountMinor!)}),
+      );
     }
     b.writeln();
-    b.write('Thank you!');
+    b.write(tr('receipt.thanks'));
     return b.toString();
   }
 }

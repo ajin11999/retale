@@ -6,6 +6,7 @@
   import Combobox from "$lib/components/ui/combobox.svelte";
   import Input from "$lib/components/ui/input.svelte";
   import { searchTokens, matchesTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   const BudgetSandbox = graphql(`
     query ConsoleBudgetSandbox($budgetAmount: Float!) {
@@ -140,7 +141,7 @@
 
   let selectedRequisitionId = $state<string>("");
   const requisitionOptions = $derived([
-    { value: "", label: "— Create New Requisition —" },
+    { value: "", label: t("reorder.createNewRequisition") },
     ...draftRequisitions.map((p) => ({ value: p.id, label: `${p.name} (${new Date(p.createdAt).toLocaleDateString()})` })),
   ]);
 
@@ -158,16 +159,16 @@
           feedback = { ok: false, text: res.errors[0].message };
           return;
         }
-        feedback = { ok: true, text: `Appended ${selectedLines.length} items to requisition.` };
+        feedback = { ok: true, text: t("reorder.appendedItems", { count: selectedLines.length }) };
       } else {
         const payload = selectedLines.map(l => ({ suggestionId: l.suggestionId, qty: l.suggestedQty }));
-        const name = `Requisition from Budget Simulator ${new Date().toISOString()}`;
+        const name = t("reorder.budgetRequisitionName", { date: new Date().toISOString() });
         const res = await ConvertSuggestions.mutate({ name, lines: payload });
         if (res.errors?.length) {
           feedback = { ok: false, text: res.errors[0].message };
           return;
         }
-        feedback = { ok: true, text: `Created draft requisition.` };
+        feedback = { ok: true, text: t("reorder.createdDraft") };
       }
       await generate();
     } catch (e) {
@@ -178,16 +179,16 @@
   }
 </script>
 
-<svelte:head><title>Budget Sandbox · Retale</title></svelte:head>
+<svelte:head><title>{t("reorder.budgetPageTitle")}</title></svelte:head>
 
 <div class="mx-auto max-w-4xl space-y-6">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Budgeted Priority Reorder Sandbox</h1>
-    <a href="/reorder" class="text-sm text-muted-foreground hover:underline">Back to Review</a>
+    <h1 class="text-xl font-semibold">{t("reorder.budgetTitle")}</h1>
+    <a href="/reorder" class="text-sm text-muted-foreground hover:underline">{t("reorder.backToReview")}</a>
   </div>
 
   <div class="flex items-center gap-3 bg-card p-4 rounded-lg border shadow-sm">
-    <label for="budget" class="font-medium text-sm">Available Budget:</label>
+    <label for="budget" class="font-medium text-sm">{t("reorder.availableBudget")}</label>
     <div class="relative w-40">
       <MoneyInput
         id="budget"
@@ -195,7 +196,7 @@
         bind:value={budget}
       />
     </div>
-    <Button disabled={busy || !budget || budget <= 0} onclick={generate}>Generate Plan</Button>
+    <Button disabled={busy || !budget || budget <= 0} onclick={generate}>{t("reorder.generatePlan")}</Button>
   </div>
 
   {#if feedback}
@@ -205,25 +206,25 @@
   {/if}
 
   {#if busy}
-    <p class="text-sm text-muted-foreground">Calculating optimal order plan...</p>
+    <p class="text-sm text-muted-foreground">{t("reorder.calculating")}</p>
   {:else if plan}
     <div class="grid grid-cols-2 gap-4">
       <div class="rounded-lg border bg-card p-4">
-        <p class="text-sm text-muted-foreground mb-1">Total Estimated Cost</p>
+        <p class="text-sm text-muted-foreground mb-1">{t("reorder.totalEstimatedCost")}</p>
         <p class="text-2xl font-bold">{formatNumber(plan.totalEstimatedCost)}</p>
       </div>
       <div class="rounded-lg border bg-card p-4">
-        <p class="text-sm text-muted-foreground mb-1">Remaining Budget</p>
+        <p class="text-sm text-muted-foreground mb-1">{t("reorder.remainingBudget")}</p>
         <p class="text-2xl font-bold">{formatNumber(plan.remainingBudget)}</p>
       </div>
     </div>
     
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Suggested Orders ({plan.lines.length} items)</h2>
+        <h2 class="text-lg font-semibold">{t("reorder.suggestedOrders", { count: plan.lines.length })}</h2>
         <div class="w-72">
           <Input 
-            placeholder="Search orders..." 
+            placeholder={t("reorder.searchOrders")} 
             value={searchInputText}
             oninput={(e) => onSearchInput(e.currentTarget.value)}
           />
@@ -231,7 +232,7 @@
       </div>
       
       {#if plan.lines.length === 0}
-        <p class="text-sm text-muted-foreground">No items require reordering, or budget is too low.</p>
+        <p class="text-sm text-muted-foreground">{t("reorder.noItemsRequire")}</p>
       {:else}
         <div class="rounded-lg border bg-card overflow-hidden shadow-sm">
           <table class="w-full text-sm">
@@ -240,12 +241,12 @@
                 <th class="p-3 w-10">
                   <input type="checkbox" class="h-4 w-4 rounded border-gray-300" checked={allSelected} onchange={toggleAll} />
                 </th>
-                <th class="p-3 font-medium">Product</th>
-                <th class="p-3 font-medium">Vendor</th>
-                <th class="p-3 font-medium">Urgency</th>
-                <th class="p-3 text-right font-medium">Qty</th>
-                <th class="p-3 text-right font-medium">Unit Cost</th>
-                <th class="p-3 text-right font-medium">Total Cost</th>
+                <th class="p-3 font-medium">{t("common.product")}</th>
+                <th class="p-3 font-medium">{t("common.vendor")}</th>
+                <th class="p-3 font-medium">{t("reorder.urgency")}</th>
+                <th class="p-3 text-right font-medium">{t("common.qty")}</th>
+                <th class="p-3 text-right font-medium">{t("reorder.unitCost")}</th>
+                <th class="p-3 text-right font-medium">{t("reorder.totalCost")}</th>
               </tr>
             </thead>
             <tbody>
@@ -266,7 +267,7 @@
                   <td class="p-3">{line.vendorName ?? "—"}</td>
                   <td class="p-3">
                     <Badge class={line.status === 'order_now' ? 'border border-red-200 text-red-700 bg-red-50' : line.status === 'order_soon' ? 'border border-amber-200 text-amber-700 bg-amber-50' : 'border border-emerald-200 text-emerald-700 bg-emerald-50'}>
-                      {line.status.replace('_', ' ')}
+                      {t(`reorder.status.${line.status}`)}
                     </Badge>
                   </td>
                   <td class="p-3 text-right font-medium">{line.suggestedQty}</td>
@@ -283,9 +284,9 @@
             <Combobox options={requisitionOptions} bind:value={selectedRequisitionId} class="w-64" />
             <Button disabled={busy || displaySelectedLines.length === 0} onclick={convertSelected}>
               {#if selectedRequisitionId}
-                Add {displaySelectedLines.length} item{displaySelectedLines.length === 1 ? '' : 's'} to Requisition
+                {t("reorder.addToRequisition", { count: displaySelectedLines.length })}
               {:else}
-                Convert {displaySelectedLines.length} item{displaySelectedLines.length === 1 ? '' : 's'} to Requisition
+                {t("reorder.convertToRequisitionItems", { count: displaySelectedLines.length })}
               {/if}
             </Button>
           </div>

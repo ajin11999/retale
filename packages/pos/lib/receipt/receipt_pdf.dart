@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../i18n/i18n_service.dart';
 import '../models/money.dart';
 import 'receipt.dart';
 
@@ -55,8 +56,10 @@ Future<Uint8List> buildReceiptPdf(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
-          pw.Text(Money.format(minor),
-              style: pw.TextStyle(font: font, fontSize: size)),
+          pw.Text(
+            Money.format(minor),
+            style: pw.TextStyle(font: font, fontSize: size),
+          ),
         ],
       ),
     );
@@ -65,21 +68,21 @@ Future<Uint8List> buildReceiptPdf(
   // One item. Quantity 1 collapses to a single name/total row; higher
   // quantities add a `N Units x unitPrice` line beneath the name.
   pw.Widget itemBlock(ReceiptLine line) {
-    final name = pw.Text(_latin1(line.name),
-        style: pw.TextStyle(font: regular, fontSize: 11));
-    final total = pw.Text(Money.format(line.lineTotalMinor),
-        style: pw.TextStyle(font: regular, fontSize: 11));
+    final name = pw.Text(
+      _latin1(line.name),
+      style: pw.TextStyle(font: regular, fontSize: 11),
+    );
+    final total = pw.Text(
+      Money.format(line.lineTotalMinor),
+      style: pw.TextStyle(font: regular, fontSize: 11),
+    );
 
     if (line.qty == 1) {
       return pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 4),
         child: pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: name),
-            pw.SizedBox(width: 8),
-            total,
-          ],
+          children: [pw.Expanded(child: name), pw.SizedBox(width: 8), total],
         ),
       );
     }
@@ -94,8 +97,9 @@ Future<Uint8List> buildReceiptPdf(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text(
-                  '  ${line.qty} ${line.unit ?? 'Units'} x ${Money.format(line.unitPriceMinor)}',
-                  style: pw.TextStyle(font: regular, fontSize: 9)),
+                '  ${line.qty} ${line.unit ?? 'Units'} x ${Money.format(line.unitPriceMinor)}',
+                style: pw.TextStyle(font: regular, fontSize: 9),
+              ),
               total,
             ],
           ),
@@ -106,40 +110,58 @@ Future<Uint8List> buildReceiptPdf(
 
   final body = <pw.Widget>[
     pw.Center(
-      child: logo != null
-          // A real logo replaces the store-name header; cap its height so a
-          // tall image can't push the whole receipt down the page.
-          ? pw.Image(logo, height: 60, fit: pw.BoxFit.contain)
-          : pw.Text(_latin1(receipt.store.name),
-              style: pw.TextStyle(font: bold, fontSize: 15)),
+      child:
+          logo != null
+              // A real logo replaces the store-name header; cap its height so a
+              // tall image can't push the whole receipt down the page.
+              ? pw.Image(logo, height: 60, fit: pw.BoxFit.contain)
+              : pw.Text(
+                _latin1(receipt.store.name),
+                style: pw.TextStyle(font: bold, fontSize: 15),
+              ),
     ),
     if (_has(receipt.customerName))
       pw.Padding(
         padding: const pw.EdgeInsets.only(top: 4),
         child: pw.Center(
-          child: pw.Text('Customer: ${_latin1(receipt.customerName!)}',
-              style: pw.TextStyle(font: bold, fontSize: 10)),
+          child: pw.Text(
+            tr('receipt.customerLine', {
+              'name': _latin1(receipt.customerName!),
+            }),
+            style: pw.TextStyle(font: bold, fontSize: 10),
+          ),
         ),
       ),
     pw.Divider(height: 14),
     for (final line in receipt.lines) itemBlock(line),
     pw.Divider(height: 14),
-    costRow('TOTAL', receipt.totalMinor, strong: true),
-    if (receipt.paidMinor != null) costRow('Cash', receipt.paidMinor!),
+    costRow(tr('receipt.totalUpper'), receipt.totalMinor, strong: true),
+    if (receipt.paidMinor != null)
+      costRow(tr('receipt.cashLabel'), receipt.paidMinor!),
     if (receipt.changeMinor != null && receipt.changeMinor! > 0)
-      costRow('CHANGE', receipt.changeMinor!, strong: true),
+      costRow(tr('receipt.changeUpper'), receipt.changeMinor!, strong: true),
     if (receipt.onAccountMinor != null && receipt.onAccountMinor! > 0)
-      costRow('ON ACCOUNT', receipt.onAccountMinor!, strong: true),
+      costRow(
+        tr('receipt.onAccountUpper'),
+        receipt.onAccountMinor!,
+        strong: true,
+      ),
     pw.SizedBox(height: 14),
     if (receipt.displayNumber != null)
       pw.Center(
-        child: pw.Text('Receipt ${_latin1(receipt.displayNumber!)}',
-            style: pw.TextStyle(font: regular, fontSize: 9)),
+        child: pw.Text(
+          tr('receipt.receiptNumber', {
+            'number': _latin1(receipt.displayNumber!),
+          }),
+          style: pw.TextStyle(font: regular, fontSize: 9),
+        ),
       ),
     if (receipt.createdAt != null)
       pw.Center(
-        child: pw.Text(Receipt.formatDate(receipt.createdAt!),
-            style: pw.TextStyle(font: bold, fontSize: 10)),
+        child: pw.Text(
+          Receipt.formatDate(receipt.createdAt!),
+          style: pw.TextStyle(font: bold, fontSize: 10),
+        ),
       ),
   ];
 
@@ -147,18 +169,18 @@ Future<Uint8List> buildReceiptPdf(
   // pages to avoid overflow. A thermal roll reports an infinite height, which
   // MultiPage can't paginate — render it as one continuous page instead.
   if (pageFormat.height.isFinite) {
-    doc.addPage(pw.MultiPage(
-      pageFormat: pageFormat,
-      build: (context) => body,
-    ));
+    doc.addPage(pw.MultiPage(pageFormat: pageFormat, build: (context) => body));
   } else {
-    doc.addPage(pw.Page(
-      pageFormat: pageFormat,
-      build: (context) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: body,
+    doc.addPage(
+      pw.Page(
+        pageFormat: pageFormat,
+        build:
+            (context) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: body,
+            ),
       ),
-    ));
+    );
   }
 
   return doc.save();

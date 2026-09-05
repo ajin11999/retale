@@ -12,6 +12,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
   import { matchesTokens, searchTokens } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen. The live store is
@@ -239,7 +240,7 @@
   // { value, label } parent options: a leading "Top level" row, then each
   // allowed parent (descendants of the edited node are excluded) by full path.
   const parentComboOptions = $derived([
-    { value: "", label: "— Top level —" },
+    { value: "", label: t("categories.topLevel") },
     ...parentOptions.map((n) => ({
       value: n.id,
       label: pathById.get(n.id) ?? n.name,
@@ -283,7 +284,7 @@
   async function saveQuick() {
     const q = quick;
     if (!q || !q.name.trim()) return;
-    const ok = await run("Category", () =>
+    const ok = await run(t("common.category"), () =>
       UpdateCategory.mutate({
         id: q.id,
         name: q.name.trim(),
@@ -348,7 +349,7 @@
         feedback = { ok: false, text: res.errors[0].message };
         return false;
       }
-      feedback = { ok: true, text: `${label} saved.` };
+      feedback = { ok: true, text: t("common.saved", { label }) };
       return true;
     } catch (e) {
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
@@ -361,7 +362,7 @@
   async function saveCategory() {
     const d = draft;
     if (!d || !d.name.trim()) return;
-    const ok = await run("Category", () =>
+    const ok = await run(t("common.category"), () =>
       d.id
         ? UpdateCategory.mutate({
             id: d.id,
@@ -382,21 +383,16 @@
   }
 
   async function toggleArchived(n: Node) {
-    const ok = await run("Category", () =>
+    const ok = await run(t("common.category"), () =>
       SetCategoryArchived.mutate({ id: n.id, archived: !n.archived }),
     );
     if (ok) await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
   }
 
   async function deleteCategory(n: Node) {
-    if (
-      !confirm(
-        `Delete "${n.name}"? Its products become uncategorized and child ` +
-          `categories are reparented.`,
-      )
-    )
+    if (!confirm(t("categories.confirmDelete", { name: n.name })))
       return;
-    const ok = await run("Category", () => DeleteCategory.mutate({ id: n.id }));
+    const ok = await run(t("common.category"), () => DeleteCategory.mutate({ id: n.id }));
     if (ok) {
       if (draft?.id === n.id) draft = null;
       await CategoryList.fetch({ policy: CachePolicy.NetworkOnly });
@@ -404,21 +400,21 @@
   }
 </script>
 
-<svelte:head><title>Categories · Retale Console</title></svelte:head>
+<svelte:head><title>{t("categories.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <h1 class="text-xl font-semibold">Categories</h1>
+    <h1 class="text-xl font-semibold">{t("categories.title")}</h1>
     <div class="flex items-center gap-2">
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search categories…"
+          placeholder={t("categories.searchCategories")}
           bind:value={search}
         />
       </div>
       <Button size="sm" disabled={busy || !canCreate} onclick={newCategory}>
-        New category
+        {t("categories.newCategory")}
       </Button>
     </div>
   </div>
@@ -433,18 +429,18 @@
     <p
       class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
     >
-      You have read-only access to products — editing is disabled.
+      {t("categories.readOnlyNotice")}
     </p>
   {/if}
 
   {#if draft}
     <div class="space-y-3 rounded-lg border bg-card p-5">
       <h2 class="text-sm font-semibold">
-        {draft.id ? "Edit category" : "New category"}
+        {draft.id ? t("categories.editCategory") : t("categories.newCategory")}
       </h2>
       <div class="grid grid-cols-2 gap-4">
         <label class="relative space-y-1">
-          <span class="text-sm font-medium">Name</span>
+          <span class="text-sm font-medium">{t("common.name")}</span>
           <Input bind:value={draft.name} disabled={!canEdit} />
           <DuplicateHint
             query={draft.name}
@@ -454,22 +450,22 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Parent</span>
+          <span class="text-sm font-medium">{t("categories.parent")}</span>
           <Combobox
             options={parentComboOptions}
             bind:value={draft.parentId}
-            placeholder="Search parent category…"
+            placeholder={t("categories.searchParent")}
             disabled={!canEdit}
           />
         </label>
         <label class="space-y-1">
-          <span class="text-sm font-medium">Min margin (%)</span>
+          <span class="text-sm font-medium">{t("categories.minMargin")}</span>
           <NumericInput
             step="0.1"
             value={bpsToPct(draft.minMarginBps)}
             oninput={(e) =>
               (draft!.minMarginBps = pctToBps(e.currentTarget.value))}
-            placeholder="Inherited / none"
+            placeholder={t("categories.inheritedNone")}
             disabled={!canEdit}
           />
         </label>
@@ -479,21 +475,21 @@
           variant="ghost"
           size="sm"
           disabled={busy}
-          onclick={() => (draft = null)}>Cancel</Button
+          onclick={() => (draft = null)}>{t("common.cancel")}</Button
         >
         <Button
           size="sm"
           disabled={busy || !canEdit || !draft.name.trim()}
           onclick={saveCategory}
         >
-          {draft.id ? "Save category" : "Create category"}
+          {draft.id ? t("categories.saveCategory") : t("categories.createCategory")}
         </Button>
       </div>
     </div>
   {/if}
 
   {#if $CategoryList.fetching && categories.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $CategoryList.errors?.length}
     <p class="text-sm text-destructive">{$CategoryList.errors[0].message}</p>
   {:else}
@@ -501,10 +497,10 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">Category</th>
-            <th class="px-4 py-2 text-right font-medium">Products</th>
-            <th class="px-4 py-2 text-right font-medium">Min margin</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("common.category")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("nav.products")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("products.minMargin")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
             <th class="px-4 py-2"></th>
           </tr>
         </thead>
@@ -528,7 +524,7 @@
                     <button
                       type="button"
                       class="rounded px-1 font-medium hover:bg-muted disabled:cursor-not-allowed"
-                      title="Click to rename"
+                      title={t("categories.clickToRename")}
                       disabled={busy}
                       onclick={() => startQuick(n, "name")}>{n.name}</button
                     >
@@ -542,7 +538,7 @@
                   <a
                     href={`/products?category=${n.id}`}
                     class="text-primary hover:underline"
-                    title={`View products in ${n.name}`}
+                    title={t("categories.viewProductsIn", { name: n.name })}
                     >{productCount.get(n.id)}</a
                   >
                 {:else}
@@ -556,7 +552,7 @@
                     ? "bg-muted text-muted-foreground"
                     : "bg-emerald-100 text-emerald-700"}
                 >
-                  {n.archived ? "Archived" : "Active"}
+                  {n.archived ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
@@ -564,34 +560,34 @@
                   {#if quick?.id === n.id}
                     <IconButton
                       icon={Check}
-                      label="Save"
+                      label={t("common.save")}
                       variant="primary"
                       disabled={busy || !quick.name.trim()}
                       onclick={saveQuick}
                     />
                     <IconButton
                       icon={X}
-                      label="Cancel"
+                      label={t("common.cancel")}
                       disabled={busy}
                       onclick={() => (quick = null)}
                     />
                   {:else}
                     <IconButton
                       icon={Pencil}
-                      label="Edit"
+                      label={t("common.edit")}
                       variant="primary"
                       disabled={busy || !canEdit}
                       onclick={() => editCategory(n)}
                     />
                     <IconButton
                       icon={n.archived ? ArchiveRestore : Archive}
-                      label={n.archived ? "Restore" : "Archive"}
+                      label={n.archived ? t("addresses.restore") : t("addresses.archive")}
                       disabled={busy || !canArchive}
                       onclick={() => toggleArchived(n)}
                     />
                     <IconButton
                       icon={Trash2}
-                      label="Delete"
+                      label={t("common.delete")}
                       variant="destructive"
                       disabled={busy || !canEdit}
                       onclick={() => deleteCategory(n)}
@@ -604,7 +600,7 @@
           {#if visibleTree.length === 0}
             <tr>
               <td colspan="5" class="px-4 py-10 text-center text-muted-foreground">
-                {search.trim() ? "No categories match." : "No categories yet."}
+                {search.trim() ? t("categories.noMatch") : t("categories.noCategories")}
               </td>
             </tr>
           {/if}

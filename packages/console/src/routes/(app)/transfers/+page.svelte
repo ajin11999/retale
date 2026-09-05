@@ -6,7 +6,8 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
-  import { statusLabel, treePathMap } from "$lib/utils";
+  import { treePathMap } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   // Query document — Houdini scans this for codegen.
@@ -41,7 +42,7 @@
   const locations = $derived($TransferList.data?.locations ?? []);
 
   const locationPaths = $derived(treePathMap(locations));
-  const locationName = (id: string) => locationPaths.get(id) ?? "Unknown";
+  const locationName = (id: string) => locationPaths.get(id) ?? t("products.unknown");
 
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -61,22 +62,22 @@
     if (!items || items.length === 0) return "—";
     const uniqueSources = Array.from(new Set(items.map((i) => i.sourceLocationId)));
     if (uniqueSources.length === 1) return locationName(uniqueSources[0] as string);
-    return "Multiple";
+    return t("transfers.multiple");
   }
 </script>
 
-<svelte:head><title>Stock transfers · Retale Console</title></svelte:head>
+<svelte:head><title>{t("transfers.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Stock transfers</h1>
+    <h1 class="text-xl font-semibold">{t("transfers.title")}</h1>
     <Button size="sm" disabled={!canCreate} onclick={() => goto("/transfers/new")}>
-      New transfer
+      {t("transfers.newTransfer")}
     </Button>
   </div>
 
   {#if $TransferList.fetching && transfers.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $TransferList.errors?.length}
     <p class="text-sm text-destructive">{$TransferList.errors[0].message}</p>
   {:else}
@@ -84,35 +85,35 @@
       <table class="w-full text-sm">
         <thead class="border-b bg-muted/50 text-left text-muted-foreground">
           <tr>
-            <th class="px-4 py-2 font-medium">From → To</th>
-            <th class="px-4 py-2 text-right font-medium">Lines</th>
-            <th class="px-4 py-2 font-medium">Created</th>
-            <th class="px-4 py-2 font-medium">Status</th>
+            <th class="px-4 py-2 font-medium">{t("transfers.fromTo")}</th>
+            <th class="px-4 py-2 text-right font-medium">{t("transfers.lines")}</th>
+            <th class="px-4 py-2 font-medium">{t("transfers.created")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.status")}</th>
           </tr>
         </thead>
         <tbody>
-          {#each paginatedTransfers as t (t.id)}
+          {#each paginatedTransfers as tr (tr.id)}
             <tr class="border-b last:border-0 hover:bg-muted/40">
               <td class="px-4 py-2">
                 <a
-                  href={`/transfers/${t.id}`}
+                  href={`/transfers/${tr.id}`}
                   class="font-medium text-primary hover:underline"
                 >
-                  {formatSources(t.items)} →
-                  {locationName(t.targetLocationId)}
+                  {formatSources(tr.items)} →
+                  {locationName(tr.targetLocationId)}
                 </a>
               </td>
-              <td class="px-4 py-2 text-right">{t.items.length}</td>
-              <td class="px-4 py-2">{fmtDate(t.createdAt)}</td>
+              <td class="px-4 py-2 text-right">{tr.items.length}</td>
+              <td class="px-4 py-2">{fmtDate(tr.createdAt)}</td>
               <td class="px-4 py-2">
-                <Badge class={statusClass(t.status)}>{statusLabel(t.status)}</Badge>
+                <Badge class={statusClass(tr.status)}>{t(`transfers.status.${tr.status}`)}</Badge>
               </td>
             </tr>
           {/each}
           {#if transfers.length === 0}
             <tr>
               <td colspan="4" class="px-4 py-10 text-center text-muted-foreground">
-                No transfers yet.
+                {t("transfers.noTransfers")}
               </td>
             </tr>
           {/if}
@@ -121,7 +122,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {transfers.length} transfer{transfers.length === 1 ? "" : "s"}
+        {t("transfers.transferCount", { count: transfers.length })}
       </p>
       <Pagination bind:page={pageNumber} {pageSize} totalItems={transfers.length} />
     </div>

@@ -8,6 +8,7 @@
   import Input from "$lib/components/ui/input.svelte";
   import Pagination from "$lib/components/ui/pagination.svelte";
   import Select from "$lib/components/ui/select.svelte";
+  import { t } from "$lib/i18n";
   import type { PageData } from "./$types";
 
   graphql(`
@@ -157,7 +158,9 @@
         error = res.errors[0].message;
         return;
       }
-      info = `${visible ? "Showed" : "Hid"} ${res.data?.setProductsOnlineVisible ?? 0} product(s).`;
+      info = t(visible ? "catalog.bulkShown" : "catalog.bulkHidden", {
+        count: res.data?.setProductsOnlineVisible ?? 0,
+      });
       selection = new Set();
       await Store.fetch();
     } catch (e) {
@@ -170,7 +173,7 @@
   async function publish() {
     if (
       !confirm(
-        "Build a fresh snapshot and push it to the live catalog?",
+        t("catalog.confirmPublish"),
       )
     )
       return;
@@ -186,8 +189,8 @@
       const r = res.data?.publishCatalog;
       info =
         r?.status === "success"
-          ? `Published ${r.productCount} product(s).`
-          : `Publish failed: ${r?.errorMessage ?? "unknown error"}`;
+          ? t("catalog.publishSuccess", { count: r.productCount })
+          : t("catalog.publishFailed", { error: r?.errorMessage ?? t("products.unknown") });
       await Store.fetch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -200,32 +203,31 @@
     iso ? new Date(iso).toLocaleString("id-ID") : "—";
 </script>
 
-<svelte:head><title>Catalog · Retale Console</title></svelte:head>
+<svelte:head><title>{t("catalog.pageTitle")}</title></svelte:head>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold">Catalog</h1>
+      <h1 class="text-xl font-semibold">{t("catalog.title")}</h1>
       <p class="text-sm text-muted-foreground">
-        {visibleCount} of {products.length} products are visible on the live
-        catalog.
+        {t("catalog.subtitle", { visibleCount, total: products.length })}
       </p>
     </div>
     <div class="flex items-center gap-2">
       <Select bind:value={visibilityFilter} class="w-40">
-        <option value="all">All products</option>
-        <option value="visible">Visible only</option>
-        <option value="hidden">Hidden only</option>
+        <option value="all">{t("catalog.allProducts")}</option>
+        <option value="visible">{t("catalog.visibleOnly")}</option>
+        <option value="hidden">{t("catalog.hiddenOnly")}</option>
       </Select>
       <div class="w-64">
         <Input
           type="search"
-          placeholder="Search products…"
+          placeholder={t("products.searchProducts")}
           bind:value={search}
         />
       </div>
       <Button size="sm" disabled={busy || !canPublish} onclick={publish}>
-        Publish catalog
+        {t("catalog.publishCatalog")}
       </Button>
     </div>
   </div>
@@ -242,32 +244,32 @@
       class="flex items-center justify-between rounded-md border bg-card px-3 py-2 text-sm"
     >
       <span>
-        {selection.size} selected
+        {t("common.selected", { count: selection.size })}
       </span>
       <div class="flex gap-2">
         <Button
           size="sm"
           variant="outline"
           disabled={busy || !canManage}
-          onclick={() => bulkSet(true)}>Show selected</Button
+          onclick={() => bulkSet(true)}>{t("catalog.showSelected")}</Button
         >
         <Button
           size="sm"
           variant="outline"
           disabled={busy || !canManage}
-          onclick={() => bulkSet(false)}>Hide selected</Button
+          onclick={() => bulkSet(false)}>{t("catalog.hideSelected")}</Button
         >
         <Button
           size="sm"
           variant="ghost"
-          onclick={() => (selection = new Set())}>Clear</Button
+          onclick={() => (selection = new Set())}>{t("common.clear")}</Button
         >
       </div>
     </div>
   {/if}
 
   {#if $Store.fetching && products.length === 0}
-    <p class="text-sm text-muted-foreground">Loading…</p>
+    <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
   {:else if $Store.errors?.length}
     <p class="text-sm text-destructive">{$Store.errors[0].message}</p>
   {:else}
@@ -283,11 +285,11 @@
                 onchange={toggleAllRows}
               />
             </th>
-            <th class="px-4 py-2 font-medium">Product</th>
-            <th class="px-4 py-2 font-medium">Category</th>
-            <th class="px-4 py-2 font-medium">Visibility</th>
-            <th class="px-4 py-2 font-medium">Price mode</th>
-            <th class="px-4 py-2 font-medium">Stock mode</th>
+            <th class="px-4 py-2 font-medium">{t("common.product")}</th>
+            <th class="px-4 py-2 font-medium">{t("common.category")}</th>
+            <th class="px-4 py-2 font-medium">{t("catalog.visibility")}</th>
+            <th class="px-4 py-2 font-medium">{t("products.priceMode")}</th>
+            <th class="px-4 py-2 font-medium">{t("catalog.stockMode")}</th>
           </tr>
         </thead>
         <tbody>
@@ -316,9 +318,9 @@
               </td>
               <td class="px-4 py-2">
                 {#if p.onlineVisible}
-                  <Badge class="bg-emerald-100 text-emerald-700">Visible</Badge>
+                  <Badge class="bg-emerald-100 text-emerald-700">{t("catalog.visible")}</Badge>
                 {:else}
-                  <Badge class="bg-muted text-muted-foreground">Hidden</Badge>
+                  <Badge class="bg-muted text-muted-foreground">{t("catalog.hidden")}</Badge>
                 {/if}
               </td>
               <td class="px-4 py-2 font-mono text-xs">{p.onlinePriceMode}</td>
@@ -328,7 +330,7 @@
           {#if rows.length === 0}
             <tr>
               <td colspan="6" class="px-4 py-10 text-center text-muted-foreground">
-                No products match.
+                {t("products.noProductsMatch")}
               </td>
             </tr>
           {/if}
@@ -337,7 +339,7 @@
     </div>
     <div class="flex items-center justify-between">
       <p class="text-sm text-muted-foreground">
-        {rows.length} product{rows.length === 1 ? "" : "s"}
+        {t("products.productCount", { count: rows.length })}
       </p>
       <Pagination bind:page={productsPage} {pageSize} totalItems={rows.length} />
     </div>
@@ -345,7 +347,7 @@
     <!-- Publish history -->
     <section>
       <h2 class="mb-2 text-sm font-semibold">
-        Publish history
+        {t("catalog.publishHistory")}
         <span class="ml-1 text-xs font-normal text-muted-foreground">
           ({publishes.length})
         </span>
@@ -354,11 +356,11 @@
         <table class="w-full text-sm">
           <thead class="border-b bg-muted/50 text-left text-muted-foreground">
             <tr>
-              <th class="px-4 py-2 font-medium">When</th>
-              <th class="px-4 py-2 font-medium">Trigger</th>
-              <th class="px-4 py-2 font-medium">Status</th>
-              <th class="px-4 py-2 text-right font-medium">Products</th>
-              <th class="px-4 py-2 font-medium">Snapshot</th>
+              <th class="px-4 py-2 font-medium">{t("catalog.when")}</th>
+              <th class="px-4 py-2 font-medium">{t("catalog.trigger")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.status")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("nav.products")}</th>
+              <th class="px-4 py-2 font-medium">{t("catalog.snapshot")}</th>
             </tr>
           </thead>
           <tbody>
@@ -368,9 +370,9 @@
                 <td class="px-4 py-2 capitalize">{pub.trigger}</td>
                 <td class="px-4 py-2">
                   {#if pub.status === "success"}
-                    <Badge class="bg-emerald-100 text-emerald-700">success</Badge>
+                    <Badge class="bg-emerald-100 text-emerald-700">{t("catalog.publishStatus.success")}</Badge>
                   {:else}
-                    <Badge class="bg-destructive/10 text-destructive">error</Badge>
+                    <Badge class="bg-destructive/10 text-destructive">{t("catalog.publishStatus.error")}</Badge>
                   {/if}
                   {#if pub.errorMessage}
                     <p class="mt-1 text-xs text-destructive">
@@ -387,7 +389,7 @@
             {#if publishes.length === 0}
               <tr>
                 <td colspan="5" class="px-4 py-6 text-center text-muted-foreground">
-                  No publishes yet.
+                  {t("catalog.noPublishes")}
                 </td>
               </tr>
             {/if}
