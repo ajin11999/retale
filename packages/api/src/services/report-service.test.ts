@@ -22,6 +22,7 @@ import {
   salesReport,
   sessionVarianceReport,
   sessionVariantSales,
+  variantSalesReport,
 } from "./report-service.ts";
 
 let userId: string;
@@ -364,6 +365,94 @@ describe("sessionVariantSales", () => {
     expect(row!.qtySold).toBe(1);
     expect(row!.revenueMinor).toBe(100); // the sale price, despite the 100 worker cut
     expect(row!.costMinor).toBe(0);
+  });
+});
+
+describe("variantSalesReport", () => {
+  /** Insert one order closed at a given time, with one line per item. */
+  async function seedDatedOrder(input: {
+    closedAt: Date;
+    cancelled?: boolean;
+    items: {
+      sku: string;
+      name?: string;
+      variantLabel?: string | null;
+      qty: number;
+      priceMinor: number;
+      costMinor: number;
+    }[];
+  }): Promise<void> {
+    const orderId = ulid();
+    await db.insert(orders).values({
+      id: orderId,
+      closedAt: input.closedAt,
+      cancelledAt: input.cancelled ? input.closedAt : null,
+      totalMinor: 0,
+      createdByUserId: userId,
+    });
+    await db.insert(orderItems).values(
+      input.items.map((it) => ({
+        id: ulid(),
+        orderId,
+        qty: it.qty,
+        discountMinor: 0,
+        snapshotProductName: it.name ?? "Widget",
+        snapshotProductSku: it.sku,
+        snapshotVariantLabel: it.variantLabel ?? null,
+        snapshotUnit: "piece" as const,
+        snapshotPriceMinor: it.priceMinor,
+        snapshotCostMinor: it.costMinor,
+        snapshotTaxRateBps: 0,
+        snapshotPriceMode: "tax_exclusive" as const,
+        attributionAmountMinor: 0,
+        voidedAt: null,
+      })),
+    );
+  }
+
+  test("groups by variant over the period, sorted by revenue desc", async () => {
+    await seedDatedOrder({
+      closedAt: new Date("2026-05-10T10:00:00"),
+      items: [
+        { sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: 2, priceMinor: 1000, costMinor: 600 },
+        { sku: "SKU-B", name: "Beta", qty: 1, priceMinor: 6000, costMinor: 3000 },
+      ],
+    });
+    await seedDatedOrder({
+      closedAt: new Date("2026-05-12T10:00:00"),
+      items: [{ sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: 3, priceMinor: 1000, costMinor: 600 }],
+    });
+    // Cancelled order in range — excluded.
+    await seedDatedOrder({
+      closedAt: new Date("2026-05-11T10:00:00"),
+      cancelled: true,
+      items: [{ sku: "SKU-C", name: "Gamma", qty: 5, priceMinor: 9000, costMinor: 1 }],
+    });
+    // Order outside the range — excluded.
+    await seedDatedOrder({
+      closedAt: new Date("2026-06-01T10:00:00"),
+      items: [{ sku: "SKU-A", name: "Alpha", variantLabel: "Red", qty: 9, priceMinor: 1000, costMinor: 600 }],
+    });
+
+    const rows = await variantSalesReport({
+      periodStart: "2026-05-01",
+      periodEnd: "2026-05-31",
+    });
+    expect(rows).toHaveLength(2);
+
+    // Sorted by revenue desc: B = 6000 > A = 5000.
+    const [b, a] = rows;
+    expect(b!.sku).toBe("SKU-B");
+    expect(b!.qtySold).toBe(1);
+    expect(b!.revenueMinor).toBe(6000);
+    expect(b!.costMinor).toBe(3000);
+
+    expect(a!.sku).toBe("SKU-A");
+    expect(a!.productName).toBe("Alpha");
+    expect(a!.variantLabel).toBe("Red");
+    expect(a!.qtySold).toBe(5);
+    expect(a!.revenueMinor).toBe(5000);
+    expect(a!.costMinor).toBe(3000);
   });
 });
 

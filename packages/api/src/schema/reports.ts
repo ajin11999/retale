@@ -110,6 +110,8 @@ export const typeDefs = /* GraphQL */ `
     ): SessionVarianceReport!
     "Per-variant units / revenue / cost for one POS session — gross sale price, a quick lookup (unlike the aggregate reports, it does not net attribution)."
     sessionVariantSales(sessionId: ID!): [SessionVariantSale!]!
+    "Per-variant units / revenue / cost for orders closed in the period — which variant sold the most. Same gross-sale-price grouping as sessionVariantSales."
+    variantSalesReport(periodStart: String!, periodEnd: String!): [SessionVariantSale!]!
   }
 `;
 
@@ -170,6 +172,14 @@ export const resolvers = {
     ) => {
       await requirePermission(ctx, "report.margin.view");
       return reports.sessionVariantSales(args.sessionId);
+    },
+    variantSalesReport: async (
+      _: unknown,
+      args: reports.DateRange,
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "report.sales.view");
+      return reports.variantSalesReport(args);
     },
   },
 };

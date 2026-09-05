@@ -165,6 +165,11 @@ type Query {
   """
   sessionVariantSales(sessionId: ID!): [SessionVariantSale!]!
 
+  """
+  Per-variant units / revenue / cost for orders closed in the period — which variant sold the most. Same gross-sale-price grouping as sessionVariantSales.
+  """
+  variantSalesReport(periodStart: String!, periodEnd: String!): [SessionVariantSale!]!
+
   """Balanced double-entry journal for the period, for external accounting."""
   journalExport(periodStart: String!, periodEnd: String!): JournalExport!
   requisitions(status: RequisitionStatus, includeCancelled: Boolean): [PurchaseRequisition!]!

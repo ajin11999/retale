@@ -107,6 +107,20 @@
     }
   `);
 
+  const VariantSalesReport = graphql(`
+    query VariantSalesReport($periodStart: String!, $periodEnd: String!) @cache(policy: NetworkOnly) {
+      variantSalesReport(periodStart: $periodStart, periodEnd: $periodEnd) {
+        variantId
+        productName
+        variantLabel
+        sku
+        qtySold
+        revenueMinor
+        costMinor
+      }
+    }
+  `);
+
   // Current tracking-account balances — read-only mirror of /tracking, shown as
   // a Reports tab. Not period-driven; reuses the existing trackingAccounts field.
   const TrackingBalances = graphql(`
@@ -163,6 +177,7 @@
   }
   const ALL_TABS = $derived<Tab[]>([
     { id: "sales", label: t("reports.tab.sales"), perm: "report.sales.view", ranged: true },
+    { id: "variants", label: t("reports.tab.variants"), perm: "report.sales.view", ranged: true },
     { id: "profit", label: t("reports.tab.profit"), perm: "report.margin.view", ranged: true },
     { id: "ar", label: t("reports.tab.ar"), perm: "report.ar_aging.view", ranged: true },
     { id: "ap", label: t("reports.tab.ap"), perm: "report.ap_aging.view", ranged: true },
@@ -254,6 +269,7 @@
         : range;
     try {
       if (tabId === "sales") await SalesReport.fetch({ variables: range });
+      else if (tabId === "variants") await VariantSalesReport.fetch({ variables: range });
       else if (tabId === "profit") await ProfitReport.fetch({ variables: range });
       else if (tabId === "ar")
         await ArAgingReport.fetch({ variables: optionalRange });
@@ -330,8 +346,39 @@
     }
     return out;
   });
-  const profit = $derived($ProfitReport.data?.profitReport);
 
+  // ---- Variants ------------------------------------------------------------
+  // Already sorted by revenue desc by the API; the search box filters
+  // client-side and the totals follow the filter.
+  const variantRows = $derived(
+    $VariantSalesReport.data?.variantSalesReport ?? [],
+  );
+  let variantSearch = $state("");
+  const filteredVariants = $derived.by(() => {
+    const q = variantSearch.trim().toLowerCase();
+    if (!q) return variantRows;
+    return variantRows.filter(
+      (r) =>
+        r.productName.toLowerCase().includes(q) ||
+        (r.variantLabel?.toLowerCase().includes(q) ?? false) ||
+        r.sku.toLowerCase().includes(q),
+    );
+  });
+  const variantTotals = $derived.by(() =>
+    filteredVariants.reduce(
+      (sum, r) => ({
+        qty: sum.qty + r.qtySold,
+        revenue: sum.revenue + r.revenueMinor,
+        cost: sum.cost + r.costMinor,
+      }),
+      { qty: 0, revenue: 0, cost: 0 },
+    ),
+  );
+  // Margin as a percent of revenue; "—" when there's no revenue to divide by.
+  const variantMarginPct = (revenue: number, cost: number) =>
+    revenue === 0 ? "—" : `${(((revenue - cost) / revenue) * 100).toFixed(1)}%`;
+
+  const profit = $derived($ProfitReport.data?.profitReport);
   // Daily revenue + COGS series for the profit tab, gap-filled like
   // salesSeries (and with the same >370-day bail).
   const profitSeries = $derived.by(() => {
@@ -618,6 +665,94 @@
           </table>
         </div>
       {/if}
+    {/if}
+
+    <!-- ---- Variants ------------------------------------------------------- -->
+    {#if active === "variants" && !busy}
+      <div class="flex items-center gap-2">
+        <div class="w-full max-w-sm">
+          <Input
+            type="search"
+            placeholder={t("reports.searchVariants")}
+            bind:value={variantSearch}
+          />
+        </div>
+        {#if variantSearch.trim()}
+          <span class="whitespace-nowrap text-xs text-muted-foreground">
+            {t("reports.resultsCount", { count: filteredVariants.length, total: variantRows.length })}
+          </span>
+        {/if}
+      </div>
+
+      <div class="overflow-hidden rounded-lg border bg-card">
+        <table class="w-full text-sm">
+          <thead class="border-b bg-muted/50 text-left text-muted-foreground">
+            <tr>
+              <th class="px-4 py-2 font-medium">{t("common.product")}</th>
+              <th class="px-4 py-2 font-medium">{t("common.sku")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("sessions.qtySold")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("sessions.revenue")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("common.cost")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("sessions.margin")}</th>
+              <th class="px-4 py-2 text-right font-medium">{t("sessions.marginPct")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each filteredVariants as r (r.variantId ?? r.sku)}
+              {@const margin = r.revenueMinor - r.costMinor}
+              <tr class="border-b last:border-0 hover:bg-muted/40">
+                <td class="px-4 py-2">
+                  <span class="font-medium">{r.productName}</span>
+                  {#if r.variantLabel}
+                    <span class="ml-1 text-xs text-muted-foreground">
+                      {r.variantLabel}
+                    </span>
+                  {/if}
+                </td>
+                <td class="px-4 py-2 font-mono text-xs text-muted-foreground">
+                  {r.sku}
+                </td>
+                <td class="px-4 py-2 text-right">{r.qtySold}</td>
+                <td class="px-4 py-2 text-right">{formatMoney(r.revenueMinor)}</td>
+                <td class="px-4 py-2 text-right">{formatMoney(r.costMinor)}</td>
+                <td class="px-4 py-2 text-right {margin < 0 ? 'text-destructive' : ''}">
+                  {formatMoney(margin)}
+                </td>
+                <td class="px-4 py-2 text-right text-muted-foreground">
+                  {variantMarginPct(r.revenueMinor, r.costMinor)}
+                </td>
+              </tr>
+            {/each}
+            {#if variantRows.length === 0}
+              <tr>
+                <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
+                  {t("reports.noVariantsSold")}
+                </td>
+              </tr>
+            {:else if filteredVariants.length === 0}
+              <tr>
+                <td colspan="7" class="px-4 py-10 text-center text-muted-foreground">
+                  {t("reports.noVariantsMatch", { query: variantSearch.trim() })}
+                </td>
+              </tr>
+            {:else}
+              {@const margin = variantTotals.revenue - variantTotals.cost}
+              <tr class="border-t bg-muted/30 font-medium">
+                <td class="px-4 py-2" colspan="2">{t("common.total")}</td>
+                <td class="px-4 py-2 text-right">{variantTotals.qty}</td>
+                <td class="px-4 py-2 text-right">{formatMoney(variantTotals.revenue)}</td>
+                <td class="px-4 py-2 text-right">{formatMoney(variantTotals.cost)}</td>
+                <td class="px-4 py-2 text-right {margin < 0 ? 'text-destructive' : ''}">
+                  {formatMoney(margin)}
+                </td>
+                <td class="px-4 py-2 text-right text-muted-foreground">
+                  {variantMarginPct(variantTotals.revenue, variantTotals.cost)}
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        </table>
+      </div>
     {/if}
 
     <!-- ---- Profit --------------------------------------------------------- -->

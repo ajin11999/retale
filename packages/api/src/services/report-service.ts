@@ -212,6 +212,58 @@ export async function sessionVariantSales(
       ),
     );
 
+  return groupVariantRows(rows);
+}
+
+/**
+ * Per-variant units / revenue / cost for every non-cancelled order closed
+ * within the period — the same gross-sale-price grouping as
+ * {@link sessionVariantSales}, but scoped to a date range instead of one POS
+ * session, so the shop can see which variant sold the most. Sorted by revenue,
+ * descending.
+ */
+export async function variantSalesReport(
+  range: DateRange,
+): Promise<SessionVariantSaleRow[]> {
+  const { start, end } = rangeBounds(range);
+  const rows = await db
+    .select({
+      variantId: orderItems.variantId,
+      productName: orderItems.snapshotProductName,
+      variantLabel: orderItems.snapshotVariantLabel,
+      sku: orderItems.snapshotProductSku,
+      priceMinor: orderItems.snapshotPriceMinor,
+      costMinor: orderItems.snapshotCostMinor,
+      qty: orderItems.qty,
+      discountMinor: orderItems.discountMinor,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orderItems.orderId, orders.id))
+    .where(
+      and(
+        isNull(orders.cancelledAt),
+        isNull(orderItems.voidedAt),
+        gte(orders.closedAt, start),
+        lte(orders.closedAt, end),
+      ),
+    );
+
+  return groupVariantRows(rows);
+}
+
+interface VariantLineRow {
+  variantId: string | null;
+  productName: string;
+  variantLabel: string | null;
+  sku: string;
+  priceMinor: number;
+  costMinor: number;
+  qty: number;
+  discountMinor: number;
+}
+
+/** Group gross-sale-price lines by variant; shared by both variant reports. */
+function groupVariantRows(rows: VariantLineRow[]): SessionVariantSaleRow[] {
   const byVariant = new Map<string, SessionVariantSaleRow>();
   for (const r of rows) {
     // A hard-deleted variant leaves variantId null; bucket those by sku so they
