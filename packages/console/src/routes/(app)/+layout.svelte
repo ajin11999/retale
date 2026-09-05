@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import type { Snippet, Component } from "svelte";
+  import { slide } from "svelte/transition";
   import { t } from "$lib/i18n";
   import type { LayoutServerData } from "./$types";
   import {
@@ -34,7 +35,6 @@
     Settings,
     User,
     ChevronDown,
-    ChevronRight,
     LogOut,
   } from "@lucide/svelte";
 
@@ -144,21 +144,22 @@
   const isGroupActive = (group: { items: NavItem[] }) =>
     group.items.some((item) => isActive(item.href));
 
-  // Accordion state: map of groupId -> open boolean
-  let openGroups = $state<Record<string, boolean>>({});
+  // Accordion state: at most one group expanded at a time.
+  let openGroup = $state<string | null>(null);
 
-  // Auto-expand group that contains the current active route
+  // Auto-expand the group that contains the current active route, collapsing
+  // whatever was open before.
   $effect(() => {
     const currentPath = page.url.pathname;
-    for (const group of nav) {
-      if (group.items.some((item) => isActive(item.href))) {
-        openGroups[group.id] = true;
-      }
-    }
+    void currentPath;
+    const activeGroup = nav.find((group) =>
+      group.items.some((item) => isActive(item.href)),
+    );
+    openGroup = activeGroup ? activeGroup.id : null;
   });
 
   const toggleGroup = (groupId: string) => {
-    openGroups[groupId] = !openGroups[groupId];
+    openGroup = openGroup === groupId ? null : groupId;
   };
 </script>
 
@@ -192,7 +193,7 @@
 
       <!-- Accordion Navigation Groups -->
       {#each nav as group (group.id)}
-        {@const isOpen = !!openGroups[group.id]}
+        {@const isOpen = openGroup === group.id}
         {@const hasActiveChild = isGroupActive(group)}
         {@const GroupIcon = group.icon}
 
@@ -201,6 +202,7 @@
           <button
             type="button"
             onclick={() => toggleGroup(group.id)}
+            aria-expanded={isOpen}
             class="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-xs font-semibold tracking-wide transition-colors cursor-pointer
               {hasActiveChild && !isOpen
               ? 'text-primary bg-primary/5 hover:bg-primary/10'
@@ -215,17 +217,17 @@
               {#if hasActiveChild && !isOpen}
                 <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
               {/if}
-              {#if isOpen}
-                <ChevronDown class="h-3.5 w-3.5 text-muted-foreground transition-transform" />
-              {:else}
-                <ChevronRight class="h-3.5 w-3.5 text-muted-foreground transition-transform" />
-              {/if}
+              <ChevronDown
+                class="h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 {isOpen
+                  ? 'rotate-0'
+                  : '-rotate-90'}"
+              />
             </div>
           </button>
 
           <!-- Group Sub-items List (Collapsible) -->
           {#if isOpen}
-            <div class="ml-3 pl-2.5 border-l border-border/60 space-y-0.5 py-0.5">
+            <div transition:slide={{ duration: 200 }} class="ml-3 overflow-hidden pl-2.5 border-l border-border/60 space-y-0.5 py-0.5">
               {#each group.items as item (item.href)}
                 {@const itemActive = isActive(item.href)}
                 {@const ItemIcon = item.icon}
