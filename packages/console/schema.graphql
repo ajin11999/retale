@@ -112,6 +112,22 @@ type Query {
   """Every vendor that has a code mapped for a variant."""
   codesForVariant(variantId: ID!): [VendorVariantCode!]!
 
+  """Reference pricelist rows for a vendor."""
+  catalogItems(vendorId: ID!, search: String, includeArchived: Boolean): [VendorCatalogItem!]!
+  catalogItem(id: ID!): VendorCatalogItem
+
+  """Append-only price history for a catalog row."""
+  catalogPriceHistory(itemId: ID!): [VendorCatalogPrice!]!
+
+  """Cheapest-first catalog prices linked to a variant, across vendors."""
+  catalogPriceCompare(variantId: ID!): [CatalogPriceComparison!]!
+
+  """Import audit trail for a vendor."""
+  catalogImports(vendorId: ID!): [VendorCatalogImport!]!
+
+  """True when the configured LLM endpoint answers (Settings page probe)."""
+  llmHealth: Boolean!
+
   """Catalog publish history, newest first."""
   catalogPublishes(limit: Int): [CatalogPublish!]!
 
@@ -542,6 +558,26 @@ type Mutation {
   """
   setVendorVariantCode(vendorId: ID!, variantId: ID!, code: String!, isPreferred: Boolean): VendorVariantCode!
   deleteVendorVariantCode(id: ID!): Boolean!
+  createCatalogItem(vendorId: ID!, vendorCode: String, name: String!, unitText: String, priceMinor: Float!, moq: Int, leadTimeDays: Int, validFrom: String, validTo: String, mappedVariantId: ID, note: String): VendorCatalogItem!
+  updateCatalogItem(id: ID!, vendorCode: String, name: String, unitText: String, priceMinor: Float, moq: Int, leadTimeDays: Int, validFrom: String, validTo: String, isActive: Boolean, note: String): VendorCatalogItem!
+  setCatalogItemArchived(id: ID!, archived: Boolean!): VendorCatalogItem!
+
+  """
+  Permanent delete (reference row only; variant links are SET NULL-safe).
+  """
+  hardDeleteCatalogItem(id: ID!): Boolean!
+
+  """
+  Link a catalog row to one of our variants (also upserts the vendor code mapping).
+  """
+  linkCatalogItem(id: ID!, variantId: ID!): VendorCatalogItem!
+  unlinkCatalogItem(id: ID!): VendorCatalogItem!
+
+  """
+  Confirm an import preview: accepted rows with matchedItemId update existing
+  items (price change appends history), rows without create new ones.
+  """
+  confirmCatalogImport(importId: ID!, vendorId: ID!, rows: [CatalogImportRowInput!]!): CatalogImportResult!
 
   """Edit one product's catalog visibility / display modes."""
   setProductCatalogSettings(id: ID!, onlineVisible: Boolean, onlinePriceMode: OnlinePriceMode, onlineStockMode: OnlineStockMode): Product!
@@ -1522,6 +1558,11 @@ input PosOrderItemInput {
   """
   priceOverrideMinor: Float
 
+  """
+  Per-line remark / memo: overrides the receipt name (snapshotPublicName). Null/empty = default.
+  """
+  displayNameOverride: String
+
   """Overrides the computed tracking attribution; requires order.attribute."""
   attributionAmountOverrideMinor: Float
 }
@@ -1826,6 +1867,84 @@ type VendorVariantCode {
   updatedAt: String!
   vendor: Vendor
   variant: ProductVariant
+}
+
+"""One vendor's pricelist row — reference only, never a sellable SKU."""
+type VendorCatalogItem {
+  id: ID!
+  vendorId: ID!
+
+  """The vendor's own SKU / part number; empty when unknown."""
+  vendorCode: String!
+  name: String!
+
+  """Free-text unit as printed (pcs, dus, koli, roll, ...)."""
+  unitText: String
+
+  """IDR unit price (literal rupiah)."""
+  priceMinor: Float!
+  moq: Int
+  leadTimeDays: Int
+  validFrom: String
+  validTo: String
+  isActive: Boolean!
+  mappedVariantId: ID
+  note: String
+  lastSeenAt: String
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+
+  """True when past validTo or unseen for 90+ days."""
+  isStale: Boolean!
+  vendor: Vendor
+  mappedVariant: ProductVariant
+}
+
+type VendorCatalogPrice {
+  id: ID!
+  itemId: ID!
+  priceMinor: Float!
+  validFrom: String
+  createdAt: String!
+}
+
+"""Audit row for one file → preview → confirm import cycle."""
+type VendorCatalogImport {
+  id: ID!
+  vendorId: ID!
+  fileName: String
+  status: String!
+  rowCount: Int!
+  modelUsed: String
+  errorCode: String
+  errorMessage: String
+  createdAt: String!
+}
+
+"""One vendor's price for a variant we stock, cheapest first."""
+type CatalogPriceComparison {
+  item: VendorCatalogItem!
+  vendorName: String!
+  stale: Boolean!
+}
+
+"""One accepted row for confirmCatalogImport."""
+input CatalogImportRowInput {
+  vendorCode: String!
+  name: String!
+  unitText: String
+  priceMinor: Float
+  moq: Int
+  note: String
+  matchedItemId: ID
+}
+
+"""Summary of what a confirm wrote."""
+type CatalogImportResult {
+  created: Int!
+  updated: Int!
+  skipped: Int!
 }
 
 """How a product's price renders on the online catalog."""

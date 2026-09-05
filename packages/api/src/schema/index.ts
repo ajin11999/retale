@@ -26,6 +26,7 @@ import * as stockDomain from "./stock.ts";
 import * as trackingDomain from "./tracking.ts";
 import * as transfersDomain from "./transfers.ts";
 import * as vendorVariantCodesDomain from "./vendor-variant-codes.ts";
+import * as vendorCatalogDomain from "./vendor-catalog.ts";
 import * as vendorsDomain from "./vendors.ts";
 
 // GraphQL schema root. The base defines `Query`/`Mutation` with one field
@@ -68,6 +69,7 @@ export const schema = createSchema<GraphQLContext>({
     reorderDomain.typeDefs,
     receivingDomain.typeDefs,
     vendorVariantCodesDomain.typeDefs,
+    vendorCatalogDomain.typeDefs,
     catalogDomain.typeDefs,
     purchaseAlertsDomain.typeDefs,
     productImagesDomain.typeDefs,
@@ -98,6 +100,7 @@ export const schema = createSchema<GraphQLContext>({
     reorderDomain.resolvers,
     receivingDomain.resolvers,
     vendorVariantCodesDomain.resolvers,
+    vendorCatalogDomain.resolvers,
     catalogDomain.resolvers,
     purchaseAlertsDomain.resolvers,
     productImagesDomain.resolvers,

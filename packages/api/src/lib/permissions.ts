@@ -61,6 +61,8 @@ export const PERMISSIONS = [
   "vendor.adjustment",
   "vendor.hard_delete",
   "vendor.variant_code.manage",
+  "vendor.catalog.manage",
+  "vendor.catalog.import",
   // Locations
   "location.create",
   "location.edit",
@@ -133,6 +135,8 @@ const CLERK: PermissionKey[] = [
   "vendor.archive",
   "vendor.record_payment",
   "vendor.variant_code.manage",
+  "vendor.catalog.manage",
+  "vendor.catalog.import",
   "location.create",
   "location.edit",
   "location.archive",

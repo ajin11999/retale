@@ -11,6 +11,7 @@ class CartLine {
     this.qty = 1,
     this.discountMinor = 0,
     this.overridePriceMinor,
+    this.customName,
   });
 
   final Product product;
@@ -21,6 +22,15 @@ class CartLine {
   /// Cashier-entered price for open-price (and service) lines, or an override
   /// edited on the cart; null means use the variant's base price.
   num? overridePriceMinor;
+
+  /// Per-line remark / memo: overrides the receipt name for this order only.
+  /// Never written back to the product/variant catalog — it is sent as
+  /// `displayNameOverride` and stored in the order line's snapshot. Null or
+  /// blank means the default catalog name.
+  String? customName;
+
+  /// True when the cashier set a per-line remark.
+  bool get hasCustomName => customName != null && customName!.trim().isNotEmpty;
 
   /// The effective unit price: an entered override wins over the base price.
   num get unitPriceMinor => overridePriceMinor ?? variant.priceMinor;
@@ -68,6 +78,16 @@ class CartLine {
       lineTotalMinor == 0 ? null : lineMarginMinor / lineTotalMinor;
 
   String get displayName {
+    if (hasCustomName) return customName!.trim();
+    final label = variant.label;
+    return label == null || label.isEmpty
+        ? product.publicDisplayName
+        : '${product.publicDisplayName} — $label';
+  }
+
+  /// The catalog default name, ignoring any per-line remark. Used as the edit
+  /// dialog's hint / reset target.
+  String get defaultDisplayName {
     final label = variant.label;
     return label == null || label.isEmpty
         ? product.publicDisplayName
@@ -83,6 +103,7 @@ class CartLine {
         'qty': qty,
         if (discountMinor != 0) 'discountMinor': discountMinor,
         if (overridePriceMinor != null) 'overridePriceMinor': overridePriceMinor,
+        if (hasCustomName) 'customName': customName!.trim(),
       };
 
   factory CartLine.fromJson(Map<String, dynamic> j) => CartLine(
@@ -91,6 +112,9 @@ class CartLine {
         qty: (j['qty'] as num?)?.toInt() ?? 1,
         discountMinor: (j['discountMinor'] as num?) ?? 0,
         overridePriceMinor: j['overridePriceMinor'] as num?,
+        customName: (j['customName'] as String?)?.trim().isEmpty == true
+            ? null
+            : j['customName'] as String?,
       );
 }
 
@@ -120,8 +144,11 @@ class Cart extends ChangeNotifier {
       totalMinor == 0 ? null : totalMarginMinor / totalMinor;
 
   /// Add a variant; if it is already in the cart, bump its quantity.
+  /// Lines carrying a per-line remark never merge — each remark is its own
+  /// line, so a fresh add bumps the unnamed line (or opens a new one).
   void add(Product product, Variant variant) {
-    final existing = _lines.where((l) => l.variant.id == variant.id);
+    final existing = _lines.where(
+        (l) => l.variant.id == variant.id && !l.hasCustomName);
     if (existing.isNotEmpty) {
       existing.first.qty += 1;
     } else {
@@ -165,6 +192,14 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Set or clear the per-line remark / memo. A blank name clears it back to
+  /// the catalog default. Never touches the product/variant in the catalog.
+  void setCustomName(CartLine line, String? name) {
+    final trimmed = name?.trim();
+    line.customName = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    notifyListeners();
+  }
+
   void remove(CartLine line) {
     _lines.remove(line);
     notifyListeners();
@@ -190,6 +225,7 @@ class Cart extends ChangeNotifier {
             if (l.discountMinor > 0) 'discountMinor': l.discountMinor,
             if (l.overridePriceMinor != null)
               'priceOverrideMinor': l.overridePriceMinor,
+            if (l.hasCustomName) 'displayNameOverride': l.customName!.trim(),
           })
       .toList();
 

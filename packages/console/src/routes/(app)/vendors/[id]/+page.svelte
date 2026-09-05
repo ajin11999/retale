@@ -661,9 +661,18 @@
 </svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6">
-  <a href="/vendors" class="text-sm text-muted-foreground hover:text-foreground"
-    >{t("vendorDetail.backToVendors")}</a
-  >
+  <div class="flex items-center justify-between">
+    <a href="/vendors" class="text-sm text-muted-foreground hover:text-foreground"
+      >{t("vendorDetail.backToVendors")}</a
+    >
+    {#if vendor && has("vendor.catalog.manage")}
+      <a
+        href={`/vendors/${vendor.id}/catalog`}
+        class="text-sm font-medium underline hover:text-foreground"
+        >{t("vendorDetail.viewPricelist")}</a
+      >
+    {/if}
+  </div>
 
   {#if $VendorDetail.fetching && !vendor}
     <p class="text-sm text-muted-foreground">{t("common.loading")}</p>

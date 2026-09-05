@@ -159,7 +159,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (product.variants.length > 1) {
       variant = await showModalBottomSheet<Variant>(
         context: context,
-        builder: (_) => _VariantPicker(product: product),
+        // Scroll-controlled so a long variant list gets most of the screen
+        // instead of overflowing the default half-height sheet.
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder:
+            (_) => DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.7,
+              minChildSize: 0.4,
+              maxChildSize: 0.9,
+              builder:
+                  (_, controller) => _VariantPicker(
+                    product: product,
+                    scrollController: controller,
+                  ),
+            ),
       );
     }
     if (variant != null) _register.active.add(product, variant);
@@ -1000,16 +1015,35 @@ class _CartLineTile extends StatelessWidget {
     return ListTile(
       onTap: () => _edit(context),
       title: Text(line.displayName),
-      subtitle: Row(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (overridden) ...[
-            Icon(Icons.edit, size: 12, color: Theme.of(context).hintColor),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            '${Money.format(line.unitPriceMinor)} ${tr('register.each')}'
-            '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}',
+          Row(
+            children: [
+              if (overridden || line.hasCustomName) ...[
+                Icon(Icons.edit, size: 12, color: Theme.of(context).hintColor),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                '${Money.format(line.unitPriceMinor)} ${tr('register.each')}'
+                '${line.discountMinor > 0 ? '  −${Money.format(line.discountMinor)}' : ''}',
+              ),
+            ],
           ),
+          // A renamed line keeps its catalog name visible underneath, so the
+          // cashier can still tell which product it actually is.
+          if (line.hasCustomName)
+            Text(
+              line.defaultDisplayName,
+              style: TextStyle(
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                color: Theme.of(context).hintColor,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
         ],
       ),
       trailing: Row(
@@ -1037,11 +1071,16 @@ class _CartLineTile extends StatelessWidget {
     );
   }
 
-  /// Edit dialog reached by tapping the line: override the unit price (0 is
-  /// valid — a bonus / free item) and set an exact quantity. "Reset price"
-  /// drops the override, reverting to the base price. Prefilled with plain
+  /// Edit dialog reached by tapping the line: rename the item for this order
+  /// only (a remark/memo — never written back to the catalog), override the
+  /// unit price (0 is valid — a bonus / free item) and set an exact quantity.
+  /// "Reset price" drops the override, reverting to the base price; "Reset
+  /// name" clears the remark back to the catalog name. Prefilled with plain
   /// (non-grouped) numbers so they parse back cleanly.
   Future<void> _edit(BuildContext context) async {
+    final nameController = TextEditingController(
+      text: line.hasCustomName ? line.customName : '',
+    );
     final priceController = TextEditingController(
       text: Money.format(line.unitPriceMinor),
     );
@@ -1054,6 +1093,17 @@ class _CartLineTile extends StatelessWidget {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                TextField(
+                  controller: nameController,
+                  textCapitalization: TextCapitalization.sentences,
+                  onSubmitted: (_) => Navigator.pop(ctx, 'save'),
+                  decoration: InputDecoration(
+                    labelText: tr('register.lineName'),
+                    hintText: line.defaultDisplayName,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: priceController,
                   autofocus: true,
@@ -1117,6 +1167,11 @@ class _CartLineTile extends StatelessWidget {
                   onPressed: () => Navigator.pop(ctx, 'reset'),
                   child: Text(tr('register.resetPrice')),
                 ),
+              if (line.hasCustomName)
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'resetName'),
+                  child: Text(tr('register.resetLineName')),
+                ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, null),
                 child: Text(tr('common.cancel')),
@@ -1134,6 +1189,16 @@ class _CartLineTile extends StatelessWidget {
       cart.setQty(line, qty); // 0 or less removes the line
       return;
     }
+    if (action == 'resetName') {
+      cart.setCustomName(line, null);
+    } else {
+      // A blank field keeps the catalog name — only a non-blank entry becomes
+      // a per-line remark. Skip a no-op entry so it doesn't dirty the line.
+      final nameText = nameController.text;
+      if (nameText.trim() != (line.customName ?? '')) {
+        cart.setCustomName(line, nameText);
+      }
+    }
     if (action == 'reset') {
       cart.setPrice(line, null);
     } else {
@@ -1148,38 +1213,100 @@ class _CartLineTile extends StatelessWidget {
 }
 
 /// Bottom sheet for choosing which variant of a multi-variant product.
-class _VariantPicker extends StatelessWidget {
-  const _VariantPicker({required this.product});
+/// Searchable and scrollable, so products with dozens of variants don't
+/// overflow the sheet: type to filter by label, SKU or barcode.
+class _VariantPicker extends StatefulWidget {
+  const _VariantPicker({required this.product, required this.scrollController});
 
   final Product product;
+  final ScrollController scrollController;
+
+  @override
+  State<_VariantPicker> createState() => _VariantPickerState();
+}
+
+class _VariantPickerState extends State<_VariantPicker> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final terms =
+        _query.toLowerCase().split(RegExp(r'\s+'))
+          ..removeWhere((t) => t.isEmpty);
+    final variants =
+        terms.isEmpty
+            ? widget.product.variants
+            : widget.product.variants.where((v) {
+              final haystack =
+                  '${v.label ?? ''} ${v.sku} ${v.barcode ?? ''}'
+                      .toLowerCase();
+              return terms.every(haystack.contains);
+            }).toList();
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
-              product.publicDisplayName,
+              widget.product.publicDisplayName,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ),
-          ...product.variants.map(
-            (v) => ListTile(
-              title: Text(v.label ?? v.sku),
-              subtitle: Text(
-                v.sku,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                  fontFamily: 'monospace',
+          // Only worth searching when the list is long enough to overflow.
+          if (widget.product.variants.length > 5)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: TextField(
+                controller: _searchController,
+                autofocus: false,
+                onChanged: (text) => setState(() => _query = text),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: tr('register.searchVariantsHint'),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
                 ),
               ),
-              trailing: Text(Money.format(v.priceMinor)),
-              onTap: () => Navigator.pop(context, v),
             ),
+          Flexible(
+            child:
+                variants.isEmpty
+                    ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(tr('register.noMatchingVariants')),
+                      ),
+                    )
+                    : ListView.separated(
+                      controller: widget.scrollController,
+                      shrinkWrap: true,
+                      itemCount: variants.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final v = variants[i];
+                        return ListTile(
+                          title: Text(v.label ?? v.sku),
+                          subtitle: Text(
+                            v.sku,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                          trailing: Text(Money.format(v.priceMinor)),
+                          onTap: () => Navigator.pop(context, v),
+                        );
+                      },
+                    ),
           ),
         ],
       ),

@@ -14,7 +14,9 @@ COPY packages/api/package.json packages/api/
 COPY packages/catalog/package.json packages/catalog/
 COPY packages/console/package.json packages/console/
 COPY packages/shared/package.json packages/shared/
-RUN bun install
+# Flaky-link resilience (see packages/console/Dockerfile): retry the install,
+# re-fetching only the failed tarball each time, instead of failing the build.
+RUN sh -c 'i=1; while [ $i -le 8 ]; do bun install && exit 0; echo "install attempt $i failed, retrying..."; i=$((i+1)); done; exit 1'
 
 COPY packages/shared packages/shared
 COPY packages/api packages/api

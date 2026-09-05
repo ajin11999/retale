@@ -137,5 +137,58 @@ void main() {
       expect(restored.active.isEmpty, isTrue);
       expect(restored.isPristine, isTrue);
     });
+
+    test('a per-line remark overrides the display name and reaches the wire', () {
+      final cart = Register().active;
+      final p = _product();
+      cart.add(p, p.variants.first);
+      final line = cart.lines.single;
+
+      expect(line.displayName, 'Bearing p1 — std');
+      cart.setCustomName(line, '  custom remark  ');
+      expect(line.hasCustomName, isTrue);
+      expect(line.displayName, 'custom remark');
+      expect(line.defaultDisplayName, 'Bearing p1 — std');
+      expect(
+        cart.toOrderItemsInput().single['displayNameOverride'],
+        'custom remark',
+      );
+
+      final restored = Cart.fromJson(
+          jsonDecode(jsonEncode(cart.toJson())) as Map<String, dynamic>);
+      final restoredLine = restored.lines.single;
+      expect(restoredLine.customName, 'custom remark');
+      expect(restoredLine.displayName, 'custom remark');
+    });
+
+    test('a blank remark clears back to the catalog name and is not sent', () {
+      final cart = Register().active;
+      final p = _product();
+      cart.add(p, p.variants.first);
+      final line = cart.lines.single;
+
+      cart.setCustomName(line, 'remark');
+      cart.setCustomName(line, '   ');
+      expect(line.hasCustomName, isFalse);
+      expect(line.displayName, 'Bearing p1 — std');
+      expect(
+        cart.toOrderItemsInput().single.containsKey('displayNameOverride'),
+        isFalse,
+      );
+    });
+
+    test('renamed lines never merge with fresh adds of the same variant', () {
+      final cart = Register().active;
+      final p = _product();
+      cart.add(p, p.variants.first);
+      cart.setCustomName(cart.lines.single, 'remark');
+      cart.add(p, p.variants.first);
+
+      expect(cart.lines, hasLength(2));
+      expect(cart.lines[0].displayName, 'remark');
+      expect(cart.lines[0].qty, 1);
+      expect(cart.lines[1].displayName, 'Bearing p1 — std');
+      expect(cart.lines[1].qty, 1);
+    });
   });
 }

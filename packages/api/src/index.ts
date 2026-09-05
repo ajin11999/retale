@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { createYoga } from "graphql-yoga";
 import { businessLogoRoute } from "./http/business-logo-route.ts";
+import { catalogImportRoute } from "./http/catalog-import-route.ts";
 import { invoiceRecognitionRoute } from "./http/invoice-recognition-route.ts";
 import { journalCsvRoute } from "./http/journal-csv-route.ts";
 import { orderReceiptRoute } from "./http/order-receipt-route.ts";
@@ -20,6 +21,7 @@ const yoga = createYoga({
 const app = new Elysia()
   .get("/", () => ({ name: "retale-api", status: "ok" }))
   .use(productImagesRoute)
+  .use(catalogImportRoute)
   .use(invoiceRecognitionRoute)
   .use(businessLogoRoute)
   .use(purchasePdfRoute)

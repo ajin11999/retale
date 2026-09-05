@@ -132,6 +132,11 @@
   "register.add": "Tambah",
   "register.onAccountNeedsConnection": "Penjualan ke akun memerlukan koneksi — coba lagi saat online, atau terima tunai.",
   "register.creditLimitExceeded": "Ini akan melebihi batas kredit pelanggan.",
+  "register.searchVariantsHint": "Cari varian",
+  "register.noMatchingVariants": "Tidak ada varian yang cocok",
+  "register.lineName": "Nama item (catatan)",
+  "register.lineNameHint": "Kosongkan untuk nama katalog",
+  "register.resetLineName": "Reset nama",
 
   "history.orders": "Pesanan",
   "history.order": "Pesanan",

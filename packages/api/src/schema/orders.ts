@@ -108,6 +108,8 @@ export const typeDefs = /* GraphQL */ `
     discountMinor: Float
     "Cashier-entered price override. Optional on any line; required on open-price products."
     priceOverrideMinor: Float
+    "Per-line remark / memo: overrides the receipt name (snapshotPublicName). Null/empty = default."
+    displayNameOverride: String
     "Overrides the computed tracking attribution; requires order.attribute."
     attributionAmountOverrideMinor: Float
   }

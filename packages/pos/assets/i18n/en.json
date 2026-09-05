@@ -132,6 +132,11 @@
   "register.add": "Add",
   "register.onAccountNeedsConnection": "On-account sales need a connection — retry once online, or take cash.",
   "register.creditLimitExceeded": "This would exceed the customer's credit limit.",
+  "register.searchVariantsHint": "Search variants",
+  "register.noMatchingVariants": "No matching variants",
+  "register.lineName": "Item name (remark)",
+  "register.lineNameHint": "Leave blank for the catalog name",
+  "register.resetLineName": "Reset name",
 
   "history.orders": "Orders",
   "history.order": "Order",

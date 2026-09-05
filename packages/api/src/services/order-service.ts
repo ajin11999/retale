@@ -76,6 +76,13 @@ export interface PosOrderItemInput {
   /** Allowed only for `kind = 'service'` products. */
   priceOverrideMinor?: number | null;
   /**
+   * Per-line remark / memo for this order only. Writes `snapshotPublicName`,
+   * which the receipt / displayName resolver already prefers. Empty string is
+   * treated as "no override". Not supported on bundles (they explode into
+   * multiple lines).
+   */
+  displayNameOverride?: string | null;
+  /**
    * Replaces the computed tracking-account attribution for this line.
    * Requires the variant to carry a tracking account; the caller must hold
    * the `order.attribute` permission.
@@ -312,6 +319,7 @@ async function buildSnapshotRow(opts: {
   discountMinor: number;
   bundleName: string | null;
   attributionOverrideMinor?: number | null;
+  displayNameOverride?: string | null;
 }): Promise<BuiltLine> {
   const { tx, variant, product, qty, priceMinor, discountMinor } = opts;
   // Round after the multiply so `qty * priceMinor` drift never reaches the DB
@@ -372,7 +380,10 @@ async function buildSnapshotRow(opts: {
       qty,
       discountMinor,
       snapshotProductName: product.name,
-      snapshotPublicName: product.publicName,
+      snapshotPublicName:
+        opts.displayNameOverride?.trim()
+          ? opts.displayNameOverride.trim()
+          : product.publicName,
       snapshotProductSku: variant.sku,
       snapshotProductBarcode: variant.barcode,
       snapshotVariantLabel: variant.label,
@@ -417,6 +428,9 @@ async function buildBundleLines(opts: {
   }
   if (item.attributionAmountOverrideMinor != null) {
     throw new OrderError("INVALID_INPUT", "attribution override is not supported on bundle lines");
+  }
+  if (item.displayNameOverride?.trim()) {
+    throw new OrderError("INVALID_INPUT", "display name override is not supported on bundle lines");
   }
 
   const bundlePrice = await resolvePrice(tx, bundleVariant, opts.customerId, item.qty);
@@ -485,6 +499,9 @@ async function buildLines(
   if (!isMoney(discount) || discount < 0) {
     throw new OrderError("INVALID_INPUT", "discount must be a non-negative integer");
   }
+  if (item.displayNameOverride != null && item.displayNameOverride.trim().length > 300) {
+    throw new OrderError("INVALID_INPUT", "display name override must be 300 characters or fewer");
+  }
 
   const variant = await tx.query.productVariants.findFirst({
     where: eq(productVariants.id, item.variantId),
@@ -534,6 +551,7 @@ async function buildLines(
       discountMinor: discount,
       bundleName: null,
       attributionOverrideMinor: item.attributionAmountOverrideMinor,
+      displayNameOverride: item.displayNameOverride,
     }),
   ];
 }

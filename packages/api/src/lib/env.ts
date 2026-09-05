@@ -40,4 +40,10 @@ export const env = {
   twoFactorEncKey: required("TWO_FACTOR_ENC_KEY"),
   port: Number(process.env.PORT ?? 3000),
   isDev: process.env.NODE_ENV !== "production",
+  // Vendor-catalog LLM ingest (OpenAI-compatible). Optional — absence surfaces
+  // as NOT_CONFIGURED; unreachable host surfaces as LLM_UNREACHABLE (fail
+  // fast, no local fallback per product decision).
+  llmBaseUrl: process.env.LLM_BASE_URL,
+  llmApiKey: process.env.LLM_API_KEY,
+  llmModel: process.env.LLM_MODEL,
 };

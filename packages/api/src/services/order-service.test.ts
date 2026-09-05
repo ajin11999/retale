@@ -1294,6 +1294,52 @@ describe("dual product naming", () => {
     expect(item.snapshotPublicName).toBeNull();
   });
 
+  test("a displayNameOverride writes the line remark, leaving the catalog untouched", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      publicName: "Premium Widget",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1, displayNameOverride: "  custom remark  " }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    const item = (await listOrderItems(order.id))[0]!;
+    expect(item.snapshotPublicName).toBe("custom remark");
+    expect(item.snapshotProductName).toBe("Widget");
+  });
+
+  test("a blank displayNameOverride falls back to the catalog public name", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({
+      priceMinor: 1000,
+      publicName: "Premium Widget",
+    });
+    const order = await createPosOrder({
+      posSessionId: sessionId,
+      items: [{ variantId, qty: 1, displayNameOverride: "   " }],
+      payments: [{ amountMinor: 1000 }],
+      createdByUserId: userId,
+    });
+    const item = (await listOrderItems(order.id))[0]!;
+    expect(item.snapshotPublicName).toBe("Premium Widget");
+  });
+
+  test("an overlong displayNameOverride is rejected", async () => {
+    const sessionId = await seedSession("P1");
+    const variantId = await seedVariant({ priceMinor: 1000 });
+    await expectError("INVALID_INPUT", () =>
+      createPosOrder({
+        posSessionId: sessionId,
+        items: [{ variantId, qty: 1, displayNameOverride: "x".repeat(301) }],
+        payments: [{ amountMinor: 1000 }],
+        createdByUserId: userId,
+      }),
+    );
+  });
+
   test("a return order carries the public name snapshot forward", async () => {
     const sessionId = await seedSession("P1");
     const variantId = await seedVariant({
