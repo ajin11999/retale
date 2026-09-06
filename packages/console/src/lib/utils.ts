@@ -107,6 +107,42 @@ export function treePathMap(
 }
 
 /**
+ * Parse a date value coming back from the API into a Date, or null when it
+ * cannot be parsed. Handles both wire formats in use: ISO strings (domains
+ * with `iso()` field resolvers, e.g. deliveries/purchases) and bare
+ * epoch-millis strings (domains without one, e.g. requisitions — graphql's
+ * String scalar serializes a Date as millis, which `new Date(str)` alone
+ * reads as Invalid Date). Always format via this instead of `new Date()`
+ * directly on API date fields.
+ */
+export function parseApiDate(
+  value: string | number | Date | null | undefined,
+): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const s = value.trim();
+  if (!s) return null;
+  const d = /^\d+$/.test(s) ? new Date(Number(s)) : new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Format an API date value as a locale date string ("—" when unparseable).
+ * See {@link parseApiDate}.
+ */
+export function formatApiDate(
+  value: string | number | Date | null | undefined,
+  locale?: string | string[],
+): string {
+  const d = parseApiDate(value);
+  return d ? d.toLocaleDateString(locale) : "—";
+}
+
+/**
  * Safely evaluates a simple arithmetic expression string (e.g., "20+5").
  * Strips all characters except digits, ., +, -, *, /, (, ).
  * Returns null if invalid or evaluating fails.

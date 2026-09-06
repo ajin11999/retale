@@ -127,8 +127,16 @@ export const typeDefs = /* GraphQL */ `
   }
 `;
 
+/** Serialize DB timestamps as ISO strings (graphql String has no Date support). */
+const iso = (v: Date | string | null | undefined): string | null =>
+  v ? new Date(v).toISOString() : null;
+
+type RfqRow = Awaited<ReturnType<typeof rfqService.getRfq>>;
+
 export const resolvers = {
   RequestForQuotation: {
+    createdAt: (r: RfqRow) => iso(r.createdAt),
+    updatedAt: (r: RfqRow) => iso(r.updatedAt),
     sections: (parent: any) => rfqService.listSections(parent.id),
     items: (parent: any) => rfqService.listItems(parent.id),
   },

@@ -20,7 +20,6 @@ let's beautify and make ux easier.
 - line form: goods line: add goods lines: make the list compact, shows their total cost, add search field (or just use the existing purchase menu table filtering?). also in po line list, maybe we can add search bar as well? or use existing table view and filtering feature?
 
 ## rfq
-- rfq detail screen: fix created always show invalid date
 - i don't see any option or button to delete or cancel an rfq
 - fix rfq selection not disappearing after deleting selections
 - improve ux by moving add line item form onto the bottom of the section we want to add, maybe similar placement like in the

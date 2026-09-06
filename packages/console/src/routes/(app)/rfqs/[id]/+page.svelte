@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import type { Viewer } from "../../+layout.server";
-  import { formatMoney, searchTokens, matchesTokens } from "$lib/utils";
+  import { formatApiDate, formatMoney, searchTokens, matchesTokens } from "$lib/utils";
   import { t } from "$lib/i18n";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
@@ -1004,7 +1004,7 @@
           <Badge class={statusClass(rfq.status)}>{t(`rfqs.status.${rfq.status}`)}</Badge>
         </div>
         <p class="text-sm text-muted-foreground mt-1">
-          {t("rfqs.created", { date: new Date(rfq.createdAt).toLocaleDateString() })}
+          {t("rfqs.created", { date: formatApiDate(rfq.createdAt) })}
         </p>
       </div>
 
@@ -1705,7 +1705,7 @@
                       <Badge class="bg-sky-100 text-sky-700 capitalize text-xs">{t(`requisitions.status.${pr.status}`)}</Badge>
                     </div>
                     <p class="text-xs text-muted-foreground font-mono">
-                      {t("rfqs.createdLineCount", { date: new Date(pr.createdAt).toLocaleDateString(), count: pr.items.length })}
+                      {t("rfqs.createdLineCount", { date: formatApiDate(pr.createdAt), count: pr.items.length })}
                     </p>
                   </div>
                   <div class="flex items-center gap-3">
