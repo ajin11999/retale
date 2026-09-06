@@ -54,6 +54,7 @@
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
   const canCreate = $derived(has("customer.create"));
+  const canViewOrders = $derived(has("report.sales.view"));
 
   // ---- Search + sort -------------------------------------------------------
   // Archived customers always sink below active ones; within each group the
@@ -240,6 +241,9 @@
               </button>
             </th>
             <th class="px-4 py-2 font-medium">{t("common.status")}</th>
+            <th class="px-4 py-2 font-medium">
+              <span class="sr-only">{t("customers.viewOrders")}</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -274,12 +278,22 @@
                   {c.archivedAt ? t("common.archived") : t("common.active")}
                 </Badge>
               </td>
+              <td class="px-4 py-2 text-right">
+                {#if canViewOrders}
+                  <a
+                    href={`/orders?customer=${c.id}`}
+                    class="text-xs whitespace-nowrap text-primary hover:underline"
+                  >
+                    {t("customers.viewOrders")}
+                  </a>
+                {/if}
+              </td>
             </tr>
           {/each}
           {#if rows.length === 0}
             <tr>
               <td
-                colspan="6"
+                colspan="7"
                 class="px-4 py-10 text-center text-muted-foreground"
               >
                 {t("customers.noCustomersMatch")}

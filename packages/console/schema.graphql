@@ -1352,6 +1352,9 @@ type Customer {
   archivedAt: String
   createdAt: String!
   updatedAt: String!
+
+  """This customer's orders — newest first. Requires report.sales.view."""
+  orders(limit: Int): [Order!]!
 }
 
 type CustomerLedgerEntry {

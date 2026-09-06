@@ -65,6 +65,27 @@
     }
   `);
 
+  // Recent orders need report.sales.view — a separate query, fetched
+  // imperatively only for viewers who hold that key (else it would error the
+  // combined document for everyone else). Uses the nested Customer.orders
+  // field rather than the top-level orders filter.
+  const CustomerOrders = graphql(`
+    query ConsoleCustomerOrders($customerId: ID!) {
+      customer(id: $customerId) {
+        id
+        orders(limit: 50) {
+          id
+          displayNumber
+          status
+          totalMinor
+          closedAt
+          cancelledAt
+          createdAt
+        }
+      }
+    }
+  `);
+
   const UpdateCustomer = graphql(`
     mutation ConsoleUpdateCustomer(
       $id: ID!
@@ -215,6 +236,7 @@
   const canAdjust = $derived(has("customer.adjustment"));
   const canHardDelete = $derived(has("customer.hard_delete"));
   const canViewLedger = $derived(has("report.ar_aging.view"));
+  const canViewOrders = $derived(has("report.sales.view"));
   const canCreateSale = $derived(has("order.create_customer_sale"));
 
   let saleNote = $state("");
@@ -288,6 +310,16 @@
   });
   const ledger = $derived($CustomerLedger.data?.customerLedger ?? []);
 
+  // Load recent orders once, for viewers allowed to see them.
+  let ordersLoaded = $state(false);
+  $effect(() => {
+    if (customer && canViewOrders && !ordersLoaded) {
+      ordersLoaded = true;
+      CustomerOrders.fetch({ variables: { customerId: customer.id } });
+    }
+  });
+  const custOrders = $derived($CustomerOrders.data?.customer?.orders ?? []);
+
   // Each ledger row's running AR balance immediately after that entry. The
   // ledger comes newest-first, so we anchor at the customer's current balance
   // (the balance after the newest entry) and walk backwards, subtracting each
@@ -345,6 +377,12 @@
     });
     if (canViewLedger) {
       await CustomerLedger.fetch({
+        variables: { customerId: customer.id },
+        policy: CachePolicy.NetworkOnly,
+      });
+    }
+    if (canViewOrders) {
+      await CustomerOrders.fetch({
         variables: { customerId: customer.id },
         policy: CachePolicy.NetworkOnly,
       });
@@ -816,6 +854,67 @@
           <div class="mt-2 flex justify-end">
             <Pagination bind:page={ledgerPage} {pageSize} totalItems={ledgerRows.length} />
           </div>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- Orders -->
+    {#if canViewOrders}
+      <section class="space-y-3 rounded-lg border bg-card p-5">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold">
+            {t("customerDetail.orders", { count: custOrders.length })}
+          </h2>
+          <a
+            href={`/orders?customer=${customer.id}`}
+            class="text-xs text-primary hover:underline"
+          >
+            {t("customerDetail.viewAllOrders")}
+          </a>
+        </div>
+        {#if $CustomerOrders.fetching && custOrders.length === 0}
+          <p class="text-sm text-muted-foreground">{t("common.loading")}</p>
+        {:else}
+          <table class="w-full text-sm">
+            <thead class="border-b text-left text-muted-foreground">
+              <tr>
+                <th class="py-1.5 font-medium">{t("orders.number")}</th>
+                <th class="py-1.5 pr-4 font-medium">{t("orders.when")}</th>
+                <th class="py-1.5 pl-4 text-right font-medium">{t("common.total")}</th>
+                <th class="py-1.5 pl-4 font-medium">{t("common.status")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each custOrders as o (o.id)}
+                <tr class="border-b last:border-0">
+                  <td class="py-1.5">
+                    <a
+                      href={`/orders/${o.id}`}
+                      class="font-mono text-xs text-primary hover:underline"
+                    >
+                      {o.displayNumber ?? o.id.slice(-8)}
+                    </a>
+                  </td>
+                  <td class="whitespace-nowrap py-1.5 pr-4">
+                    {fmtDateTime(o.closedAt ?? o.cancelledAt ?? o.createdAt)}
+                  </td>
+                  <td
+                    class="whitespace-nowrap py-1.5 pl-4 text-right tabular-nums"
+                  >
+                    {formatMoney(o.totalMinor)}
+                  </td>
+                  <td class="py-1.5 pl-4">{t(`orders.status.${o.status}`)}</td>
+                </tr>
+              {/each}
+              {#if custOrders.length === 0}
+                <tr>
+                  <td colspan="4" class="py-6 text-center text-muted-foreground">
+                    {t("customerDetail.noOrders")}
+                  </td>
+                </tr>
+              {/if}
+            </tbody>
+          </table>
         {/if}
       </section>
     {/if}

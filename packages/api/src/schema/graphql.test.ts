@@ -17,6 +17,8 @@ import type { GraphQLContext } from "../lib/context.ts";
 import type { AccessTokenClaims } from "../lib/jwt.ts";
 import { db } from "../lib/db.ts";
 import { schema } from "./index.ts";
+import { createCustomer } from "../services/customer-service.ts";
+import { createCustomerSale } from "../services/order-service.ts";
 
 /** Truncate the tables these tests write to. */
 async function wipe(): Promise<void> {
@@ -24,6 +26,8 @@ async function wipe(): Promise<void> {
   for (const t of [
     "vendor_ledger", "vendors", "user_roles", "role_permissions", "roles",
     "user_two_factor", "users",
+    "order_payments", "order_items", "orders",
+    "customer_ledger", "customer_prices", "customers",
   ]) {
     await db.execute(sql.raw(`DELETE FROM \`${t}\``));
   }
@@ -159,5 +163,51 @@ describe("domain errors surface as GraphQL errors", () => {
       root,
     );
     expect(errorCode(result)).toBe("INVALID_INPUT");
+  });
+});
+
+describe("Customer.orders", () => {
+  test("returns only that customer's orders", async () => {
+    const userId = await seedEnrolledUser();
+    const root: AccessTokenClaims = { userId, isRoot: true, roleIds: [] };
+    const a = await createCustomer({ name: "A", createdByUserId: userId });
+    const b = await createCustomer({ name: "B", createdByUserId: userId });
+    const orderA = await createCustomerSale({
+      customerId: a.id,
+      createdByUserId: userId,
+    });
+    await createCustomerSale({ customerId: b.id, createdByUserId: userId });
+
+    const result = await run(
+      `query ($id: ID!) { customer(id: $id) { id orders { id customerId } } }`,
+      root,
+      { id: a.id },
+    );
+    expect(result.errors).toBeUndefined();
+    const customer = (
+      result.data as {
+        customer: { orders: { id: string; customerId: string }[] };
+      }
+    ).customer;
+    expect(customer.orders.map((o) => o.id)).toEqual([orderA.id]);
+  });
+
+  test("the nested field requires report.sales.view", async () => {
+    const userId = await seedUser();
+    const roleId = ulid();
+    await db.insert(roles).values({ id: roleId, name: `r_${roleId}` });
+    await db
+      .insert(rolePermissions)
+      .values({ roleId, permissionKey: "customer.edit" });
+    await db.insert(userRoles).values({ userId, roleId });
+    const viewer: AccessTokenClaims = { userId, isRoot: false, roleIds: [roleId] };
+
+    const c = await createCustomer({ name: "C", createdByUserId: userId });
+    const result = await run(
+      `query ($id: ID!) { customer(id: $id) { orders { id } } }`,
+      viewer,
+      { id: c.id },
+    );
+    expect(errorCode(result)).toBe("FORBIDDEN");
   });
 });

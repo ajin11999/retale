@@ -58,6 +58,11 @@ export const typeDefs = /* GraphQL */ `
     phone: String
   }
 
+  extend type Customer {
+    "This customer's orders — newest first. Requires report.sales.view."
+    orders(limit: Int): [Order!]!
+  }
+
   type OrderItem {
     id: ID!
     orderId: ID!
@@ -236,6 +241,16 @@ export const resolvers = {
   },
   OrderPayment: {
     createdAt: (p: { createdAt: Date | string }) => iso(p.createdAt),
+  },
+  Customer: {
+    orders: async (
+      c: { id: string },
+      args: { limit?: number | null },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "report.sales.view");
+      return orders.listOrders({ customerId: c.id, limit: args.limit ?? 50 });
+    },
   },
 
   Query: {

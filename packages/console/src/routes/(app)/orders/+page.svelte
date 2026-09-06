@@ -12,8 +12,8 @@
   import type { PageData } from "./$types";
 
   graphql(`
-    query OrderList {
-      orders(limit: 200) {
+    query OrderList($customerId: ID) {
+      orders(customerId: $customerId, limit: 200) {
         id
         displayNumber
         status
@@ -118,6 +118,22 @@
   let search = $state("");
   let statusFilter = $state<"all" | "open" | "closed" | "cancelled">("all");
 
+  // Deep-link support: /orders?customer=<id> arrives pre-filtered (e.g. from
+  // the Customers list or a customer detail page). The server load already
+  // fetched this customer's orders; changing the select navigates so the load
+  // re-runs with the new filter.
+  let customerFilter = $state(data.initialCustomerId ?? "");
+  $effect(() => {
+    const fromUrl = page.url.searchParams.get("customer") ?? "";
+    if (fromUrl !== customerFilter) customerFilter = fromUrl;
+  });
+  async function changeCustomerFilter() {
+    const url = customerFilter
+      ? `/orders?customer=${customerFilter}`
+      : "/orders";
+    await goto(url, { keepFocus: true, noScroll: true });
+  }
+
   const rows = $derived.by(() => {
     const tokens = searchTokens(search.trim());
     let list = orders;
@@ -138,7 +154,7 @@
   let pageNumber = $state(1);
   const pageSize = 50;
   $effect(() => {
-    search; statusFilter;
+    search; statusFilter; customerFilter;
     pageNumber = 1;
   });
   const paginatedRows = $derived(rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize));
@@ -159,6 +175,16 @@
   <div class="flex items-center justify-between gap-3">
     <h1 class="text-xl font-semibold">{t("orders.title")}</h1>
     <div class="flex items-center gap-3">
+      <select
+        bind:value={customerFilter}
+        onchange={changeCustomerFilter}
+        class="h-9 max-w-56 rounded-md border border-input bg-transparent px-3 text-sm"
+      >
+        <option value="">{t("orders.allCustomers")}</option>
+        {#each customers as c (c.id)}
+          <option value={c.id}>{c.name}</option>
+        {/each}
+      </select>
       <select
         bind:value={statusFilter}
         class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
