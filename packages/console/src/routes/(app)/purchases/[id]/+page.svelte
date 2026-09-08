@@ -1542,8 +1542,13 @@
   });
 
   // Only lines with no deliveries can be re-sourced (matches the API's lock).
+  // Keep selection order (Set insertion order) so the modal lists lines in the
+  // order they were ticked, not the PO's display order.
   function openResource() {
-    const chosen = items.filter((i) => selected.has(i.id) && i.qtyDelivered === 0);
+    const selOrder = new Map([...selected].map((id, idx) => [id, idx] as const));
+    const chosen = items
+      .filter((i) => selected.has(i.id) && i.qtyDelivered === 0)
+      .sort((a, b) => (selOrder.get(a.id) ?? 0) - (selOrder.get(b.id) ?? 0));
     if (chosen.length === 0) {
       feedback = {
         ok: false,
@@ -2533,6 +2538,7 @@
                             use:selectOnMount
                             onkeydown={cellKeydown}
                             onblur={commitCell}
+                            autocomplete="off"
                             class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           />
                         {:else if editable && !i.variantId}

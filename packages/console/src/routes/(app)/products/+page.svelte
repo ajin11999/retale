@@ -1063,12 +1063,14 @@
               <tr class="border-b last:border-0 hover:bg-muted/40 {isDirty ? 'bg-amber-50/50 hover:bg-amber-50/70' : ''}">
                 <td class="px-1 py-1 pl-3">
                   <input class={quickInputClass} value={edit?.name ?? row.name}
+                    autocomplete="off"
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'name', e.currentTarget.value)} />
                 </td>
                 <td class="px-1 py-1">
                   <input class={quickInputClass} value={edit?.publicName ?? row.publicName ?? ''}
                     placeholder={t("products.sameAsName")}
+                    autocomplete="off"
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'publicName', e.currentTarget.value)} />
                 </td>
@@ -1100,6 +1102,7 @@
                 </td>
                 <td class="px-1 py-1">
                   <input class={quickInputClass} value={edit?.description ?? row.description ?? ''}
+                    autocomplete="off"
                     onfocus={() => ensureEditing(row)}
                     oninput={(e) => patchEdit(row.id, 'description', e.currentTarget.value)} />
                 </td>
@@ -1189,6 +1192,7 @@
                   <input
                     class={quickInputClass}
                     bind:value={quick.name}
+                    autocomplete="off"
                     onkeydown={quickKeydown}
                     use:autofocus={quick.focus === "name"}
                   />

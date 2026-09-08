@@ -954,6 +954,7 @@
                     onkeydown={cellKeydown}
                     onblur={commitCell}
                     placeholder={i.snapshotProductName}
+                    autocomplete="off"
                     class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 {:else if lineEditable(i)}

@@ -517,6 +517,7 @@
                     <input
                       class="{quickInputClass} w-48"
                       bind:value={quick.name}
+                      autocomplete="off"
                       onkeydown={quickKeydown}
                       use:autofocus={quick.focus === "name"}
                     />

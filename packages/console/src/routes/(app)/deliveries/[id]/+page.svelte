@@ -1226,6 +1226,7 @@
                     <input
                       inputmode="numeric"
                       value={q}
+                      autocomplete="off"
                       oninput={(e) => setPickQty(l.itemId, e.currentTarget.value)}
                       class="h-8 w-24 rounded-md border bg-background px-2 text-right text-sm {over
                         ? 'border-amber-500'

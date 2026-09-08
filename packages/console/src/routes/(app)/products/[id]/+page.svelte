@@ -1440,6 +1440,7 @@
                     use:selectOnMount
                     onkeydown={variantCellKeydown}
                     onblur={commitVariantCell}
+                    autocomplete="off"
                     class="h-7 w-full rounded-md border border-input bg-background px-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 {:else if canEdit}
@@ -1460,6 +1461,7 @@
                     use:selectOnMount
                     onkeydown={variantCellKeydown}
                     onblur={commitVariantCell}
+                    autocomplete="off"
                     class="h-7 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 {:else if canEdit}

@@ -19,11 +19,5 @@ let's beautify and make ux easier.
 - line form: cost line: make description optional, auto focus on cost, and use ctrl+enter for submit shortcut and esc for canceling.
 - line form: goods line: add goods lines: make the list compact, shows their total cost, add search field (or just use the existing purchase menu table filtering?). also in po line list, maybe we can add search bar as well? or use existing table view and filtering feature?
 
-## rfq
-- i don't see any option or button to delete or cancel an rfq
-- fix rfq selection not disappearing after deleting selections
-- improve ux by moving add line item form onto the bottom of the section we want to add, maybe similar placement like in the
-  requisition.
-
 ## stockeeper
 - received indicator on the main PO list doesn't move, it stays 0 even after we checked all of the items. received bar works fine inside the PO checking thought.
