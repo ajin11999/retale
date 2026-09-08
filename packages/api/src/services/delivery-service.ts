@@ -95,7 +95,10 @@ function assertDraft(d: Delivery): void {
   }
 }
 
-/** Recompute `totalCostMinor` from the tree's root nodes (parentItemId IS NULL). */
+/** Recompute `totalCostMinor` as the delivery's charges total: the sum of every
+ * cost node (`purchaseItemId IS NULL`) across the whole tree. Goods leaves
+ * (PO line value) are excluded — the list view shows what the delivery itself
+ * costs (freight/customs), not the value of the goods it carries. */
 async function syncTotal(tx: Tx, deliveryId: string): Promise<void> {
   const rows = await tx
     .select({ total: sql<number>`COALESCE(SUM(${purchaseDeliveryItems.costMinor}), 0)` })
@@ -103,7 +106,7 @@ async function syncTotal(tx: Tx, deliveryId: string): Promise<void> {
     .where(
       and(
         eq(purchaseDeliveryItems.deliveryId, deliveryId),
-        sql`${purchaseDeliveryItems.parentItemId} is null`,
+        sql`${purchaseDeliveryItems.purchaseItemId} is null`,
       ),
     );
   await tx
@@ -235,8 +238,22 @@ export async function createDeliveryItem(input: {
 }): Promise<DeliveryItem> {
   const delivery = await loadDelivery(input.deliveryId);
   assertDraft(delivery);
-  if (!input.description.trim()) {
-    throw new DeliveryError("INVALID_INPUT", "description is required");
+  // Goods leaves always carry a description (the console writes the PO line
+  // label). Cost nodes leave it optional — a bare amount + courier is enough;
+  // blank falls back to the courier's name, else a generic "Freight".
+  let description = input.description.trim();
+  if (!description) {
+    if (input.purchaseItemId) {
+      throw new DeliveryError("INVALID_INPUT", "description is required");
+    }
+    if (input.vendorId) {
+      const courier = await db.query.vendors.findFirst({
+        where: eq(vendors.id, input.vendorId),
+      });
+      description = courier?.name ?? "Freight";
+    } else {
+      description = "Freight";
+    }
   }
   if (!isMoney(input.costMinor) || input.costMinor < 0) {
     throw new DeliveryError("INVALID_INPUT", "costMinor must be a non-negative integer");
@@ -284,7 +301,7 @@ export async function createDeliveryItem(input: {
       parentItemId: input.parentItemId ?? null,
       purchaseItemId: input.purchaseItemId ?? null,
       vendorId: input.purchaseItemId ? null : (input.vendorId ?? null),
-      description: input.description.trim(),
+      description,
       qty: input.purchaseItemId ? (input.qty as number) : null,
       costMinor: input.costMinor,
       sortOrder: input.sortOrder ?? 0,
@@ -343,8 +360,27 @@ export async function updateDeliveryItem(
     }
   }
 
-  if (patch.description !== undefined && !patch.description.trim()) {
-    throw new DeliveryError("INVALID_INPUT", "description cannot be blank");
+  // A cleared description on a cost node falls back the same way as creation
+  // (courier name, else "Freight"); goods leaves keep requiring one.
+  let description: string | undefined;
+  if (patch.description !== undefined) {
+    const trimmed = patch.description.trim();
+    if (!trimmed) {
+      if (item.purchaseItemId) {
+        throw new DeliveryError("INVALID_INPUT", "description cannot be blank");
+      }
+      const vendorId = patch.vendorId !== undefined ? patch.vendorId : item.vendorId;
+      if (vendorId) {
+        const courier = await db.query.vendors.findFirst({
+          where: eq(vendors.id, vendorId),
+        });
+        description = courier?.name ?? "Freight";
+      } else {
+        description = "Freight";
+      }
+    } else {
+      description = trimmed;
+    }
   }
   if (
     patch.costMinor !== undefined &&
@@ -371,7 +407,7 @@ export async function updateDeliveryItem(
     await tx
       .update(purchaseDeliveryItems)
       .set({
-        ...(patch.description !== undefined && { description: patch.description.trim() }),
+        ...(description !== undefined && { description }),
         ...(patch.qty !== undefined && { qty: patch.qty }),
         ...(patch.costMinor !== undefined && { costMinor: patch.costMinor }),
         ...(patch.vendorId !== undefined && { vendorId: patch.vendorId }),

@@ -39,8 +39,9 @@ export const DELIVERY_KINDS = ["transit", "arrival"] as const;
 /**
  * Delivery header. For `arrival` deliveries stock lands at `targetLocationId`;
  * `transit` deliveries have no target location. The cost tree is editable only
- * while `status = draft`; `totalCostMinor` is a denormalized sum of the tree's
- * root nodes, kept fresh on every tree edit, for list views.
+ * while `status = draft`; `totalCostMinor` is the denormalized charges total
+ * (sum of every cost node, excluding goods leaves), kept fresh on every tree
+ * edit, for list views.
  */
 export const purchaseDeliveries = mysqlTable("purchase_deliveries", {
   id: ulidPk(),

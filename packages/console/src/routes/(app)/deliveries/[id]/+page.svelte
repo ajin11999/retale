@@ -278,15 +278,27 @@
     return m;
   });
   // Open purchases that still have lines to receive — step 1 of the picker.
+  // `totalMinor` is the remaining value per purchase, so the picker shows what
+  // each PO is still worth alongside its open line count.
   const poGroups = $derived.by(() => {
     const m = new Map<
       string,
-      { id: string; vendorName: string; count: number }
+      { id: string; vendorName: string; count: number; totalMinor: number }
     >();
     for (const l of poLines) {
+      const value = l.remaining * l.unitCostMinor;
       const g = m.get(l.purchaseId);
-      if (g) g.count++;
-      else m.set(l.purchaseId, { id: l.purchaseId, vendorName: l.vendorName, count: 1 });
+      if (g) {
+        g.count++;
+        g.totalMinor += value;
+      } else {
+        m.set(l.purchaseId, {
+          id: l.purchaseId,
+          vendorName: l.vendorName,
+          count: 1,
+          totalMinor: value,
+        });
+      }
     }
     return [...m.values()];
   });
@@ -303,8 +315,8 @@
   // Itemized totals for the reconciliation summary. Every node is counted once:
   // goods leaves carry line value, cost nodes carry their freight/customs amount,
   // so goods + charges is the true grand total landing into stock — unlike the
-  // server's denormalized `totalCostMinor` (roots only), which under-reports when
-  // goods are nested under a cost node.
+  // server's denormalized `totalCostMinor`, which intentionally sums only the
+  // cost nodes (the delivery's own charges, for list views).
   const costSummary = $derived.by(() => {
     let goods = 0;
     let charges = 0;
@@ -454,6 +466,8 @@
   let pickerOpen = $state(false);
   let pickerParent = $state<string | "">("");
   let pickerPoId = $state(""); // "" = step 1 (pick a purchase); else show its lines
+  let pickerSearch = $state(""); // step 1: filter purchases by vendor
+  let pickerLineSearch = $state(""); // step 2: filter the purchase's lines
   // poLine itemId → qty string. A key's presence means the line is selected.
   let pickerQty = $state<Record<string, string>>({});
 
@@ -461,6 +475,8 @@
     if (addingUnder === null) return;
     pickerParent = addingUnder;
     pickerPoId = "";
+    pickerSearch = "";
+    pickerLineSearch = "";
     pickerQty = {};
     pickerOpen = true;
   }
@@ -473,14 +489,15 @@
       pickerQty = { ...pickerQty, [line.itemId]: String(line.remaining) };
     }
   }
-  // Select-all toggles only the lines of the purchase on screen, leaving any
-  // selection in other purchases intact (selections accumulate across POs).
+  // Select-all toggles only the visible lines of the purchase on screen,
+  // leaving any selection in other purchases intact (selections accumulate
+  // across POs).
   function toggleAllPicker() {
     const next = { ...pickerQty };
     if (allPicked) {
-      for (const l of pickerLines) delete next[l.itemId];
+      for (const l of filteredPickerLines) delete next[l.itemId];
     } else {
-      for (const l of pickerLines)
+      for (const l of filteredPickerLines)
         if (!(l.itemId in next)) next[l.itemId] = String(l.remaining);
     }
     pickerQty = next;
@@ -497,11 +514,29 @@
   const pickerLines = $derived(
     poLines.filter((l) => l.purchaseId === pickerPoId),
   );
+  // Step-1 purchase search (vendor name) and step-2 line search (product name,
+  // SKU, or full label) keep the picker usable with many open POs.
+  const filteredPoGroups = $derived.by(() => {
+    const q = pickerSearch.trim().toLowerCase();
+    if (!q) return poGroups;
+    return poGroups.filter((g) => g.vendorName.toLowerCase().includes(q));
+  });
+  const filteredPickerLines = $derived.by(() => {
+    const q = pickerLineSearch.trim().toLowerCase();
+    if (!q) return pickerLines;
+    return pickerLines.filter(
+      (l) =>
+        l.productName.toLowerCase().includes(q) ||
+        (l.sku?.toLowerCase().includes(q) ?? false) ||
+        l.label.toLowerCase().includes(q),
+    );
+  });
   const allPicked = $derived(
-    pickerLines.length > 0 && pickerLines.every((l) => l.itemId in pickerQty),
+    filteredPickerLines.length > 0 &&
+      filteredPickerLines.every((l) => l.itemId in pickerQty),
   );
   const somePicked = $derived(
-    !allPicked && pickerLines.some((l) => l.itemId in pickerQty),
+    !allPicked && filteredPickerLines.some((l) => l.itemId in pickerQty),
   );
   const pickerPoName = $derived(
     poGroups.find((g) => g.id === pickerPoId)?.vendorName ?? "",
@@ -566,10 +601,12 @@
     }
   }
 
-  // Cost lines (freight / customs) are still added one at a time inline.
+  // Cost lines (freight / customs) are still added one at a time inline. The
+  // description is optional — blank falls back to the courier's name (else
+  // "Freight") on the server.
   async function addItem() {
     if (!delivery || addingUnder === null) return;
-    if (!nDesc.trim() || nCost == null) return;
+    if (nCost == null) return;
     const parentItemId = addingUnder === "" ? null : addingUnder;
     busy = true;
     error = null;
@@ -652,7 +689,7 @@
           parentItemId: eParentId || null,
         });
       } else {
-        if (!eDesc.trim() || eCost == null) return;
+        if (eCost == null) return;
         res = await UpdateDeliveryItem.mutate({
           id: editingId,
           description: eDesc.trim(),
@@ -729,7 +766,7 @@
 
   async function createGroupCostLine() {
     if (!delivery || costSelected.size === 0) return;
-    if (!gDesc.trim() || gCost == null) return;
+    if (gCost == null) return;
     // Nest the new charge under the goods' common parent so any outer charge
     // keeps spreading over them; mixed parents fall back to the root.
     const selected = items.filter((it) => costSelected.has(it.id));
@@ -851,6 +888,63 @@
 </script>
 
 <svelte:head><title>{t("deliveryDetail.pageTitle")}</title></svelte:head>
+
+<!-- Line-form keyboard shortcuts: Ctrl/Cmd+Enter submits the open form (header
+     edit, add/edit line, group charge, or the goods picker), Esc cancels or
+     steps back. Esc inside an open combobox menu closes the menu first — it
+     only reaches here once the menu is already shut. -->
+<svelte:window
+  onkeydown={(e) => {
+    const submit = (e.ctrlKey || e.metaKey) && e.key === "Enter";
+    if (pickerOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        // Step 2 steps back to the purchase list; step 1 closes the picker.
+        if (pickerPoId) pickerPoId = "";
+        else pickerOpen = false;
+      } else if (submit && pickerValid && !busy) {
+        e.preventDefault();
+        confirmPicker();
+      }
+      return;
+    }
+    if (!editable || busy) return;
+    if (editingHeader) {
+      if (submit) {
+        e.preventDefault();
+        saveHeader();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        editingHeader = false;
+      }
+    } else if (editingId) {
+      if (submit) {
+        e.preventDefault();
+        saveEdit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        editingId = null;
+      }
+    } else if (groupFormOpen && costSelected.size > 0) {
+      if (submit) {
+        e.preventDefault();
+        createGroupCostLine();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        groupFormOpen = false;
+      }
+    } else if (addingUnder !== null) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        addingUnder = null;
+      } else if (submit) {
+        e.preventDefault();
+        if (nMode === "cost") addItem();
+        else if (poLines.length > 0) openPicker();
+      }
+    }
+  }}
+/>
 
 <div class="space-y-4">
   <a href="/deliveries" class="text-sm text-primary hover:underline">{t("deliveryDetail.backToDeliveries")}</a>
@@ -1018,9 +1112,14 @@
           <Input
             bind:value={gDesc}
             class="flex-1"
-            placeholder={t("deliveries.costDescription")}
+            placeholder={t("deliveryDetail.costDescriptionOptional")}
           />
-          <MoneyInput bind:value={gCost} class="w-32" placeholder={t("common.amount")} />
+          <MoneyInput
+            bind:value={gCost}
+            autofocus
+            class="w-32"
+            placeholder={t("common.amount")}
+          />
           <div class="w-40">
             <Combobox
               options={[{ value: "", label: t("deliveryDetail.noCourier") }, ...courierOptions]}
@@ -1030,7 +1129,7 @@
           </div>
           <Button
             size="sm"
-            disabled={busy || !gDesc.trim() || gCost == null}
+            disabled={busy || gCost == null}
             onclick={createGroupCostLine}>{t("common.create")}</Button
           >
           <Button
@@ -1131,46 +1230,71 @@
 
     <div class="flex-1 overflow-y-auto">
       {#if !pickerPoId}
-        <!-- Step 1: pick a purchase -->
+        <!-- Step 1: pick a purchase. Search filters by vendor; each row shows
+             the remaining value so the clerk sees what a PO is still worth. -->
         {#if poGroups.length === 0}
           <p class="p-6 text-center text-sm text-muted-foreground">
             {t("deliveryDetail.noOpenPurchases")}
           </p>
         {:else}
-          <ul class="divide-y">
-            {#each poGroups as g (g.id)}
-              {@const picked = selectedByPo.get(g.id) ?? 0}
-              <li>
-                <button
-                  type="button"
-                  class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40"
-                  onclick={() => (pickerPoId = g.id)}
-                >
-                  <span>
-                    <span class="text-sm font-medium">{g.vendorName}</span>
-                    <span class="block text-xs text-muted-foreground">
-                      {t("deliveryDetail.poLinesLeft", { id: g.id.slice(-6), count: g.count })}
+          {#if poGroups.length > 1}
+            <div class="border-b p-2">
+              <Input
+                bind:value={pickerSearch}
+                placeholder={t("deliveryDetail.searchPurchases")}
+              />
+            </div>
+          {/if}
+          {#if filteredPoGroups.length === 0}
+            <p class="p-6 text-center text-sm text-muted-foreground">
+              {t("deliveryDetail.noMatches")}
+            </p>
+          {:else}
+            <ul class="divide-y">
+              {#each filteredPoGroups as g (g.id)}
+                {@const picked = selectedByPo.get(g.id) ?? 0}
+                <li>
+                  <button
+                    type="button"
+                    class="flex w-full items-center justify-between gap-3 px-4 py-2 text-left hover:bg-muted/40"
+                    onclick={() => {
+                      pickerPoId = g.id;
+                      pickerLineSearch = "";
+                    }}
+                  >
+                    <span class="min-w-0">
+                      <span class="block truncate text-sm font-medium">{g.vendorName}</span>
+                      <span class="block text-xs text-muted-foreground">
+                        {t("deliveryDetail.poLinesLeft", { id: g.id.slice(-6), count: g.count })}
+                      </span>
                     </span>
-                  </span>
-                  <span class="flex items-center gap-2 text-xs text-muted-foreground">
-                    {#if picked > 0}
-                      <Badge class="bg-primary/10 text-primary">{t("deliveryDetail.picked", { count: picked })}</Badge>
-                    {/if}
-                    <span aria-hidden="true">›</span>
-                  </span>
-                </button>
-              </li>
-            {/each}
-          </ul>
+                    <span class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                      <span class="tabular-nums">{formatMoney(g.totalMinor)}</span>
+                      {#if picked > 0}
+                        <Badge class="bg-primary/10 text-primary">{t("deliveryDetail.picked", { count: picked })}</Badge>
+                      {/if}
+                      <span aria-hidden="true">›</span>
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
       {:else}
         <!-- Step 2: tick the chosen purchase's lines -->
+        <div class="border-b p-2">
+          <Input
+            bind:value={pickerLineSearch}
+            placeholder={t("deliveryDetail.searchLines")}
+          />
+        </div>
         <table class="w-full text-sm">
           <thead
             class="sticky top-0 border-b bg-muted text-left text-xs text-muted-foreground"
           >
             <tr>
-              <th class="w-8 px-3 py-2">
+              <th class="w-8 px-3 py-1.5">
                 <input
                   type="checkbox"
                   checked={allPicked}
@@ -1180,22 +1304,25 @@
                   title={t("deliveryDetail.selectAllLines")}
                 />
               </th>
-              <th class="px-3 py-2 font-medium">{t("deliveryDetail.poLine")}</th>
-              <th class="px-3 py-2 text-right font-medium">{t("deliveryDetail.left")}</th>
-              <th class="px-3 py-2 text-right font-medium">{t("deliveryDetail.unitCost")}</th>
-              <th class="w-28 px-3 py-2 text-right font-medium">{t("common.qty")}</th>
+              <th class="px-3 py-1.5 font-medium">{t("deliveryDetail.poLine")}</th>
+              <th class="px-3 py-1.5 text-right font-medium">{t("deliveryDetail.left")}</th>
+              <th class="px-3 py-1.5 text-right font-medium">{t("deliveryDetail.unitCost")}</th>
+              <th class="w-24 px-3 py-1.5 text-right font-medium">{t("common.qty")}</th>
+              <th class="w-28 px-3 py-1.5 text-right font-medium">{t("deliveryDetail.lineTotal")}</th>
             </tr>
           </thead>
           <tbody>
-            {#each pickerLines as l (l.itemId)}
+            {#each filteredPickerLines as l (l.itemId)}
               {@const sel = l.itemId in pickerQty}
               {@const q = pickerQty[l.itemId] ?? ""}
+              {@const qNum = Number(q)}
               {@const over =
-                sel && Number.isFinite(Number(q)) && Number(q) > l.remaining}
+                sel && Number.isFinite(qNum) && qNum > l.remaining}
+              {@const lineQty = sel && Number.isFinite(qNum) ? qNum : l.remaining}
               <tr
                 class="border-b last:border-0 hover:bg-muted/40 {sel ? 'bg-primary/5' : ''}"
               >
-                <td class="px-3 py-2">
+                <td class="px-3 py-1.5">
                   <input
                     type="checkbox"
                     checked={sel}
@@ -1203,13 +1330,13 @@
                     class="h-4 w-4"
                   />
                 </td>
-                <td class="px-3 py-2">
+                <td class="px-3 py-1.5">
                   <button
                     type="button"
                     class="text-left hover:underline"
                     onclick={() => togglePick(l)}
                   >
-                    <span class="block font-medium">{l.productName}</span>
+                    <span class="block text-[13px] font-medium">{l.productName}</span>
                     {#if l.sku}
                       <span class="block text-xs font-normal text-muted-foreground">
                         {l.sku}
@@ -1217,18 +1344,18 @@
                     {/if}
                   </button>
                 </td>
-                <td class="px-3 py-2 text-right tabular-nums">{l.remaining}</td>
-                <td class="px-3 py-2 text-right tabular-nums">
+                <td class="px-3 py-1.5 text-right tabular-nums">{l.remaining}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums">
                   {formatMoney(l.unitCostMinor)}
                 </td>
-                <td class="px-3 py-2 text-right">
+                <td class="px-3 py-1.5 text-right">
                   {#if sel}
                     <input
                       inputmode="numeric"
                       value={q}
                       autocomplete="off"
                       oninput={(e) => setPickQty(l.itemId, e.currentTarget.value)}
-                      class="h-8 w-24 rounded-md border bg-background px-2 text-right text-sm {over
+                      class="h-7 w-20 rounded-md border bg-background px-2 text-right text-sm {over
                         ? 'border-amber-500'
                         : 'border-input'}"
                     />
@@ -1236,17 +1363,30 @@
                     <span class="text-xs text-muted-foreground">—</span>
                   {/if}
                 </td>
+                <td class="px-3 py-1.5 text-right tabular-nums">
+                  {formatMoney(l.unitCostMinor * lineQty)}
+                </td>
               </tr>
             {/each}
+            {#if filteredPickerLines.length === 0}
+              <tr>
+                <td colspan="6" class="px-4 py-6 text-center text-sm text-muted-foreground">
+                  {t("deliveryDetail.noMatches")}
+                </td>
+              </tr>
+            {/if}
           </tbody>
         </table>
       {/if}
     </div>
 
     <div class="flex items-center justify-between gap-3 border-t p-4">
-      <p class="text-sm text-muted-foreground">
-        {t("deliveryDetail.selectedAmount", { count: pickerSelected.length, amount: formatMoney(pickerTotal) })}
-      </p>
+      <div>
+        <p class="text-sm text-muted-foreground">
+          {t("deliveryDetail.selectedAmount", { count: pickerSelected.length, amount: formatMoney(pickerTotal) })}
+        </p>
+        <p class="text-xs text-muted-foreground">{t("deliveryDetail.ctrlEnterHint")}</p>
+      </div>
       <div class="flex gap-2">
         <Button
           variant="ghost"
@@ -1284,8 +1424,12 @@
             {formatMoney(eUnitCost * (eGoodsValid ? eGoodsQty : 0))}
           </span>
         {:else}
-          <Input bind:value={eDesc} class="flex-1" />
-          <MoneyInput bind:value={eCost} class="w-32" />
+          <Input
+            bind:value={eDesc}
+            class="flex-1"
+            placeholder={t("deliveryDetail.costDescriptionOptional")}
+          />
+          <MoneyInput bind:value={eCost} autofocus class="w-32" />
           <div class="w-36">
             <Combobox
               options={[{ value: "", label: t("deliveryDetail.noCourier") }, ...courierOptions]}
@@ -1455,12 +1599,12 @@
     {:else}
       <div class="flex items-end gap-2">
         <label class="flex-1 space-y-1">
-          <span class="text-xs font-medium">{t("common.description")}</span>
+          <span class="text-xs font-medium">{t("deliveryDetail.costDescriptionOptional")}</span>
           <Input bind:value={nDesc} placeholder={t("deliveryDetail.freightCustomsPlaceholder")} />
         </label>
         <label class="w-40 space-y-1">
           <span class="text-xs font-medium">{t("deliveryDetail.costRp")}</span>
-          <MoneyInput bind:value={nCost} />
+          <MoneyInput bind:value={nCost} autofocus />
         </label>
         <label class="w-40 space-y-1">
           <span class="text-xs font-medium">{t("deliveryDetail.courierAp")}</span>
@@ -1472,7 +1616,7 @@
         </label>
         <Button
           size="sm"
-          disabled={busy || !nDesc.trim() || nCost == null}
+          disabled={busy || nCost == null}
           onclick={addItem}>{t("common.add")}</Button
         >
         <Button
@@ -1482,6 +1626,7 @@
           onclick={() => (addingUnder = null)}>{t("common.cancel")}</Button
         >
       </div>
+      <p class="text-xs text-muted-foreground">{t("deliveryDetail.ctrlEnterHint")}</p>
     {/if}
   </div>
 {/snippet}

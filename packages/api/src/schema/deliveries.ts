@@ -32,7 +32,7 @@ export const typeDefs = /* GraphQL */ `
     purchaseId: ID
     status: DeliveryStatus!
     deliveredAt: String
-    "Denormalized sum of the cost tree's root nodes — for list views."
+    "Denormalized charges total (freight/customs cost nodes only, excluding goods value) — for list views."
     totalCostMinor: Float!
     "Number of goods leaves (received product lines) — for list summaries."
     lineCount: Int!

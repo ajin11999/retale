@@ -154,6 +154,22 @@
 
 <svelte:head><title>{t("deliveries.pageTitle")}</title></svelte:head>
 
+<!-- New-delivery shortcuts: Ctrl/Cmd+Enter creates the draft, Esc cancels. -->
+<svelte:window
+  onkeydown={(e) => {
+    if (!showNew) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      if (!busy && canDraft && newDate && (newKind === "transit" || newTargetLocationId)) {
+        e.preventDefault();
+        createDelivery();
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      resetNew();
+    }
+  }}
+/>
+
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <h1 class="text-xl font-semibold">{t("deliveries.title")}</h1>
@@ -220,6 +236,7 @@
           {t("common.cancel")}
         </Button>
       </div>
+      <p class="mt-2 text-xs text-muted-foreground">{t("deliveryDetail.ctrlEnterHint")}</p>
     </div>
   {/if}
 

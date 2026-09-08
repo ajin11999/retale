@@ -12,7 +12,6 @@
     AlertTriangle,
     Plus,
     Trash2,
-    Printer,
     Check,
     X,
     GripVertical,
@@ -721,11 +720,6 @@
             <Pencil class="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         {/if}
-      </div>
-      <div class="flex items-center gap-2 print:hidden">
-        <Button variant="outline" size="sm" onclick={() => window.print()}>
-          <Printer class="mr-1.5 h-4 w-4" /> {t("common.print")}
-        </Button>
       </div>
     </div>
 

@@ -71,6 +71,16 @@
 
   import { evaluateMath } from "$lib/utils";
 
+  /**
+   * Round to the currency's precision (2 decimals, DECIMAL(19,2)). The API
+   * rejects money with more than 2 decimals (`isMoney`), so infield math
+   * results (e.g. 100/3, 0.1+0.2, float drift like 11000.000000000002) must
+   * be rounded before binding — otherwise the save fails with
+   * "unitCostMinor must be a non-negative integer". Plain typed entry is
+   * already capped to 2 decimals by normalize().
+   */
+  const roundMoney = (v: number): number => Math.round(v * 100) / 100;
+
   let isEditingExpr = $state(false);
 
   /** The string the input shows, seeded from `value` and re-synced by the effect
@@ -109,7 +119,7 @@
       
       const evaled = evaluateMath(safe);
       if (evaled != null) {
-        value = evaled;
+        value = roundMoney(evaled);
       }
       (rest as any).oninput?.(e);
       return;
@@ -137,7 +147,7 @@
     if (isEditingExpr) {
       const evaled = evaluateMath(text);
       if (evaled != null) {
-        value = evaled;
+        value = roundMoney(evaled);
       }
       isEditingExpr = false;
       text = fmt(value);

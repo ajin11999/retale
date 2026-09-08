@@ -828,7 +828,7 @@ export async function updateItem(
     patch.unitCostMinor !== undefined &&
     (!isMoney(patch.unitCostMinor) || patch.unitCostMinor < 0)
   ) {
-    throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative integer");
+    throw new PurchaseError("INVALID_INPUT", "unitCostMinor must be a non-negative amount");
   }
 
     const nextBaseCostMinor =
