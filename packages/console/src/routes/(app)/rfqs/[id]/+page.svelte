@@ -18,6 +18,7 @@
   import { flip } from "svelte/animate";
   import {
     Pencil,
+    Plus,
     Printer,
     Trash2,
     ArrowRight,
@@ -709,12 +710,24 @@
     if (!selected.size) return;
     if (!confirm(t("rfqs.confirmDeleteSelected", { count: selected.size }))) return;
     busy = true;
+    feedback = null;
     try {
+      const failed: string[] = [];
       for (const id of selected) {
-        await DeleteItem.mutate({ id });
+        try {
+          const res = await DeleteItem.mutate({ id });
+          if (res.errors?.length) failed.push(id);
+        } catch {
+          failed.push(id);
+        }
       }
-      selected = new Set();
+      // Keep only the ids that failed so the user can retry; drop the rest
+      // even before refetch so ticks/bulk bar clear immediately on success.
+      selected = new Set(failed);
       await refetch();
+      if (failed.length > 0) {
+        feedback = { ok: false, text: t("rfqs.bulkDeletePartial", { count: failed.length }) };
+      }
     } finally {
       busy = false;
     }
@@ -786,18 +799,44 @@
 
   // ---- Sections Management ----
   let newSectionName = $state<string | null>(null);
+  let newSectionAnchorId = $state<string | null>(null);
   let editingSectionId = $state<string | null>(null);
   let editingSectionName = $state("");
+
+  function startAddSection(anchorId: string | null = null) {
+    itemDraft = null;
+    itemDraftAnchorId = null;
+    newSectionAnchorId = anchorId;
+    newSectionName = "";
+  }
+
+  function cancelAddSection() {
+    newSectionName = null;
+    newSectionAnchorId = null;
+  }
 
   async function addSection() {
     const name = (newSectionName ?? "").trim();
     if (!rfq || !name) return;
+    const anchorId = newSectionAnchorId;
     busy = true;
     try {
       const res = await CreateSection.mutate({ rfqId: rfq.id, name });
       if (!res.errors?.length) {
+        const newId = res.data?.createRfqSection?.id;
+        if (newId && anchorId) {
+          const currentIds = sections.map((s) => s.id).filter((id) => id !== newId);
+          const idx = currentIds.indexOf(anchorId);
+          const orderedIds = idx === -1
+            ? [...currentIds, newId]
+            : [...currentIds.slice(0, idx + 1), newId, ...currentIds.slice(idx + 1)];
+          await ReorderSections.mutate({ rfqId: rfq.id, orderedIds });
+        }
         newSectionName = null;
+        newSectionAnchorId = null;
         await refetch();
+      } else {
+        feedback = { ok: false, text: res.errors[0].message };
       }
     } finally {
       busy = false;
@@ -830,10 +869,19 @@
     busy = true;
     try {
       const res = await DeleteSection.mutate({ id });
-      if (!res.errors?.length) await refetch();
+      if (!res.errors?.length) {
+        if (sectionFilter === id) sectionFilter = "";
+        await refetch();
+      }
     } finally {
       busy = false;
     }
+  }
+
+  async function cancelRfq() {
+    if (!rfq || !confirm(t("rfqs.confirmCancel", { number: rfq.rfqNumber })))
+      return;
+    await setStatus("cancelled");
   }
 
   // ---- Items ----
@@ -848,8 +896,14 @@
   }
 
   let itemDraft = $state<ItemDraft | null>(null);
+  // Which group the draft form renders under. "" = General Items. Kept separate
+  // from itemDraft.sectionId so changing the section <select> doesn't teleport
+  // the open form.
+  let itemDraftAnchorId = $state<string | null>(null);
 
   function startAddItem(sectionId: string = "") {
+    cancelAddSection();
+    itemDraftAnchorId = sectionId;
     itemDraft = {
       id: null,
       sectionId,
@@ -862,6 +916,8 @@
   }
 
   function startEditItem(i: RfqItemType) {
+    cancelAddSection();
+    itemDraftAnchorId = i.sectionId ?? "";
     itemDraft = {
       id: i.id,
       sectionId: i.sectionId ?? "",
@@ -871,6 +927,11 @@
       targetUnitCostMinor: i.targetUnitCostMinor,
       quotedUnitCostMinor: i.quotedUnitCostMinor,
     };
+  }
+
+  function closeItemDraft() {
+    itemDraft = null;
+    itemDraftAnchorId = null;
   }
 
   async function saveItem() {
@@ -890,8 +951,10 @@
           quotedUnitCostMinor: d.quotedUnitCostMinor,
         });
         if (!res.errors?.length) {
-          itemDraft = null;
+          closeItemDraft();
           await refetch();
+        } else {
+          feedback = { ok: false, text: res.errors[0].message };
         }
       } else {
         const res = await CreateItem.mutate({
@@ -904,8 +967,10 @@
           quotedUnitCostMinor: d.quotedUnitCostMinor,
         });
         if (!res.errors?.length) {
-          itemDraft = null;
+          closeItemDraft();
           await refetch();
+        } else {
+          feedback = { ok: false, text: res.errors[0].message };
         }
       }
     } finally {
@@ -918,7 +983,16 @@
     busy = true;
     try {
       const res = await DeleteItem.mutate({ id });
-      if (!res.errors?.length) await refetch();
+      if (!res.errors?.length) {
+        if (selected.has(id)) {
+          const next = new Set(selected);
+          next.delete(id);
+          selected = next;
+        }
+        await refetch();
+      } else {
+        feedback = { ok: false, text: res.errors[0].message };
+      }
     } finally {
       busy = false;
     }
@@ -1046,13 +1120,25 @@
           </Button>
 
           <Button
-            variant="ghost"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onclick={cancelRfq}
+          >
+            {t("rfqs.cancelRfq")}
+          </Button>
+        {/if}
+
+        {#if canEdit && rfq.status !== "awarded"}
+          <Button
+            variant="outline"
             size="sm"
             class="text-destructive hover:text-destructive"
             disabled={busy}
             onclick={deleteRfq}
+            title={t("rfqs.confirmDelete", { number: rfq.rfqNumber })}
           >
-            <Trash2 class="size-4" />
+            <Trash2 class="mr-1.5 size-4" /> {t("rfqs.deleteRfq")}
           </Button>
         {/if}
       </div>
@@ -1234,7 +1320,7 @@
             <Button
               size="sm"
               variant="outline"
-              onclick={() => (newSectionName = "")}
+              onclick={() => startAddSection(null)}
             >
               {t("rfqs.addSection")}
             </Button>
@@ -1245,24 +1331,25 @@
         {/if}
       </div>
 
-      {#if newSectionName !== null}
+      {#if newSectionName !== null && newSectionAnchorId === null}
         <div class="flex items-center gap-2 border p-3 rounded-lg bg-card shadow-sm">
           <Input
             placeholder={t("rfqs.sectionName")}
             bind:value={newSectionName}
             class="max-w-xs h-8 text-xs"
             autofocus
-            onkeydown={(e: any) => e.key === "Enter" && addSection()}
+            onkeydown={(e: any) => { if (e.key === "Enter") addSection(); else if (e.key === "Escape") cancelAddSection(); }}
           />
           <Button size="sm" onclick={addSection} disabled={busy || !newSectionName.trim()}>{t("rfqs.saveSection")}</Button>
           <Button
             size="sm"
             variant="ghost"
-            onclick={() => (newSectionName = null)}>{t("common.cancel")}</Button
+            onclick={cancelAddSection}>{t("common.cancel")}</Button
           >
         </div>
       {/if}
 
+      {#snippet itemForm()}
       {#if itemDraft}
         <div class="border rounded-lg p-4 bg-card space-y-3 shadow-sm">
           <div class="flex items-center justify-between border-b pb-2">
@@ -1324,12 +1411,13 @@
             <Button
               size="sm"
               variant="ghost"
-              onclick={() => (itemDraft = null)}>{t("common.cancel")}</Button
+              onclick={closeItemDraft}>{t("common.cancel")}</Button
             >
             <Button size="sm" disabled={busy} onclick={saveItem}>{t("rfqs.saveLine")}</Button>
           </div>
         </div>
       {/if}
+      {/snippet}
 
       <!-- Sticky Bulk Actions Bar -->
       {#if isEditable && selectedCount > 0}
@@ -1449,29 +1537,19 @@
                     <span class="text-muted-foreground">{t("rfqs.quoted")} <strong class="text-emerald-700 font-semibold">{formatMoney(g.quotedSubtotal)}</strong></span>
                   </div>
 
-                  {#if isEditable}
+                  {#if isEditable && g.key !== UNGROUPED}
                     <div class="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        class="h-7 text-xs px-2"
-                        onclick={() => startAddItem(g.key === UNGROUPED ? "" : g.key)}
-                      >
-                        {t("rfqs.addLine")}
-                      </Button>
-                      {#if g.key !== UNGROUPED}
-                        <IconButton
-                          icon={Pencil}
-                          label={t("rfqs.renameSection")}
-                          onclick={() => startRenameSection(g.id, g.name)}
-                        />
-                        <IconButton
-                          icon={Trash2}
-                          label={t("rfqs.deleteSection")}
-                          variant="destructive"
-                          onclick={() => deleteSection(g.id)}
-                        />
-                      {/if}
+                      <IconButton
+                        icon={Pencil}
+                        label={t("rfqs.renameSection")}
+                        onclick={() => startRenameSection(g.id, g.name)}
+                      />
+                      <IconButton
+                        icon={Trash2}
+                        label={t("rfqs.deleteSection")}
+                        variant="destructive"
+                        onclick={() => deleteSection(g.id)}
+                      />
                     </div>
                   {/if}
                 </div>
@@ -1651,10 +1729,54 @@
                   </tbody>
                 </table>
               </div>
+
+              {#if itemDraft && (itemDraftAnchorId ?? "") === g.key}
+                <div class="border-t p-3">
+                  {@render itemForm()}
+                </div>
+              {:else if newSectionName !== null && newSectionAnchorId === g.key}
+                <div class="flex items-center gap-2 border-t px-4 py-2.5">
+                  <Input
+                    placeholder={t("rfqs.sectionName")}
+                    bind:value={newSectionName}
+                    class="h-8 max-w-xs text-xs"
+                    autofocus
+                    onkeydown={(e: any) => { if (e.key === "Enter") addSection(); else if (e.key === "Escape") cancelAddSection(); }}
+                  />
+                  <Button size="sm" onclick={addSection} disabled={busy || !newSectionName.trim()}>{t("rfqs.saveSection")}</Button>
+                  <Button size="sm" variant="ghost" onclick={cancelAddSection}>{t("common.cancel")}</Button>
+                </div>
+              {:else if isEditable && !filtering && newSectionName === null && !itemDraft}
+                <div class="border-t flex items-center justify-between gap-2 group/footer">
+                  <button
+                    type="button"
+                    class="flex-1 text-left px-4 py-2.5 text-xs font-medium text-muted-foreground group-hover/footer:text-primary transition-colors flex items-center gap-1.5"
+                    onclick={() => startAddItem(g.key === UNGROUPED ? "" : g.key)}
+                  >
+                    <Plus class="size-3.5" /> {t("rfqs.addLineToSection", { section: g.name })}
+                  </button>
+                  {#if g.key !== UNGROUPED}
+                    <button
+                      type="button"
+                      class="shrink-0 mr-2 px-2 py-2.5 text-xs font-medium text-muted-foreground/70 hover:text-primary transition-colors flex items-center gap-1"
+                      title={t("rfqs.addSectionBelow")}
+                      onclick={() => startAddSection(g.key)}
+                    >
+                      <Plus class="size-3.5" /> {t("rfqs.addSectionBelow")}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
             {/if}
           </div>
         {/each}
       </div>
+
+      {#if itemDraft && !visibleGroups.some((g) => (itemDraftAnchorId ?? "") === g.key)}
+        <div class="rounded-lg border bg-card p-3 shadow-xs">
+          {@render itemForm()}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
