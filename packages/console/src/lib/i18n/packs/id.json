@@ -618,6 +618,7 @@
   "requisitions.alreadyOnRequisition": "Varian ini sudah ada di permintaan pembelian!",
   "requisitions.requestedItems": "Item yang Diminta",
   "requisitions.addSection": "Tambah bagian",
+  "requisitions.addSectionBelow": "Tambah bagian di bawah",
   "requisitions.addMultiple": "Tambah banyak",
   "requisitions.addLine": "Tambah baris",
   "requisitions.itemsSelected": "{count} item dipilih",

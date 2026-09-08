@@ -173,6 +173,7 @@
   let newItemSection = $state("");
 
   let newSectionName = $state<string | null>(null);
+  let newSectionAnchorId = $state<string | null>(null);
   let adding = $state(false);
 
   // Edit Metadata
@@ -272,12 +273,39 @@
   }
 
   // --- Section Actions ---
+  function startAddSection(anchorId: string | null = null) {
+    showAddItem = false;
+    newSectionAnchorId = anchorId;
+    newSectionName = "";
+  }
+
+  function cancelAddSection() {
+    newSectionName = null;
+    newSectionAnchorId = null;
+  }
+
   async function addSection() {
     const name = (newSectionName ?? "").trim();
-    if (!requisition || !name) return;
-    await CreateSection.mutate({ requisitionId: requisition.id, name });
-    newSectionName = null;
-    await refetch();
+    if (!requisition || !name || adding) return;
+    const anchorId = newSectionAnchorId;
+    adding = true;
+    try {
+      const res = await CreateSection.mutate({ requisitionId: requisition.id, name });
+      const newId = res.data?.createRequisitionSection?.id;
+      if (newId && anchorId) {
+        const currentIds = sections.map((s: any) => s.id).filter((id: string) => id !== newId);
+        const idx = currentIds.indexOf(anchorId);
+        const orderedIds = idx === -1
+          ? [...currentIds, newId]
+          : [...currentIds.slice(0, idx + 1), newId, ...currentIds.slice(idx + 1)];
+        await ReorderSections.mutate({ requisitionId: requisition.id, orderedIds });
+      }
+      newSectionName = null;
+      newSectionAnchorId = null;
+      await refetch();
+    } finally {
+      adding = false;
+    }
   }
 
   function startRenameSection(id: string, name: string) {
@@ -301,6 +329,7 @@
 
   // --- Item Actions ---
   function openAddItem(sectionId: string = "") {
+    cancelAddSection();
     newItemSection = sectionId === "unsectioned" ? "" : sectionId;
     newItemVariantId = "";
     newItemDescription = "";
@@ -711,14 +740,14 @@
 
         <div class="flex items-center gap-2 print:hidden">
           <Input type="search" placeholder={t("requisitions.searchItems")} bind:value={search} class="w-56 h-9" />
-          {#if newSectionName !== null}
+          {#if newSectionName !== null && newSectionAnchorId === null}
             <div class="flex items-center gap-2">
-              <Input placeholder={t("requisitions.sectionName")} bind:value={newSectionName} class="w-40 h-9 text-sm" onkeydown={(e: any) => e.key === 'Enter' && addSection()} autofocus />
-              <Button size="sm" onclick={addSection}>{t("common.save")}</Button>
-              <Button size="sm" variant="ghost" onclick={() => newSectionName = null}>{t("common.cancel")}</Button>
+              <Input placeholder={t("requisitions.sectionName")} bind:value={newSectionName} class="w-40 h-9 text-sm" onkeydown={(e: any) => { if (e.key === 'Enter') addSection(); else if (e.key === 'Escape') cancelAddSection(); }} autofocus />
+              <Button size="sm" onclick={addSection} disabled={adding || !newSectionName.trim()}>{t("common.save")}</Button>
+              <Button size="sm" variant="ghost" onclick={cancelAddSection}>{t("common.cancel")}</Button>
             </div>
           {:else}
-            <Button variant="outline" size="sm" onclick={() => newSectionName = ""}>
+            <Button variant="outline" size="sm" onclick={() => startAddSection(null)}>
               {t("requisitions.addSection")}
             </Button>
             <Button variant="outline" size="sm" onclick={openBulk}>
@@ -920,12 +949,27 @@
                       {#if groupedItems[section.id].length === 0}
                         <tr><td colspan="8" class="px-4 py-6 text-center text-muted-foreground text-xs">{t("requisitions.noItemsInSection")}</td></tr>
                       {/if}
-                      {#if section.id !== "unsectioned" && !showAddItem}
+                      {#if newSectionName !== null && newSectionAnchorId === section.id}
+                        <tr class="border-t">
+                          <td colspan="8" class="p-0">
+                            <div class="flex items-center gap-2 px-4 py-2">
+                              <Input placeholder={t("requisitions.sectionName")} bind:value={newSectionName} class="h-8 max-w-xs text-sm" onkeydown={(e: any) => { if (e.key === 'Enter') addSection(); else if (e.key === 'Escape') cancelAddSection(); }} autofocus />
+                              <Button size="sm" onclick={addSection} disabled={adding || !newSectionName.trim()}>{t("common.save")}</Button>
+                              <Button size="sm" variant="ghost" onclick={cancelAddSection}>{t("common.cancel")}</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      {:else if section.id !== "unsectioned" && !showAddItem && newSectionName === null && search === ""}
                         <tr class="hover:bg-muted/20 border-t group">
                           <td colspan="8" class="p-0">
-                            <button class="w-full text-left px-4 py-2 text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-1.5" onclick={() => openAddItem(section.id)}>
-                              <Plus class="h-3.5 w-3.5" /> {t("requisitions.addLineToSection", { section: section.name })}
-                            </button>
+                            <div class="flex items-center justify-between gap-2">
+                              <button class="flex-1 text-left px-4 py-2 text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-1.5" onclick={() => openAddItem(section.id)}>
+                                <Plus class="h-3.5 w-3.5" /> {t("requisitions.addLineToSection", { section: section.name })}
+                              </button>
+                              <button class="shrink-0 mr-2 px-2 py-2 text-xs font-medium text-muted-foreground/70 hover:text-primary transition-colors flex items-center gap-1 print:hidden" title={t("requisitions.addSectionBelow")} onclick={() => startAddSection(section.id)}>
+                                <Plus class="h-3.5 w-3.5" /> {t("requisitions.addSectionBelow")}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       {:else if showAddItem && (newItemSection || "unsectioned") === section.id}

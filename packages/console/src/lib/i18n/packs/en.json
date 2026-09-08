@@ -618,6 +618,7 @@
   "requisitions.alreadyOnRequisition": "This variant is already on the requisition!",
   "requisitions.requestedItems": "Requested Items",
   "requisitions.addSection": "Add section",
+  "requisitions.addSectionBelow": "Add section below",
   "requisitions.addMultiple": "Add multiple",
   "requisitions.addLine": "Add line",
   "requisitions.itemsSelected": "{count} item selected|{count} items selected",
