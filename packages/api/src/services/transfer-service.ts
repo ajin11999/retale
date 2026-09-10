@@ -7,7 +7,7 @@
 import { desc, eq, and } from "drizzle-orm";
 import { ulid } from "ulid";
 import { locations } from "../db/schema/locations.ts";
-import { productVariants } from "../db/schema/products.ts";
+import { products, productVariants } from "../db/schema/products.ts";
 import {
   stockTransferItems,
   stockTransfers,
@@ -54,6 +54,26 @@ export function transferStatus(t: Transfer): TransferStatus {
   if (t.receivedAt) return "received";
   if (t.dispatchedAt) return "in_transit";
   return "draft";
+}
+
+/** Display snapshot for a new transfer line, taken from the live variant. */
+async function snapshotFor(
+  tx: Tx,
+  variantId: string,
+): Promise<{ snapshotSku: string; snapshotProductName: string; snapshotVariantLabel: string | null }> {
+  const variant = await tx.query.productVariants.findFirst({
+    where: eq(productVariants.id, variantId),
+  });
+  if (!variant) throw new TransferError("VARIANT_NOT_FOUND", variantId);
+  const product = await tx.query.products.findFirst({
+    where: eq(products.id, variant.productId),
+  });
+  if (!product) throw new TransferError("VARIANT_NOT_FOUND", variantId);
+  return {
+    snapshotSku: variant.sku,
+    snapshotProductName: product.name,
+    snapshotVariantLabel: variant.label,
+  };
 }
 
 async function loadTransfer(id: string): Promise<Transfer> {
@@ -107,10 +127,9 @@ export async function createTransfer(input: {
         where: eq(locations.id, item.sourceLocationId),
       });
       if (!sloc) throw new TransferError("LOCATION_NOT_FOUND", item.sourceLocationId);
-      const variant = await tx.query.productVariants.findFirst({
-        where: eq(productVariants.id, item.variantId),
-      });
-      if (!variant) throw new TransferError("VARIANT_NOT_FOUND", item.variantId);
+      // Throws VARIANT_NOT_FOUND when missing; also captures the display
+      // snapshot stored on the line.
+      await snapshotFor(tx, item.variantId);
     }
 
     const transferId = ulid();
@@ -122,13 +141,16 @@ export async function createTransfer(input: {
     });
     if (items.length > 0) {
       await tx.insert(stockTransferItems).values(
-        items.map((item) => ({
-          id: ulid(),
-          transferId,
-          sourceLocationId: item.sourceLocationId,
-          variantId: item.variantId,
-          qty: item.qty,
-        })),
+        await Promise.all(
+          items.map(async (item) => ({
+            id: ulid(),
+            transferId,
+            sourceLocationId: item.sourceLocationId,
+            variantId: item.variantId,
+            qty: item.qty,
+            ...(await snapshotFor(tx, item.variantId)),
+          })),
+        ),
       );
     }
     const row = await tx.query.stockTransfers.findFirst({
@@ -154,6 +176,11 @@ async function moveLines(
   const sign = direction === "out" ? -1 : 1;
   for (const item of items) {
     const locationId = direction === "out" ? item.sourceLocationId : transfer.targetLocationId;
+    // The variant may be gone (its product was hard-deleted) — the line keeps
+    // its display snapshot, but no stock can move for it anymore.
+    if (!item.variantId) {
+      throw new TransferError("VARIANT_NOT_FOUND", `transfer line ${item.id} references a deleted variant`);
+    }
     await recordMovement(
       {
         variantId: item.variantId,
@@ -254,6 +281,9 @@ export async function cancelTransfer(
         .from(stockTransferItems)
         .where(eq(stockTransferItems.transferId, transfer.id));
       for (const item of items) {
+        if (!item.variantId) {
+          throw new TransferError("VARIANT_NOT_FOUND", `transfer line ${item.id} references a deleted variant`);
+        }
         await recordMovement(
           {
             variantId: item.variantId,
@@ -310,10 +340,7 @@ export async function addTransferItems(
         where: eq(locations.id, item.sourceLocationId),
       });
       if (!sloc) throw new TransferError("LOCATION_NOT_FOUND", item.sourceLocationId);
-      const variant = await tx.query.productVariants.findFirst({
-        where: eq(productVariants.id, item.variantId),
-      });
-      if (!variant) throw new TransferError("VARIANT_NOT_FOUND", item.variantId);
+      await snapshotFor(tx, item.variantId);
     }
 
     for (const item of items) {
@@ -335,6 +362,7 @@ export async function addTransferItems(
           sourceLocationId: item.sourceLocationId,
           variantId: item.variantId,
           qty: item.qty,
+          ...(await snapshotFor(tx, item.variantId)),
         });
       }
     }

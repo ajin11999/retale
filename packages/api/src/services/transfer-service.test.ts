@@ -23,6 +23,8 @@ import {
   TransferError,
   type TransferErrorCode,
 } from "./transfer-service.ts";
+import { adjustStock } from "./stock-service.ts";
+import { hardDeleteProduct } from "./product-service.ts";
 
 let userId: string;
 let sourceId: string;
@@ -237,6 +239,73 @@ describe("cancellation", () => {
     await receiveTransfer(transfer.id, userId);
     await expectError("ALREADY_RECEIVED", () =>
       cancelTransfer(transfer.id, "too late", userId),
+    );
+  });
+});
+
+/** Product id owning a seeded variant (throws when the seed is missing). */
+async function productIdOf(variantId: string): Promise<string> {
+  const rows = await db
+    .select()
+    .from(productVariants)
+    .where(eq(productVariants.id, variantId));
+  const productId = rows[0]?.productId;
+  if (!productId) throw new Error(`seed variant ${variantId} missing`);
+  return productId;
+}
+
+describe("snapshots and product hard-delete", () => {
+  test("new lines snapshot the variant display", async () => {
+    const variantId = await seedVariant(10);
+    const transfer = await createTransfer({
+      targetLocationId: targetId,
+      items: [{ variantId, qty: 5, sourceLocationId: sourceId }],
+      createdByUserId: userId,
+    });
+    const items = await listTransferItems(transfer.id);
+    expect(items).toHaveLength(1);
+    const item = items[0];
+    if (!item) throw new Error("transfer line missing");
+    expect(item.snapshotSku).toBe(`SKU-${variantId}`);
+    expect(item.snapshotProductName).toBe("Widget");
+    expect(item.snapshotVariantLabel).toBeNull();
+  });
+
+  test("hard-deleting a product keeps its transfer lines with a nulled variant", async () => {
+    const variantId = await seedVariant(100);
+    const transfer = await createTransfer({
+      targetLocationId: targetId,
+      items: [{ variantId, qty: 30, sourceLocationId: sourceId }],
+      createdByUserId: userId,
+    });
+    await dispatchTransfer(transfer.id, userId);
+    await receiveTransfer(transfer.id, userId);
+    // Zero out both locations, mirroring the reported case (0 stock in two
+    // locations), then delete the product the way the console bulk action does.
+    await adjustStock({ variantId, locationId: sourceId, qtyDelta: -70, reason: "test", createdByUserId: userId });
+    await adjustStock({ variantId, locationId: targetId, qtyDelta: -30, reason: "test", createdByUserId: userId });
+
+    await hardDeleteProduct(await productIdOf(variantId));
+
+    const items = await listTransferItems(transfer.id);
+    expect(items).toHaveLength(1);
+    const item = items[0];
+    if (!item) throw new Error("transfer line missing");
+    expect(item.variantId).toBeNull();
+    expect(item.snapshotSku).toBe(`SKU-${variantId}`);
+    expect(item.snapshotProductName).toBe("Widget");
+  });
+
+  test("dispatch fails cleanly when the variant was hard-deleted", async () => {
+    const variantId = await seedVariant(10);
+    const transfer = await createTransfer({
+      targetLocationId: targetId,
+      items: [{ variantId, qty: 5, sourceLocationId: sourceId }],
+      createdByUserId: userId,
+    });
+    await hardDeleteProduct(await productIdOf(variantId));
+    await expectError("VARIANT_NOT_FOUND", () =>
+      dispatchTransfer(transfer.id, userId),
     );
   });
 });

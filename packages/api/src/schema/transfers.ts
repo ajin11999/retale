@@ -26,8 +26,13 @@ export const typeDefs = /* GraphQL */ `
     id: ID!
     transferId: ID!
     sourceLocationId: ID!
-    variantId: ID!
+    "Null after the variant's product is hard-deleted — use the snapshot."
+    variantId: ID
     qty: Float!
+    "Display snapshot taken when the line was created; survives hard-delete."
+    snapshotSku: String!
+    snapshotProductName: String!
+    snapshotVariantLabel: String
   }
 
   input StockTransferItemInput {

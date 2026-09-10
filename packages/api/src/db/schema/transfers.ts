@@ -49,13 +49,19 @@ export const stockTransferItems = mysqlTable(
     transferId: ulidRef()
       .notNull()
       .references(() => stockTransfers.id, { onDelete: "cascade" }),
-    variantId: ulidRef()
-      .notNull()
-      .references(() => productVariants.id, { onDelete: "restrict" }),
+    // Null after the variant's product is hard-deleted — the snapshot columns
+    // below keep the history readable (mirrors order/purchase lines).
+    variantId: ulidRef().references(() => productVariants.id, {
+      onDelete: "set null",
+    }),
     sourceLocationId: ulidRef()
       .notNull()
       .references(() => locations.id, { onDelete: "restrict" }),
     qty: bigint({ mode: "number" }).notNull(),
+    // Immutable display snapshot taken when the line is created.
+    snapshotSku: varchar({ length: 64 }).notNull(),
+    snapshotProductName: varchar({ length: 300 }).notNull(),
+    snapshotVariantLabel: varchar({ length: 200 }),
   },
   (t) => [
     index("stock_transfer_items_transfer_id_idx").on(t.transferId),

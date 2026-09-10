@@ -31,6 +31,9 @@
           sourceLocationId
           variantId
           qty
+          snapshotSku
+          snapshotProductName
+          snapshotVariantLabel
         }
       }
       locations {
@@ -120,15 +123,26 @@
       .map((l) => ({ value: l.id, label: locationName(l.id) })),
   );
 
-  const variantLabel = (id: string) => {
-    for (const p of products) {
-      const v = p.variants.find((x) => x.id === id);
-      if (v) {
-        const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        return `${p.name} · ${suffix}`;
+  const variantLabel = (item: {
+    variantId: string | null;
+    snapshotSku: string;
+    snapshotProductName: string;
+    snapshotVariantLabel: string | null;
+  }) => {
+    if (item.variantId) {
+      for (const p of products) {
+        const v = p.variants.find((x) => x.id === item.variantId);
+        if (v) {
+          const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
+          return `${p.name} · ${suffix}`;
+        }
       }
     }
-    return t("transferDetail.unknownVariant");
+    // The variant's product was hard-deleted — fall back to the line snapshot.
+    const suffix = item.snapshotVariantLabel
+      ? `${item.snapshotSku} · ${item.snapshotVariantLabel}`
+      : item.snapshotSku;
+    return `${item.snapshotProductName} · ${suffix}`;
   };
 
   interface VariantOption {
@@ -472,7 +486,7 @@
               <tbody>
                 {#each section.items as i (i.id)}
                   <tr class="border-b last:border-0 hover:bg-muted/40">
-                    <td class="py-1.5">{variantLabel(i.variantId)}</td>
+                    <td class="py-1.5">{variantLabel(i)}</td>
                     <td class="py-1.5 text-right">{i.qty}</td>
                     {#if transfer.status === "draft" && canEdit}
                       <td class="py-1.5 text-right">

@@ -273,9 +273,9 @@ type Mutation {
   hardDeleteLocation(id: ID!): Boolean!
 
   """
-  Manual stock write-on (positive) or write-off (negative). Reason required.
+  Manual stock write-on (positive) or write-off (negative). Reason is optional.
   """
-  adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String!): StockMovement!
+  adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String): StockMovement!
 
   """Snap a variant's weighted-average cost to an exact value."""
   overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
@@ -1251,7 +1251,9 @@ type PurchaseDelivery {
   status: DeliveryStatus!
   deliveredAt: String
 
-  """Denormalized sum of the cost tree's root nodes — for list views."""
+  """
+  Denormalized charges total (freight/customs cost nodes only, excluding goods value) — for list views.
+  """
   totalCostMinor: Float!
 
   """Number of goods leaves (received product lines) — for list summaries."""
@@ -1689,8 +1691,17 @@ type StockTransferItem {
   id: ID!
   transferId: ID!
   sourceLocationId: ID!
-  variantId: ID!
+
+  """Null after the variant's product is hard-deleted — use the snapshot."""
+  variantId: ID
   qty: Float!
+
+  """
+  Display snapshot taken when the line was created; survives hard-delete.
+  """
+  snapshotSku: String!
+  snapshotProductName: String!
+  snapshotVariantLabel: String
 }
 
 input StockTransferItemInput {
