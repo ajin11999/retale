@@ -18,6 +18,7 @@ import { vendorVariantCodes } from "../db/schema/vendor-variant-codes.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import { isMoney } from "../lib/money.ts";
+import { postPurchasePrepayment } from "./vendor-service.ts";
 
 export type PurchaseErrorCode =
   | "PURCHASE_NOT_FOUND"
@@ -29,6 +30,7 @@ export type PurchaseErrorCode =
   | "VARIANT_NOT_FOUND"
   | "INVALID_INPUT"
   | "NOT_OPEN"
+  | "ALREADY_PAID"
   | "ITEM_LOCKED";
 
 export class PurchaseError extends Error {
@@ -264,6 +266,78 @@ export async function cancelPurchase(id: string, userId: string): Promise<Purcha
     }
   });
   return loadPurchase(id);
+}
+
+/**
+ * Mark an open purchase as prepaid (pay-before-send vendors). An optional
+ * `vendorId` attaches a vendor to an ad-hoc PO in the same step — prepayments
+ * live on the vendor ledger, so a vendorless PO cannot be marked paid (and
+ * gaining a vendor also unlocks the per-vendor price history). Posts the
+ * matching negative ledger row and stamps `paidAt/paidAmountMinor`; the later
+ * delivery-time `purchase_on_account` charge nets against the prepayment, so
+ * a prepaid PO never sits in AP as owed. Single-shot: refuses when already
+ * paid. Cancelling afterwards keeps the prepayment as vendor credit (the cash
+ * really left) — correct it with `adjustVendorBalance` if that was a mistake.
+ * Not PO content, so `revision` is untouched.
+ */
+export async function markPurchasePaid(input: {
+  purchaseId: string;
+  vendorId?: string | null;
+  /** Defaults to the current invoice total; anything less leaves the remainder owed at delivery. */
+  amountMinor?: number | null;
+  note?: string | null;
+  createdByUserId: string;
+}): Promise<Purchase> {
+  const purchase = await loadPurchase(input.purchaseId);
+  if (purchase.status !== "open") {
+    throw new PurchaseError("NOT_OPEN", "only an open purchase can be marked as paid");
+  }
+  if (purchase.paidAt) {
+    throw new PurchaseError("ALREADY_PAID", "purchase is already marked as paid");
+  }
+
+  let vendorId = purchase.vendorId;
+  let snapshotVendorName: string | undefined;
+  if (input.vendorId) {
+    const vendor = await db.query.vendors.findFirst({
+      where: eq(vendors.id, input.vendorId),
+    });
+    if (!vendor) throw new PurchaseError("VENDOR_NOT_FOUND");
+    vendorId = vendor.id;
+    snapshotVendorName = vendor.name;
+  }
+  if (!vendorId) {
+    throw new PurchaseError(
+      "INVALID_INPUT",
+      "a vendor is required to mark a purchase as paid",
+    );
+  }
+
+  const amount = input.amountMinor ?? (await invoiceTotalMinor(input.purchaseId));
+  if (!isMoney(amount) || amount <= 0) {
+    throw new PurchaseError("INVALID_INPUT", "payment amount must be a positive amount");
+  }
+
+  await db.transaction(async (tx) => {
+    await postPurchasePrepayment(tx, {
+      vendorId,
+      purchaseId: input.purchaseId,
+      amountMinor: amount,
+      note: input.note ?? null,
+      createdByUserId: input.createdByUserId,
+    });
+    await tx
+      .update(purchases)
+      .set({
+        vendorId,
+        ...(snapshotVendorName !== undefined ? { snapshotVendorName } : {}),
+        paidAt: new Date(),
+        paidAmountMinor: amount,
+        paidByUserId: input.createdByUserId,
+      })
+      .where(eq(purchases.id, input.purchaseId));
+  });
+  return loadPurchase(input.purchaseId);
 }
 
 /**
@@ -962,11 +1036,22 @@ export async function invoiceTotalMinor(purchaseId: string): Promise<number> {
  * Most recent unit cost per variant across a vendor's non-cancelled purchases.
  * This is what the vendor actually charges — unlike `productVariants.costMinor`,
  * which landed-cost delivery inflates with allocated freight. Used to prefill
- * new PO lines. Newest purchase wins (by document date, then creation time).
+ * new PO lines and to flag price changes on the PO editor. Newest purchase
+ * wins (by document date, then creation time). Pass `excludePurchaseId` to
+ * ignore the PO being edited, so its own lines don't shadow prior history.
  */
 export async function lastVendorCosts(
   vendorId: string,
+  opts?: { excludePurchaseId?: string | null },
 ): Promise<{ variantId: string; unitCostMinor: number }[]> {
+  const conditions = [
+    eq(purchases.vendorId, vendorId),
+    ne(purchases.status, "cancelled"),
+    isNotNull(purchaseItems.variantId),
+  ];
+  if (opts?.excludePurchaseId) {
+    conditions.push(ne(purchases.id, opts.excludePurchaseId));
+  }
   const rows = await db
     .select({
       variantId: purchaseItems.variantId,
@@ -974,13 +1059,7 @@ export async function lastVendorCosts(
     })
     .from(purchaseItems)
     .innerJoin(purchases, eq(purchaseItems.purchaseId, purchases.id))
-    .where(
-      and(
-        eq(purchases.vendorId, vendorId),
-        ne(purchases.status, "cancelled"),
-        isNotNull(purchaseItems.variantId),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(
       desc(purchases.date),
       desc(purchases.createdAt),

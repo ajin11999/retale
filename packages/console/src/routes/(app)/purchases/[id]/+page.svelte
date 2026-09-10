@@ -34,6 +34,7 @@
   import Textarea from "$lib/components/ui/textarea.svelte";
   import type { PageData } from "./$types";
   import PullRequisitionModal from "./pull-requisition-modal.svelte";
+  import MarkPaidModal from "./mark-paid-modal.svelte";
 
   let showDiscountModal = $state(false);
 
@@ -52,6 +53,8 @@
         status
         revision
         lastSentAt
+        paidAt
+        paidAmountMinor
         totalInvoiceCost
         hasUnsentChanges
         sections {
@@ -244,9 +247,11 @@
   // What this PO's vendor last charged per variant (latest non-cancelled PO).
   // Prefills new-line unit costs — the variant's current cost is only a
   // fallback, since landed costs inflate it past the vendor's actual price.
+  // excludePurchaseId keeps this PO's own lines from shadowing prior history,
+  // so the price-change indicator compares against earlier POs.
   const VendorLastCostsQuery = graphql(`
-    query PurchaseVendorLastCosts($vendorId: ID!) {
-      vendorLastCosts(vendorId: $vendorId) {
+    query PurchaseVendorLastCosts($vendorId: ID!, $excludePurchaseId: ID) {
+      vendorLastCosts(vendorId: $vendorId, excludePurchaseId: $excludePurchaseId) {
         variantId
         unitCostMinor
       }
@@ -505,7 +510,11 @@
   // so they prefill straight from current cost.
   $effect(() => {
     const vendorId = purchase?.vendorId;
-    if (vendorId) VendorLastCostsQuery.fetch({ variables: { vendorId } });
+    if (vendorId) {
+      VendorLastCostsQuery.fetch({
+        variables: { vendorId, excludePurchaseId: purchase?.id ?? null },
+      });
+    }
   });
   const lastCostByVariant = $derived.by(() => {
     if (!purchase?.vendorId) return new Map<string, number>();
@@ -524,6 +533,30 @@
   const prefillCost = (variantId: string) =>
     lastCostByVariant.get(variantId) ?? currentCostByVariant.get(variantId) ?? 0;
 
+  // ---- Price-change indicator ----------------------------------------------
+  // Compare each stock line's unit cost against what this vendor last charged
+  // for the same variant on an earlier PO. Returns null when there is nothing
+  // to compare (non-stock line, no history, or unchanged price).
+  interface PriceDelta {
+    dir: "up" | "down";
+    deltaMinor: number;
+    pct: number;
+    lastMinor: number;
+  }
+  const priceDelta = (
+    variantId: string | null | undefined,
+    unitCostMinor: number,
+  ): PriceDelta | null => {
+    if (!variantId || !purchase?.vendorId) return null;
+    const last = lastCostByVariant.get(variantId);
+    if (last == null || last === unitCostMinor) return null;
+    const deltaMinor = unitCostMinor - last;
+    const pct = last !== 0 ? (deltaMinor / last) * 100 : 0;
+    return { dir: deltaMinor > 0 ? "up" : "down", deltaMinor, pct, lastMinor: last };
+  };
+  const formatPct = (pct: number) =>
+    `${pct > 0 ? "+" : ""}${pct.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
+
   // ---- Viewer permissions --------------------------------------------------
   const viewer = $derived(page.data.user as Viewer | undefined);
   const has = (key: string) => !!viewer && viewer.permissions.includes(key);
@@ -531,6 +564,7 @@
   const canCancel = $derived(has("purchase.cancel"));
   const canCreate = $derived(has("purchase.create"));
   const canSend = $derived(has("purchase.send"));
+  const canRecordPayment = $derived(has("vendor.record_payment"));
   // Gate the combobox's on-the-fly "Create product" row.
   const canCreateProduct = $derived(has("product.create"));
 
@@ -686,6 +720,30 @@
       feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
     } finally {
       busy = false;
+    }
+  }
+
+  // ---- Prepaid (pay-before-send) -------------------------------------------
+  // The mark-paid modal posts the vendor prepayment and stamps paidAt; the
+  // delivery-time AP charge nets against it. Refetch so the Paid badge, the
+  // (possibly newly attached) vendor header, and the ledger-backed totals
+  // all reflect the result.
+  let markPaidOpen = $state(false);
+  const showMarkPaid = $derived(
+    !!purchase &&
+      purchase.status === "open" &&
+      !purchase.paidAt &&
+      editable &&
+      canRecordPayment,
+  );
+  async function afterMarkPaid() {
+    await refetch();
+    // A newly attached vendor changes prefill history — re-pull last costs.
+    const vendorId = purchase?.vendorId;
+    if (vendorId) {
+      VendorLastCostsQuery.fetch({
+        variables: { vendorId, excludePurchaseId: purchase?.id ?? null },
+      });
     }
   }
 
@@ -2046,6 +2104,23 @@
       </div>
       <div class="flex items-center gap-3">
         <Badge class={statusClass(purchase.status)}>{t(`purchases.status.${purchase.status}`)}</Badge>
+        {#if purchase.paidAt}
+          <span
+            title={t("purchaseDetail.paidBadgeTitle", { amount: formatMoney(purchase.paidAmountMinor ?? 0), date: fmtDate(purchase.paidAt) })}
+          >
+            <Badge class="bg-emerald-100 text-emerald-700">
+              {t("purchaseDetail.paidBadge", { amount: formatMoney(purchase.paidAmountMinor ?? 0) })}
+            </Badge>
+          </span>
+        {/if}
+        {#if showMarkPaid}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onclick={() => (markPaidOpen = true)}>{t("purchaseDetail.markPaid")}</Button
+          >
+        {/if}
         {#if has("delivery.draft") && purchase.status !== "cancelled"}
           <a
             href="/purchases/{purchase.id}/receive"
@@ -2606,6 +2681,7 @@
                             class="ml-auto h-7 w-28 px-2 text-right tabular-nums"
                           />
                         {:else if editable}
+                          {@const delta = priceDelta(i.variantId, i.unitCostMinor)}
                           <div class="flex flex-col items-end leading-tight">
                             <button
                               type="button"
@@ -2614,6 +2690,15 @@
                               onclick={() => startCellEdit(i, "cost")}
                               >{formatMoney(i.unitCostMinor)}</button
                             >
+                            {#if delta}
+                              <span
+                                class="mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums {delta.dir === 'up' ? 'text-red-600' : 'text-emerald-600'}"
+                                title={t(delta.dir === "up" ? "purchaseDetail.priceUpTitle" : "purchaseDetail.priceDownTitle", { last: formatMoney(delta.lastMinor), delta: `${delta.deltaMinor > 0 ? "+" : "-"}${formatMoney(Math.abs(delta.deltaMinor))}`, pct: formatPct(delta.pct) })}
+                              >
+                                {#if delta.dir === "up"}<ArrowUp class="h-3 w-3" />{:else}<ArrowDown class="h-3 w-3" />{/if}
+                                {delta.deltaMinor > 0 ? "+" : "-"}{formatMoney(Math.abs(delta.deltaMinor))} ({formatPct(delta.pct)})
+                              </span>
+                            {/if}
                             {#if i.discount || i.taxPct}
                               <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={t("purchaseDetail.costBreakdown", { base: formatMoney(i.baseCostMinor), discount: i.discount || t("purchaseDetail.none"), tax: i.taxPct ? i.taxPct + "%" : t("purchaseDetail.none") })}>
                                 {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
@@ -2621,8 +2706,18 @@
                             {/if}
                           </div>
                         {:else}
+                          {@const deltaRo = priceDelta(i.variantId, i.unitCostMinor)}
                           <div class="flex flex-col items-end leading-tight">
                             <span>{formatMoney(i.unitCostMinor)}</span>
+                            {#if deltaRo}
+                              <span
+                                class="mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums {deltaRo.dir === 'up' ? 'text-red-600' : 'text-emerald-600'}"
+                                title={t(deltaRo.dir === "up" ? "purchaseDetail.priceUpTitle" : "purchaseDetail.priceDownTitle", { last: formatMoney(deltaRo.lastMinor), delta: `${deltaRo.deltaMinor > 0 ? "+" : "-"}${formatMoney(Math.abs(deltaRo.deltaMinor))}`, pct: formatPct(deltaRo.pct) })}
+                              >
+                                {#if deltaRo.dir === "up"}<ArrowUp class="h-3 w-3" />{:else}<ArrowDown class="h-3 w-3" />{/if}
+                                {deltaRo.deltaMinor > 0 ? "+" : "-"}{formatMoney(Math.abs(deltaRo.deltaMinor))} ({formatPct(deltaRo.pct)})
+                              </span>
+                            {/if}
                             {#if i.discount || i.taxPct}
                               <span class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[150px]" title={t("purchaseDetail.costBreakdown", { base: formatMoney(i.baseCostMinor), discount: i.discount || t("purchaseDetail.none"), tax: i.taxPct ? i.taxPct + "%" : t("purchaseDetail.none") })}>
                                 {formatMoney(i.baseCostMinor)} {i.discount ? `(-${i.discount})` : ''} {i.taxPct ? `(+${i.taxPct}%)` : ''}
@@ -3345,5 +3440,13 @@
     selected = new Set();
     PurchaseDetail.fetch({ policy: 'NetworkOnly', variables: { id: purchase.id } });
   }}
+/>
+<MarkPaidModal
+  bind:open={markPaidOpen}
+  purchaseId={purchase.id}
+  purchaseVendorId={purchase.vendorId}
+  vendorOptions={vendorOptions}
+  invoiceTotal={purchase.totalInvoiceCost}
+  onSaved={afterMarkPaid}
 />
 {/if}

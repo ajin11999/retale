@@ -41,7 +41,7 @@ type Query {
   """
   Latest unit cost per variant across this vendor's non-cancelled purchases — for prefilling new PO lines.
   """
-  vendorLastCosts(vendorId: ID!): [VendorLastCost!]!
+  vendorLastCosts(vendorId: ID!, excludePurchaseId: ID): [VendorLastCost!]!
   deliveries(status: DeliveryStatus, kind: DeliveryKind): [PurchaseDelivery!]!
   delivery(id: ID!): PurchaseDelivery
   customers(includeArchived: Boolean): [Customer!]!
@@ -339,6 +339,11 @@ type Mutation {
   Confirm a prepared send: flip it to 'sent' and capture the expected delivery date.
   """
   confirmPurchaseSend(id: ID!, expectedDeliveryDate: String): PurchaseSend!
+
+  """
+  Mark an open PO as prepaid (pay-before-send): posts the vendor prepayment and stamps paidAt. Optionally attaches a vendor to an ad-hoc PO; amountMinor defaults to the invoice total.
+  """
+  markPurchasePaid(purchaseId: ID!, vendorId: ID, amountMinor: Float, note: String): Purchase!
 
   """
   targetLocationId is required for an arrival (the default kind) and must be absent for a transit hop.
@@ -1077,6 +1082,16 @@ type Purchase {
   revision: Int!
   lastSentAt: String
   cancelledAt: String
+
+  """
+  When this PO was marked prepaid (pay-before-send); null = unpaid / on-terms.
+  """
+  paidAt: String
+
+  """
+  Prepaid sum in minor units; the delivery-time AP charge nets against it.
+  """
+  paidAmountMinor: Float
   createdAt: String!
   updatedAt: String!
   sections: [PurchaseSection!]!

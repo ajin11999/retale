@@ -257,6 +257,37 @@ export async function reverseDeliveryCharges(
 }
 
 /**
+ * Record an upfront (pay-before-send) prepayment against a purchase order — a
+ * `payment` row (negative `amountMinor` = we owe less) tagged to the purchase
+ * via `refType: "purchase"`. The later delivery-time `purchase_on_account`
+ * charge nets against it, so a prepaid PO never sits in AP as owed. Runs
+ * inside the caller's transaction (see `markPurchasePaid` in purchase-service).
+ */
+export async function postPurchasePrepayment(
+  tx: Tx,
+  input: {
+    vendorId: string;
+    purchaseId: string;
+    amountMinor: number;
+    note?: string | null;
+    createdByUserId?: string | null;
+  },
+): Promise<void> {
+  if (!isMoney(input.amountMinor) || input.amountMinor <= 0) return;
+  await tx.insert(vendorLedger).values({
+    id: ulid(),
+    vendorId: input.vendorId,
+    type: "payment",
+    amountMinor: -input.amountMinor,
+    refType: "purchase",
+    refId: input.purchaseId,
+    note: input.note ?? null,
+    createdByUserId: input.createdByUserId ?? null,
+  });
+  await syncBalance(tx, input.vendorId);
+}
+
+/**
  * Record a payment to a vendor. `amountMinor` is the positive sum paid; it is
  * stored as a negative ledger row (it reduces what we owe). `posSessionId` is
  * expected when the cash leaves a POS drawer — not yet enforced (no POS

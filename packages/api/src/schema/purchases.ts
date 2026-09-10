@@ -33,6 +33,10 @@ export const typeDefs = /* GraphQL */ `
     revision: Int!
     lastSentAt: String
     cancelledAt: String
+    "When this PO was marked prepaid (pay-before-send); null = unpaid / on-terms."
+    paidAt: String
+    "Prepaid sum in minor units; the delivery-time AP charge nets against it."
+    paidAmountMinor: Float
     createdAt: String!
     updatedAt: String!
     sections: [PurchaseSection!]!
@@ -124,7 +128,7 @@ export const typeDefs = /* GraphQL */ `
       recipientOverride: String
     ): PurchaseSendDraft!
     "Latest unit cost per variant across this vendor's non-cancelled purchases — for prefilling new PO lines."
-    vendorLastCosts(vendorId: ID!): [VendorLastCost!]!
+    vendorLastCosts(vendorId: ID!, excludePurchaseId: ID): [VendorLastCost!]!
   }
 
   "One line for the bulk-add picker (reorder suggestions / by-stock)."
@@ -239,6 +243,13 @@ export const typeDefs = /* GraphQL */ `
     ): PurchaseSend!
     "Confirm a prepared send: flip it to 'sent' and capture the expected delivery date."
     confirmPurchaseSend(id: ID!, expectedDeliveryDate: String): PurchaseSend!
+    "Mark an open PO as prepaid (pay-before-send): posts the vendor prepayment and stamps paidAt. Optionally attaches a vendor to an ad-hoc PO; amountMinor defaults to the invoice total."
+    markPurchasePaid(
+      purchaseId: ID!
+      vendorId: ID
+      amountMinor: Float
+      note: String
+    ): Purchase!
   }
 `;
 
@@ -271,6 +282,7 @@ export const resolvers = {
     updatedAt: (p: PurchaseRow) => iso(p.updatedAt),
     lastSentAt: (p: PurchaseRow) => iso(p.lastSentAt),
     cancelledAt: (p: PurchaseRow) => iso(p.cancelledAt),
+    paidAt: (p: PurchaseRow) => iso(p.paidAt),
     vendor: (p: PurchaseRow) =>
       p.vendorId ? vendors.getVendor(p.vendorId) : null,
     sections: (p: PurchaseRow) => purchases.listSections(p.id),
@@ -346,11 +358,13 @@ export const resolvers = {
     },
     vendorLastCosts: async (
       _: unknown,
-      args: { vendorId: string },
+      args: { vendorId: string; excludePurchaseId?: string | null },
       ctx: GraphQLContext,
     ) => {
       await requirePermission(ctx, "purchase.edit");
-      return purchases.lastVendorCosts(args.vendorId);
+      return purchases.lastVendorCosts(args.vendorId, {
+        excludePurchaseId: args.excludePurchaseId ?? null,
+      });
     },
   },
 
@@ -595,6 +609,31 @@ export const resolvers = {
         return await purchases.confirmPurchaseSend({
           id: args.id,
           expectedDeliveryDate: args.expectedDeliveryDate ?? null,
+        });
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    markPurchasePaid: async (
+      _: unknown,
+      args: {
+        purchaseId: string;
+        vendorId?: string | null;
+        amountMinor?: number | null;
+        note?: string | null;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      // Marking paid edits the PO and moves ledger money — needs both.
+      const viewer = await requirePermission(ctx, "purchase.edit");
+      await requirePermission(ctx, "vendor.record_payment");
+      try {
+        return await purchases.markPurchasePaid({
+          purchaseId: args.purchaseId,
+          vendorId: args.vendorId ?? null,
+          amountMinor: args.amountMinor ?? null,
+          note: args.note ?? null,
+          createdByUserId: viewer.userId,
         });
       } catch (e) {
         asGraphQLError(e);

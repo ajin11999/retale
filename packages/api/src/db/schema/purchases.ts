@@ -58,6 +58,13 @@ export const purchases = mysqlTable("purchases", {
   lastSentAt: timestamp(),
   cancelledAt: timestamp(),
   cancelledByUserId: ulidRef().references(() => users.id),
+  // Upfront (pay-before-send) prepayment marker. Set by `markPurchasePaid`,
+  // which also posts the matching negative `vendor_ledger` row — the later
+  // delivery-time `purchase_on_account` charge nets against it, so a prepaid
+  // PO never sits in AP as owed. Null = unpaid / on-terms.
+  paidAt: timestamp(),
+  paidAmountMinor: money(),
+  paidByUserId: ulidRef().references(() => users.id),
   createdByUserId: ulidRef().references(() => users.id),
   ...timestamps,
 });

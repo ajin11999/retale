@@ -370,6 +370,7 @@ purchase_delivery_items:
 
 - `snapshot_vendor_name` is **always required**. Auto-copied from `vendors.name` when `vendor_id` is set; free-text when NULL ("Toko Sumber Jaya," "Cash pickup — Jl. Sudirman").
 - **No AP on ad-hoc.** Ad-hoc purchases must be paid in full at delivery time — no vendor to owe, so `vendor_ledger` is never written. Enforced at the API layer: delivery commit on an ad-hoc purchase requires a same-transaction full payment record.
+- **Prepaid (pay-before-send) POs.** Vendors paid upfront are marked paid on the open PO via `markPurchasePaid`, which posts a negative `vendor_ledger` prepayment row (`type: "payment"`, `refType: "purchase"`) and stamps `purchases.paid_at / paid_amount_minor`. An ad-hoc PO must gain a vendor in the same step (prepayments live on the vendor ledger; this also unlocks the per-vendor price history). The later delivery-time `purchase_on_account` charge nets against the prepayment, so a prepaid PO never sits in AP as owed. Cancelling afterwards keeps the prepayment as vendor credit. Single-shot — no unmark in v1; correct mistakes with `adjustVendorBalance`.
 - **No vendor variant code mapping** applies — there's no vendor row to key against.
 - Reporting "spend by vendor" buckets all `vendor_id IS NULL` purchases as "Ad-hoc / one-off."
 - Setting a vendor on an ad-hoc purchase later (clerk realized it's actually a recurring source): allowed while `status = 'open'`; updates `vendor_id` and refreshes `snapshot_vendor_name` from the vendor row. Disallowed once any delivery is committed.

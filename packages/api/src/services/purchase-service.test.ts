@@ -12,7 +12,7 @@ import { ulid } from "ulid";
 import { users } from "../db/schema/auth.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchaseSections, purchases } from "../db/schema/purchases.ts";
-import { vendors } from "../db/schema/vendors.ts";
+import { vendorLedger, vendors } from "../db/schema/vendors.ts";
 import { db } from "../lib/db.ts";
 import {
   cancelPurchase,
@@ -27,6 +27,7 @@ import {
   listItems,
   listSections,
   listSends,
+  markPurchasePaid,
   PurchaseError,
   type PurchaseErrorCode,
   recordPurchaseSend,
@@ -34,6 +35,7 @@ import {
   unmappedLines,
 } from "./purchase-service.ts";
 import { setVendorVariantCode } from "./vendor-variant-code-service.ts";
+import { getVendor } from "./vendor-service.ts";
 
 let userId: string;
 
@@ -44,6 +46,7 @@ async function wipe(): Promise<void> {
     "purchase_items",
     "purchase_sections",
     "purchases",
+    "vendor_ledger",
     "vendor_variant_codes",
     "product_variants",
     "products",
@@ -508,6 +511,145 @@ describe("lastVendorCosts", () => {
   test("returns empty for a vendor with no purchase history", async () => {
     const vendorId = await seedVendor();
     expect(await lastVendorCosts(vendorId)).toHaveLength(0);
+  });
+
+  test("excludePurchaseId ignores the PO being edited", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const older = await createPurchase({
+      vendorId,
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: older.id, variantId, qtyOrdered: 1, unitCostMinor: 100 });
+    const current = await createPurchase({
+      vendorId,
+      date: "2026-02-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: current.id, variantId, qtyOrdered: 1, unitCostMinor: 150 });
+
+    // Without exclusion the current PO's own line shadows history.
+    expect(
+      new Map((await lastVendorCosts(vendorId)).map((c) => [c.variantId, c.unitCostMinor])).get(
+        variantId,
+      ),
+    ).toBe(150);
+    // With exclusion the prior PO's price surfaces — the price-change baseline.
+    const excluded = new Map(
+      (await lastVendorCosts(vendorId, { excludePurchaseId: current.id })).map((c) => [
+        c.variantId,
+        c.unitCostMinor,
+      ]),
+    );
+    expect(excluded.get(variantId)).toBe(100);
+  });
+});
+
+describe("markPurchasePaid", () => {
+  test("marks an open PO paid at the invoice total and posts a netting prepayment", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const po = await createPurchase({ vendorId, date: "2026-01-01", createdByUserId: userId });
+    await createItem({ purchaseId: po.id, variantId, qtyOrdered: 2, unitCostMinor: 100 });
+    await createItem({ purchaseId: po.id, variantId, qtyOrdered: 1, unitCostMinor: 50 });
+
+    const paid = await markPurchasePaid({ purchaseId: po.id, createdByUserId: userId });
+
+    expect(paid.paidAt).not.toBeNull();
+    expect(paid.paidAmountMinor).toBe(250);
+    expect(paid.paidByUserId).toBe(userId);
+    // Prepayment is a negative ledger row tagged to the purchase; the later
+    // delivery-time purchase_on_account nets against it.
+    const rows = await db.select().from(vendorLedger).where(eq(vendorLedger.vendorId, vendorId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("payment");
+    expect(rows[0]!.amountMinor).toBe(-250);
+    expect(rows[0]!.refType).toBe("purchase");
+    expect(rows[0]!.refId).toBe(po.id);
+    expect((await getVendor(vendorId)).balanceMinor).toBe(-250);
+  });
+
+  test("attaches a vendor to an ad-hoc PO and refreshes the snapshot name", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const po = await createPurchase({
+      snapshotVendorName: "Cash Shop",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await createItem({ purchaseId: po.id, variantId, qtyOrdered: 1, unitCostMinor: 100 });
+
+    const paid = await markPurchasePaid({
+      purchaseId: po.id,
+      vendorId,
+      createdByUserId: userId,
+    });
+
+    expect(paid.vendorId).toBe(vendorId);
+    expect(paid.snapshotVendorName).toBe("Acme Supply");
+    expect(paid.paidAmountMinor).toBe(100);
+    expect((await getVendor(vendorId)).balanceMinor).toBe(-100);
+  });
+
+  test("honors an explicit amount and note", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const po = await createPurchase({ vendorId, date: "2026-01-01", createdByUserId: userId });
+    await createItem({ purchaseId: po.id, variantId, qtyOrdered: 1, unitCostMinor: 250 });
+
+    const paid = await markPurchasePaid({
+      purchaseId: po.id,
+      amountMinor: 100,
+      note: "DP 40%",
+      createdByUserId: userId,
+    });
+
+    expect(paid.paidAmountMinor).toBe(100);
+    const rows = await db.select().from(vendorLedger).where(eq(vendorLedger.vendorId, vendorId));
+    expect(rows[0]!.amountMinor).toBe(-100);
+    expect(rows[0]!.note).toBe("DP 40%");
+    expect((await getVendor(vendorId)).balanceMinor).toBe(-100);
+  });
+
+  test("refuses an ad-hoc PO with no vendor", async () => {
+    const po = await createPurchase({
+      snapshotVendorName: "Cash Shop",
+      date: "2026-01-01",
+      createdByUserId: userId,
+    });
+    await expectError(markPurchasePaid({ purchaseId: po.id, createdByUserId: userId }), "INVALID_INPUT");
+  });
+
+  test("refuses a second mark, unknown vendors, bad amounts, and non-open POs", async () => {
+    const vendorId = await seedVendor();
+    const variantId = await seedVariant();
+    const po = await createPurchase({ vendorId, date: "2026-01-01", createdByUserId: userId });
+    await createItem({ purchaseId: po.id, variantId, qtyOrdered: 1, unitCostMinor: 100 });
+
+    await expectError(
+      markPurchasePaid({ purchaseId: po.id, vendorId: ulid(), createdByUserId: userId }),
+      "VENDOR_NOT_FOUND",
+    );
+    await expectError(
+      markPurchasePaid({ purchaseId: po.id, amountMinor: 0, createdByUserId: userId }),
+      "INVALID_INPUT",
+    );
+    await markPurchasePaid({ purchaseId: po.id, createdByUserId: userId });
+    await expectError(markPurchasePaid({ purchaseId: po.id, createdByUserId: userId }), "ALREADY_PAID");
+
+    const cancelled = await createPurchase({ vendorId, date: "2026-01-02", createdByUserId: userId });
+    await cancelPurchase(cancelled.id, userId);
+    await expectError(
+      markPurchasePaid({ purchaseId: cancelled.id, createdByUserId: userId }),
+      "NOT_OPEN",
+    );
+  });
+
+  test("refuses to mark an empty PO paid", async () => {
+    const vendorId = await seedVendor();
+    const po = await createPurchase({ vendorId, date: "2026-01-01", createdByUserId: userId });
+    await expectError(markPurchasePaid({ purchaseId: po.id, createdByUserId: userId }), "INVALID_INPUT");
   });
 });
 
