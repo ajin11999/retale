@@ -280,7 +280,7 @@
                 <span class="block font-medium">
                   {s.productName}
                   {#if s.variantLabel}
-                    <span class="font-normal text-muted-foreground">· {s.variantLabel}</span>
+                    <span class="font-normal text-foreground">· {s.variantLabel}</span>
                   {/if}
                 </span>
                 <span class="block font-mono text-xs text-muted-foreground">

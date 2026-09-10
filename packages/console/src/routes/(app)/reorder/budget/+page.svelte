@@ -259,7 +259,7 @@
                     <p class="font-medium">
                       {line.productName}
                       {#if line.variantLabel}
-                        <span class="font-normal text-muted-foreground">· {line.variantLabel}</span>
+                        <span class="font-normal text-foreground">· {line.variantLabel}</span>
                       {/if}
                     </p>
                     <p class="text-xs font-mono text-muted-foreground">{line.sku}</p>

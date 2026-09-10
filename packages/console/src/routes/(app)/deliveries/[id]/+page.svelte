@@ -215,14 +215,14 @@
       id ? (m.get(id) ?? fallback ?? t("products.unknown")) : (fallback ?? "—");
   });
 
-  // Split display parts per variant so goods rows can put the product name on
-  // the main line and the SKU underneath — inlining both bloats the row.
-  type VariantParts = { name: string; sku: string };
+  // Split display parts per variant so goods rows can put the product name
+  // and variant label on the main line and only the machine SKU underneath.
+  type VariantParts = { name: string; label: string | null; sku: string };
   const variantParts = $derived.by(() => {
     const m = new Map<string, VariantParts>();
     for (const p of productList) {
       for (const v of p.variants) {
-        m.set(v.id, { name: p.name, sku: v.label ? `${v.sku} · ${v.label}` : v.sku });
+        m.set(v.id, { name: p.name, label: v.label ?? null, sku: v.sku });
       }
     }
     return m;
@@ -243,7 +243,9 @@
     vendorName: string;
     /** Main display line: product name, else the PO line's free text. */
     productName: string;
-    /** SKU (· variant label) shown under the name; null for non-stock lines. */
+    /** Variant label shown in foreground next to the name; null when none. */
+    variantLabel: string | null;
+    /** Machine SKU shown muted under the name; null for non-stock lines. */
     sku: string | null;
     /** Full label (vendor · line) used when written onto a delivery item. */
     label: string;
@@ -263,6 +265,7 @@
           purchaseId: p.id,
           vendorName: p.snapshotVendorName,
           productName: parts?.name ?? it.description ?? lineLabel,
+          variantLabel: parts?.label ?? null,
           sku: parts?.sku ?? null,
           label: `${p.snapshotVendorName} · ${lineLabel}`,
           remaining,
@@ -1336,10 +1339,10 @@
                     class="text-left hover:underline"
                     onclick={() => togglePick(l)}
                   >
-                    <span class="block text-[13px] font-medium">{l.productName}</span>
+                    <span class="block text-[13px] font-medium">{l.productName}{#if l.variantLabel}<span class="ml-1.5 font-normal text-foreground">· {l.variantLabel}</span>{/if}</span>
                     {#if l.sku}
-                      <span class="block text-xs font-normal text-muted-foreground">
-                        {l.sku}
+                      <span class="block text-xs font-mono font-normal text-muted-foreground">
+                        ({l.sku})
                       </span>
                     {/if}
                   </button>
@@ -1412,10 +1415,10 @@
       {#if editingId === node.item.id}
         {#if eIsLeaf}
           <span class="min-w-0 flex-1 text-sm">
-            <span class="block truncate">{parts?.name ?? node.item.description}</span>
+            <span class="block truncate">{parts?.name ?? node.item.description}{#if parts?.label}<span class="ml-1.5 font-medium text-foreground">· {parts.label}</span>{/if}</span>
             {#if parts}
-              <span class="block truncate text-xs text-muted-foreground">
-                {parts.sku}
+              <span class="block truncate font-mono text-xs text-muted-foreground">
+                ({parts.sku})
               </span>
             {/if}
           </span>
@@ -1463,7 +1466,7 @@
         {/if}
         <span class="min-w-0 flex-1 text-sm">
           <span class="block truncate">
-            {parts?.name ?? node.item.description}
+            {parts?.name ?? node.item.description}{#if parts?.label}<span class="ml-1.5 font-medium text-foreground">· {parts.label}</span>{/if}
             {#if node.item.purchaseItem}
               {@const pi = node.item.purchaseItem}
               {@const over =
@@ -1486,8 +1489,8 @@
             {/if}
           </span>
           {#if parts}
-            <span class="block truncate text-xs text-muted-foreground">
-              {parts.sku}
+            <span class="block truncate font-mono text-xs text-muted-foreground">
+              ({parts.sku})
             </span>
           {/if}
         </span>

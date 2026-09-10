@@ -129,8 +129,8 @@
               <td class="px-4 py-2">
                 <span class="font-medium">{r.productName}</span>
                 {#if r.variantLabel}
-                  <span class="ml-1 text-xs text-muted-foreground">
-                    {r.variantLabel}
+                  <span class="ml-1.5 font-normal text-foreground">
+                    · {r.variantLabel}
                   </span>
                 {/if}
               </td>

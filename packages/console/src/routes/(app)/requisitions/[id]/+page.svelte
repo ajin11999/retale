@@ -444,6 +444,18 @@
 
   const reorderRows = $derived(suggestions);
 
+  // The suggestions query carries no variant label — resolve it from the
+  // catalog ref-data so the bulk modal shows it in foreground text.
+  const suggestionLabelByVariant = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const p of products) {
+      for (const v of (p as any).variants as Array<{ id: string; label?: string | null }>) {
+        if (v.label) m.set(v.id, v.label);
+      }
+    }
+    return m;
+  });
+
   const stockDefaultQty = (r: StockRow) =>
     r.reorderPoint != null ? Math.max(1, r.reorderPoint - r.totalQty) : 1;
 
@@ -1045,6 +1057,7 @@
                 <tbody class="divide-y">
                   {#each reorderRows as s (s.id)}
                     {#if reorderPicks[s.id]}
+                      {@const sLabel = suggestionLabelByVariant.get(s.variantId)}
                       <tr class="hover:bg-muted/30 transition-colors {reorderPicks[s.id].selected ? 'bg-primary/5' : ''}">
                         <td class="px-3 py-2 text-center">
                           <input
@@ -1055,6 +1068,9 @@
                         </td>
                         <td class="px-4 py-2">
                           <span class="font-medium text-foreground">{s.productName}</span>
+                          {#if sLabel}
+                            <span class="ml-1.5 font-normal text-foreground">· {sLabel}</span>
+                          {/if}
                           {#if s.sku}
                             <span class="ml-1.5 font-mono text-xs text-muted-foreground">({s.sku})</span>
                           {/if}

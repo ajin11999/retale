@@ -1047,14 +1047,25 @@
       ? "bg-emerald-100 text-emerald-700"
       : "bg-red-100 text-red-700";
 
-  // Split line text into Product Name and SKU for visual clarity
-  const lineParts = (i: RfqItemType): { name: string; sku: string | null } => {
-    if (!i.variantId) return { name: i.description ?? "—", sku: null };
+  // Split line text into product name / variant label / SKU so the
+  // human-readable label stays in foreground text and only the machine SKU
+  // is muted. Prefer a direct catalog lookup (product names may contain
+  // "·"); fall back to splitting the flat label for uncached variants.
+  const lineParts = (i: RfqItemType): { name: string; label: string | null; sku: string | null } => {
+    if (!i.variantId) return { name: i.description ?? "—", label: null, sku: null };
+    for (const p of products) {
+      for (const v of (p as any).variants as Array<{ id: string; sku: string; label?: string | null }>) {
+        if (v.id === i.variantId) {
+          return { name: (p as any).name as string, label: v.label ?? null, sku: v.sku };
+        }
+      }
+    }
     const full = variantLabel(i.variantId);
-    if (!full) return { name: t("products.unknown"), sku: null };
-    const idx = full.indexOf(" · ");
-    if (idx === -1) return { name: full, sku: null };
-    return { name: full.slice(0, idx), sku: full.slice(idx + 3) };
+    if (!full) return { name: t("products.unknown"), label: null, sku: null };
+    const segs = full.split(" · ");
+    if (segs.length === 1) return { name: full, label: null, sku: null };
+    if (segs.length === 2) return { name: segs[0], label: null, sku: segs[1] };
+    return { name: segs[0], label: segs.slice(2).join(" · ") || null, sku: segs[1] };
   };
 </script>
 
@@ -1621,9 +1632,14 @@
 
                         <td class="px-4 py-2">
                           <span class="font-medium">{parts.name}</span>
+                          {#if parts.label}
+                            <span class="ml-1.5 font-normal text-foreground"
+                              >· {parts.label}</span
+                            >
+                          {/if}
                           {#if parts.sku}
                             <span class="ml-1.5 font-mono text-xs text-muted-foreground"
-                              >{parts.sku}</span
+                              >({parts.sku})</span
                             >
                           {/if}
                         </td>

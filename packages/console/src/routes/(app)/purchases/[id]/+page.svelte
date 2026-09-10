@@ -1370,16 +1370,32 @@
   const lineLabel = (i: (typeof items)[number]) =>
     variantLabel(i.variantId) ?? i.description ?? "—";
 
-  // Split a line's display into product name vs SKU suffix for visual
-  // differentiation.  The variant label format is "Name · SKU" or
-  // "Name · SKU · label"; we split on the first " · ".
-  const lineParts = (i: (typeof items)[number]): { name: string; sku: string | null } => {
-    if (!i.variantId) return { name: i.description ?? "—", sku: null };
+  // Split a line's display into product name / variant label / SKU so the
+  // human-readable label stays in foreground text and only the machine SKU
+  // is muted. The variant label format is "Name · SKU" or "Name · SKU ·
+  // label". Prefer a direct catalog lookup (product names may contain "·");
+  // fall back to splitting the flat label for variants missing from cache.
+  const variantPartsById = $derived.by(() => {
+    const m = new Map<string, { name: string; sku: string; label: string | null }>();
+    for (const p of products) {
+      for (const v of p.variants) {
+        m.set(v.id, { name: p.name, sku: v.sku, label: v.label ?? null });
+      }
+    }
+    return m;
+  });
+  const lineParts = (
+    i: (typeof items)[number],
+  ): { name: string; label: string | null; sku: string | null } => {
+    if (!i.variantId) return { name: i.description ?? "—", label: null, sku: null };
+    const hit = variantPartsById.get(i.variantId);
+    if (hit) return hit;
     const full = variantLabel(i.variantId);
-    if (!full) return { name: t("products.unknown"), sku: null };
-    const idx = full.indexOf(" · ");
-    if (idx === -1) return { name: full, sku: null };
-    return { name: full.slice(0, idx), sku: full.slice(idx + 3) };
+    if (!full) return { name: t("products.unknown"), label: null, sku: null };
+    const segs = full.split(" · ");
+    if (segs.length === 1) return { name: full, label: null, sku: null };
+    if (segs.length === 2) return { name: segs[0], label: null, sku: segs[1] };
+    return { name: segs[0], label: segs.slice(2).join(" · ") || null, sku: segs[1] };
   };
 
   // ---- Grouped / searchable / reorderable lines ----------------------------
@@ -2626,7 +2642,7 @@
                           >
                         {:else}
                           {@const parts = lineParts(i)}
-                          {parts.name}{#if parts.sku}<span class="ml-1 font-mono text-xs text-muted-foreground">{parts.sku}</span>{/if}
+                          {parts.name}{#if parts.label}<span class="ml-1.5 font-medium text-foreground">· {parts.label}</span>{/if}{#if parts.sku}<span class="ml-1.5 font-mono text-xs text-muted-foreground">({parts.sku})</span>{/if}
                         {/if}
                       </td>
                       <td class="px-4 py-2 text-right tabular-nums">
@@ -3144,6 +3160,7 @@
                   <tbody>
                     {#each reorderRows as s (s.id)}
                       {#if reorderPicks[s.id]}
+                        {@const sLabel = variantPartsById.get(s.variantId)?.label}
                         <tr class="border-b last:border-0 hover:bg-muted/40">
                           <td class="py-2">
                             <input
@@ -3152,10 +3169,10 @@
                             />
                           </td>
                           <td class="py-2">
-                            <span class="font-medium">{s.productName}</span>
+                            <span class="font-medium">{s.productName}</span>{#if sLabel}<span class="ml-1.5 font-normal text-foreground">· {sLabel}</span>{/if}
                             <span
-                              class="ml-1 font-mono text-xs text-muted-foreground"
-                              >{s.sku}</span
+                              class="ml-1.5 font-mono text-xs text-muted-foreground"
+                              >({s.sku})</span
                             >
                           </td>
                           <td class="py-2 text-right">{s.currentStock}</td>

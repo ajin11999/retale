@@ -967,12 +967,14 @@
                 {:else}
                   <div class="font-medium">{i.displayName}</div>
                 {/if}
-                <div class="text-xs text-muted-foreground">
-                  <span class="font-mono text-xs text-muted-foreground">{i.snapshotProductSku}</span>{i.snapshotVariantLabel
-                    ? ` · ${i.snapshotVariantLabel}`
-                    : ""} · {i.snapshotUnit}
+                <div class="text-xs">
+                  {#if i.snapshotVariantLabel}
+                    <span class="font-medium text-foreground">{i.snapshotVariantLabel}</span>
+                    <span class="text-muted-foreground"> · </span>
+                  {/if}
+                  <span class="font-mono text-xs text-muted-foreground">({i.snapshotProductSku})</span><span class="text-muted-foreground"> · {i.snapshotUnit}</span>
                   {#if i.snapshotCategoryName}
-                    · {i.snapshotCategoryName}
+                    <span class="text-muted-foreground"> · {i.snapshotCategoryName}</span>
                   {/if}
                 </div>
                 {#if margin != null}

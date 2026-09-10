@@ -128,7 +128,17 @@
   );
   const products = $derived($RefData.data?.products ?? []);
 
-  // Flat variant lookup so the lines grid can label by SKU / product name.
+  // Flat variant lookup so the lines grid can label by product name /
+  // variant label (foreground) with only the machine SKU muted.
+  const variantParts = $derived.by(() => {
+    const m = new Map<string, { name: string; sku: string; label: string | null }>();
+    for (const p of products) {
+      for (const v of p.variants) {
+        m.set(v.id, { name: p.name, sku: v.sku, label: v.label ?? null });
+      }
+    }
+    return m;
+  });
   const variantLabel = $derived.by(() => {
     const m = new Map<string, string>();
     for (const p of products) {
@@ -511,6 +521,7 @@
           </thead>
           <tbody>
             {#each lines as l (l.purchaseItem.id)}
+              {@const vp = l.purchaseItem.variantId ? variantParts.get(l.purchaseItem.variantId) : undefined}
               <tr
                 class="border-b last:border-0
                   {lastScanHit === l.purchaseItem.id
@@ -518,10 +529,14 @@
                   : 'even:bg-muted/40'}"
               >
                 <td class="px-4 py-2">
-                  {variantLabel(
-                    l.purchaseItem.variantId,
-                    l.purchaseItem.description,
-                  )}
+                  {#if vp}
+                    {vp.name}{#if vp.label}<span class="ml-1.5 font-medium text-foreground">· {vp.label}</span>{/if}<span class="ml-1.5 font-mono text-xs text-muted-foreground">({vp.sku})</span>
+                  {:else}
+                    {variantLabel(
+                      l.purchaseItem.variantId,
+                      l.purchaseItem.description,
+                    )}
+                  {/if}
                 </td>
                 <td class="px-4 py-2 text-right tabular-nums">{l.qtyOrdered}</td>
                 <td class="px-4 py-2 text-right tabular-nums">{l.qtyDelivered}</td>
