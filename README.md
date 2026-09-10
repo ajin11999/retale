@@ -1,4 +1,4 @@
-<img src="assets/brand/wordmark.png" alt="Retale" width="320">
+<img src="assets/brand/logo.svg" alt="Retale" width="320">
 
 POS and inventory management system for a retail store, served over the local
 network. A Bun + TypeScript GraphQL API backs a family of clients: a Flutter
