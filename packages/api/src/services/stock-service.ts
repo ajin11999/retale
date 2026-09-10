@@ -248,14 +248,11 @@ export function adjustStock(input: {
   variantId: string;
   locationId?: string | null;
   qtyDelta: number;
-  reason: string;
+  reason?: string | null;
   createdByUserId: string;
 }): Promise<Movement> {
   if (input.qtyDelta === 0) {
     throw new StockError("INVALID_INPUT", "adjustment qtyDelta must be non-zero");
-  }
-  if (!input.reason.trim()) {
-    throw new StockError("INVALID_INPUT", "adjustment reason is required");
   }
   return recordMovement({
     variantId: input.variantId,
@@ -263,7 +260,7 @@ export function adjustStock(input: {
     type: input.qtyDelta > 0 ? "adjustment_in" : "adjustment_out",
     qtyDelta: input.qtyDelta,
     refType: "adjustment",
-    reason: input.reason.trim(),
+    reason: input.reason?.trim() || null,
     createdByUserId: input.createdByUserId,
   });
 }

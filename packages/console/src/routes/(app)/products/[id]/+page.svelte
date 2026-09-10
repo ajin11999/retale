@@ -106,7 +106,7 @@
       $variantId: ID!
       $locationId: ID
       $qtyDelta: Float!
-      $reason: String!
+      $reason: String
     ) {
       adjustStock(
         variantId: $variantId
@@ -766,22 +766,47 @@
 
   // ---- Stock adjustment ----------------------------------------------------
   // A manual write-on / write-off against one variant at one location.
+  // Two entry modes: "set" types the new on-hand quantity as a whole (the
+  // delta is derived as new − current), "delta" types the +/- adjustment
+  // directly. Both funnel into the same adjustStock mutation.
   interface StockDraft {
     variantId: string;
     variantLabel: string;
     locationId: string; // "" → the unlocated root
+    mode: "set" | "delta";
+    newQty: number | null;
     qtyDelta: number;
     reason: string;
   }
   let stockDraft = $state<StockDraft | null>(null);
 
+  // Current on-hand of a variant at a location, from the loaded detail query
+  // (locationId "" = the unlocated root row; missing row = 0).
+  function stockQtyAt(variantId: string, locationId: string): number {
+    const v = product?.variants.find((x) => x.id === variantId);
+    const row = v?.stock.find((s) => (s.locationId ?? "") === locationId);
+    return row?.qty ?? 0;
+  }
+
+  // The delta the draft will apply: derived in "set" mode, typed in "delta".
+  // Stock is an integer count of the smallest unit, so the typed target is
+  // rounded (mirrors the bulk count sheet).
+  function stockDraftDelta(d: StockDraft): number {
+    if (d.mode === "delta") return d.qtyDelta;
+    if (d.newQty == null) return 0;
+    return Math.round(d.newQty) - stockQtyAt(d.variantId, d.locationId);
+  }
+
   function adjustVariantStock(
     v: NonNullable<typeof product>["variants"][number],
   ) {
+    const rootQty = v.stock.find((s) => s.locationId == null)?.qty ?? 0;
     stockDraft = {
       variantId: v.id,
       variantLabel: v.label ? `${v.sku} · ${v.label}` : v.sku,
       locationId: "",
+      mode: "set",
+      newQty: rootQty,
       qtyDelta: 0,
       reason: "",
     };
@@ -789,13 +814,15 @@
 
   async function saveStockAdjustment() {
     const d = stockDraft;
-    if (!d || !product || !d.qtyDelta || !d.reason.trim()) return;
+    if (!d || !product) return;
+    const delta = stockDraftDelta(d);
+    if (!delta) return;
     const ok = await run(t("products.stock"), () =>
       AdjustStock.mutate({
         variantId: d.variantId,
         locationId: d.locationId || null,
-        qtyDelta: d.qtyDelta,
-        reason: d.reason.trim(),
+        qtyDelta: delta,
+        reason: d.reason.trim() || null,
       }),
     );
     if (ok) {
@@ -1889,10 +1916,46 @@
       {/if}
 
       {#if stockDraft}
+        {@const draftDelta = stockDraftDelta(stockDraft)}
+        {@const draftCurrent = stockQtyAt(stockDraft.variantId, stockDraft.locationId)}
         <div class="space-y-3 rounded-md border bg-background p-4">
           <h3 class="text-sm font-semibold">
             {t("products.adjustStockTitle", { label: stockDraft.variantLabel })}
           </h3>
+          <div class="flex gap-1 rounded-md bg-muted p-1 text-sm" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockDraft.mode === "set"}
+              class="flex-1 rounded px-2 py-1 {stockDraft.mode === 'set'
+                ? 'bg-background font-medium shadow'
+                : 'text-muted-foreground hover:text-foreground'}"
+              onclick={() => {
+                if (stockDraft && stockDraft.mode !== "set") {
+                  stockDraft.mode = "set";
+                  stockDraft.newQty = stockQtyAt(
+                    stockDraft.variantId,
+                    stockDraft.locationId,
+                  );
+                }
+              }}
+            >
+              {t("products.stockModeSet")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockDraft.mode === "delta"}
+              class="flex-1 rounded px-2 py-1 {stockDraft.mode === 'delta'
+                ? 'bg-background font-medium shadow'
+                : 'text-muted-foreground hover:text-foreground'}"
+              onclick={() => {
+                if (stockDraft) stockDraft.mode = "delta";
+              }}
+            >
+              {t("products.stockModeDelta")}
+            </button>
+          </div>
           <div class="grid grid-cols-2 gap-3">
             <label class="space-y-1">
               <span class="text-xs font-medium">{t("products.location")}</span>
@@ -1903,19 +1966,36 @@
                 {/each}
               </Select>
             </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium">
-                {t("products.qtyDelta")}
-              </span>
-              <NumericInput bind:value={stockDraft.qtyDelta} />
-            </label>
+            {#if stockDraft.mode === "set"}
+              <label class="space-y-1">
+                <span class="text-xs font-medium">
+                  {t("products.newQty", { count: draftCurrent })}
+                </span>
+                <NumericInput bind:value={stockDraft.newQty} />
+              </label>
+            {:else}
+              <label class="space-y-1">
+                <span class="text-xs font-medium">
+                  {t("products.qtyDelta")}
+                </span>
+                <NumericInput bind:value={stockDraft.qtyDelta} />
+              </label>
+            {/if}
             <label class="space-y-1 col-span-2">
-              <span class="text-xs font-medium">{t("products.reasonRequired")}</span>
+              <span class="text-xs font-medium">{t("products.reasonOptional")}</span>
               <Input bind:value={stockDraft.reason} />
             </label>
           </div>
           <p class="text-xs text-muted-foreground">
-            {t("products.stockDeltaHelp")}
+            {#if stockDraft.mode === "set"}
+              {draftDelta === 0
+                ? t("products.noChange")
+                : t("products.deltaPreview", {
+                    delta: draftDelta > 0 ? `+${draftDelta}` : `${draftDelta}`,
+                  })}
+            {:else}
+              {t("products.stockDeltaHelp")}
+            {/if}
           </p>
           <div class="flex justify-end gap-2">
             <Button
@@ -1926,7 +2006,7 @@
             >
             <Button
               size="sm"
-              disabled={busy || !stockDraft.qtyDelta || !stockDraft.reason.trim()}
+              disabled={busy || !draftDelta}
               onclick={saveStockAdjustment}>{t("products.applyAdjustment")}</Button
             >
           </div>

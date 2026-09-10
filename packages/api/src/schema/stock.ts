@@ -75,8 +75,8 @@ export const typeDefs = /* GraphQL */ `
   }
 
   extend type Mutation {
-    "Manual stock write-on (positive) or write-off (negative). Reason required."
-    adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String!): StockMovement!
+    "Manual stock write-on (positive) or write-off (negative). Reason is optional."
+    adjustStock(variantId: ID!, locationId: ID, qtyDelta: Float!, reason: String): StockMovement!
     "Snap a variant's weighted-average cost to an exact value."
     overrideVariantCost(variantId: ID!, unitCost: Float!, reason: String): StockMovement!
     """
@@ -145,7 +145,7 @@ export const resolvers = {
   Mutation: {
     adjustStock: async (
       _: unknown,
-      args: { variantId: string; locationId?: string | null; qtyDelta: number; reason: string },
+      args: { variantId: string; locationId?: string | null; qtyDelta: number; reason?: string | null },
       ctx: GraphQLContext,
     ) => {
       const viewer = await requirePermission(ctx, "stock.adjust");

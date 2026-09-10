@@ -12,7 +12,7 @@ import { users } from "../db/schema/auth.ts";
 import { products, productVariants } from "../db/schema/products.ts";
 import { stockLocations } from "../db/schema/stock.ts";
 import { db } from "../lib/db.ts";
-import { recordMovement, StockError } from "./stock-service.ts";
+import { adjustStock, recordMovement, StockError } from "./stock-service.ts";
 
 let userId: string;
 
@@ -113,5 +113,31 @@ describe("non_stock guard in recordMovement", () => {
       .from(stockLocations)
       .where(eq(stockLocations.variantId, variantId));
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("adjustStock", () => {
+  test("accepts a missing reason and stores a null ledger reason", async () => {
+    const variantId = await seedVariant({});
+    const movement = await adjustStock({
+      variantId,
+      qtyDelta: 5,
+      createdByUserId: userId,
+    });
+    expect(movement.qtyDelta).toBe(5);
+    expect(movement.reason).toBeNull();
+    expect((await variantRow(variantId)).totalQty).toBe(5);
+  });
+
+  test("still rejects a zero delta", async () => {
+    const variantId = await seedVariant({});
+    let err: unknown;
+    try {
+      await adjustStock({ variantId, qtyDelta: 0, createdByUserId: userId });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(StockError);
+    expect((err as StockError).code).toBe("INVALID_INPUT");
   });
 });
