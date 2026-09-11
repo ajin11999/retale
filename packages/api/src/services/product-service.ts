@@ -9,6 +9,7 @@ import {
   bundleComponents,
   interchangeGroups,
   productCategories,
+  productImages,
   productPriceTiers,
   productVariants,
   products,
@@ -481,6 +482,136 @@ export async function setProductArchived(
 export async function hardDeleteProduct(id: string): Promise<void> {
   await loadProductRow(id);
   await db.delete(products).where(eq(products.id, id));
+}
+
+/**
+ * Compact several products into one (`mergeProducts`).
+ *
+ * Moves every variant of each source product onto the target product, moves
+ * their images too, then hard-deletes the emptied sources — one transaction.
+ * Variant-keyed history (stock, movements, order/purchase/transfer lines,
+ * vendor codes, customer prices, tiers) travels with the variant untouched;
+ * `order_items.product_id` history is intentionally left pointing at the old
+ * (now deleted → NULL) product since snapshots are the source of truth.
+ *
+ * Guards: target + sources must share `kind` and `priceMode`; `bundle` and
+ * `open_price` kinds are rejected (component / placeholder semantics).
+ */
+export async function mergeProducts(
+  targetId: string,
+  sourceIds: string[],
+  labels?: { variantId: string; label: string | null }[],
+): Promise<ProductWithVariants> {
+  const uniqueSources = [...new Set((sourceIds ?? []).filter(Boolean))].filter(
+    (id) => id !== targetId,
+  );
+  if (!uniqueSources.length) {
+    throw new ProductError("INVALID_INPUT", "no source products to merge");
+  }
+
+  const target = await loadProductRow(targetId);
+  const sources: Product[] = [];
+  for (const id of uniqueSources) {
+    sources.push(await loadProductRow(id));
+  }
+
+  if (target.kind === "bundle" || target.kind === "open_price") {
+    throw new ProductError(
+      "INVALID_INPUT",
+      `cannot merge into a ${target.kind} product`,
+    );
+  }
+  for (const s of sources) {
+    if (s.kind === "bundle" || s.kind === "open_price") {
+      throw new ProductError(
+        "INVALID_INPUT",
+        `cannot merge a ${s.kind} product (${s.name})`,
+      );
+    }
+    if (s.kind !== target.kind) {
+      throw new ProductError(
+        "INVALID_INPUT",
+        `kind mismatch: ${s.name} is ${s.kind}, target is ${target.kind}`,
+      );
+    }
+    if (s.priceMode !== target.priceMode) {
+      throw new ProductError(
+        "INVALID_INPUT",
+        `price mode mismatch: ${s.name} is ${s.priceMode}, target is ${target.priceMode}`,
+      );
+    }
+  }
+
+  // Validate label overrides belong to one of the source products.
+  const labelMap = new Map<string, string | null>();
+  if (labels?.length) {
+    const owned = new Set(
+      (
+        await db
+          .select({ id: productVariants.id })
+          .from(productVariants)
+          .where(inArray(productVariants.productId, uniqueSources))
+      ).map((v) => v.id),
+    );
+    for (const l of labels) {
+      if (!owned.has(l.variantId)) {
+        throw new ProductError("INVALID_INPUT", "label variant is not in a source product");
+      }
+      labelMap.set(l.variantId, l.label?.trim() || null);
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    const targetVariants = await tx
+      .select({ sortOrder: productVariants.sortOrder })
+      .from(productVariants)
+      .where(eq(productVariants.productId, targetId));
+    let variantCursor = targetVariants.reduce((m, v) => Math.max(m, v.sortOrder), 0);
+
+    const targetImages = await tx
+      .select({ sortOrder: productImages.sortOrder })
+      .from(productImages)
+      .where(eq(productImages.productId, targetId));
+    let imageCursor = targetImages.reduce((m, v) => Math.max(m, v.sortOrder), 0);
+
+    for (const sourceId of uniqueSources) {
+      const rows = await tx
+        .select()
+        .from(productVariants)
+        .where(eq(productVariants.productId, sourceId));
+      // Preserve the source's variant order while appending after the target.
+      rows.sort((a, b) => a.sortOrder - b.sortOrder);
+      for (const v of rows) {
+        const patch: { productId: string; sortOrder: number; label?: string | null } = {
+          productId: targetId,
+          sortOrder: ++variantCursor,
+        };
+        if (labelMap.has(v.id)) patch.label = labelMap.get(v.id) ?? null;
+        await tx
+          .update(productVariants)
+          .set(patch)
+          .where(eq(productVariants.id, v.id));
+      }
+
+      const images = await tx
+        .select()
+        .from(productImages)
+        .where(eq(productImages.productId, sourceId));
+      images.sort((a, b) => a.sortOrder - b.sortOrder);
+      for (const img of images) {
+        await tx
+          .update(productImages)
+          .set({ productId: targetId, sortOrder: ++imageCursor })
+          .where(eq(productImages.id, img.id));
+      }
+
+      // Emptied of variants + images: alerts cascade, variant-keyed rows
+      // (stock, movements, order/purchase lines) already follow the variant.
+      await tx.delete(products).where(eq(products.id, sourceId));
+    }
+  });
+
+  return getProduct(targetId);
 }
 
 export async function addVariant(

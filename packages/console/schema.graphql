@@ -254,6 +254,11 @@ type Mutation {
 
   """Hard delete — root-only. Prefer archiving."""
   hardDeleteProduct(id: ID!): Boolean!
+
+  """
+  Compact several products into one: move every variant (+images) of each source onto the target, then hard-delete the emptied sources. Requires product.edit + product.hard_delete.
+  """
+  mergeProducts(targetId: ID!, sourceIds: [ID!]!, labels: [VariantLabelOverride!]): Product!
   addVariant(productId: ID!, variant: VariantInput!): ProductVariant!
   updateVariant(id: ID!, sku: String, barcode: String, label: String, unit: VariantUnit, qtyDecimals: Int, priceMinor: Float, costMinor: Float, sortOrder: Int, interchangeGroupId: ID): ProductVariant!
   deleteVariant(id: ID!): Boolean!
@@ -874,6 +879,11 @@ input VariantInput {
 input PriceTierInput {
   minQty: Float!
   priceMinor: Float!
+}
+
+input VariantLabelOverride {
+  variantId: ID!
+  label: String
 }
 
 type Location {

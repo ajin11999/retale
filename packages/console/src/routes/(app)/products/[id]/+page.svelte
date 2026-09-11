@@ -242,6 +242,35 @@
     }
   `);
 
+  const MergeSourceProduct = graphql(`
+    query ConsoleMergeSource($id: ID!) {
+      product(id: $id) {
+        id
+        name
+        kind
+        priceMode
+        variants {
+          id
+          sku
+          label
+          priceMinor
+        }
+      }
+    }
+  `);
+
+  const MergeProducts = graphql(`
+    mutation ConsoleMergeProducts(
+      $targetId: ID!
+      $sourceIds: [ID!]!
+      $labels: [VariantLabelOverride!]
+    ) {
+      mergeProducts(targetId: $targetId, sourceIds: $sourceIds, labels: $labels) {
+        id
+      }
+    }
+  `);
+
   const DeleteProductImage = graphql(`
     mutation ConsoleDeleteProductImage($id: ID!) {
       deleteProductImage(id: $id)
@@ -319,6 +348,8 @@
   const canEditPrice = $derived(has("product.edit_price"));
   const canEditCost = $derived(has("product.edit_cost"));
   const canArchive = $derived(has("product.archive"));
+  const canHardDelete = $derived(has("product.hard_delete"));
+  const canMerge = $derived(canEdit && canHardDelete);
   const canAdjustStock = $derived(has("stock.adjust"));
   const canManageCatalog = $derived(has("catalog.manage"));
 
@@ -597,6 +628,239 @@
       closeBulkVariantDialog();
     } finally {
       bulkVariantBusy = false;
+    }
+  }
+
+  // ---- Merge / compact products --------------------------------------------
+  // Pull other products' variants onto this one, then hard-delete the emptied
+  // sources. The picker searches the lightweight product list already loaded
+  // for the duplicate hint; each added source is fetched in full so its
+  // kind/priceMode can be validated and its variant labels pre-filled.
+  interface MergeVariantRow {
+    variantId: string;
+    sku: string;
+    oldLabel: string | null;
+    label: string;
+  }
+  interface MergeSource {
+    id: string;
+    name: string;
+    kind: string;
+    priceMode: string;
+    variants: MergeVariantRow[];
+  }
+
+  let mergeSearch = $state("");
+  let mergeSources = $state<MergeSource[]>([]);
+  let mergeBusy = $state(false);
+
+  // Suggest a variant label by stripping the target's name tokens from the
+  // source product's name ("Bearing 6201 2RS NKN" − "Bearing NKN" → "6201 2RS").
+  // Punctuation-only tokens ("/") are ignored so "oil filter / gmax / sakura"
+  // compacts to "gmax". Always editable — this is just a starting point.
+  function suggestVariantLabel(
+    targetName: string,
+    sourceName: string,
+    existingLabel: string | null,
+  ): string {
+    const words = (s: string) =>
+      s
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w && !/^[/\\|_-]+$/.test(w));
+    const targetTokens = words(targetName);
+    const remainder: string[] = [];
+    const sourceWords = sourceName.split(/\s+/).filter(Boolean);
+    const removable = new Map<string, number>();
+    for (const w of targetTokens) {
+      const key = w.toLowerCase();
+      removable.set(key, (removable.get(key) ?? 0) + 1);
+    }
+    for (const w of sourceWords) {
+      if (/^[/\\|_-]+$/.test(w)) continue;
+      const left = removable.get(w.toLowerCase()) ?? 0;
+      if (left > 0) removable.set(w.toLowerCase(), left - 1);
+      else remainder.push(w);
+    }
+    if (remainder.length) return remainder.join(" ");
+    return (existingLabel ?? sourceName).trim();
+  }
+
+  const mergeCandidates = $derived.by(() => {
+    if (!product) return [];
+    const taken = new Set([product.id, ...mergeSources.map((s) => s.id)]);
+    const tokens = mergeSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const all = ($ProductDetail.data?.products ?? []).filter((p) => !taken.has(p.id));
+    if (!tokens.length) return all;
+    return all.filter((p) =>
+      tokens.every((tok) => p.name.toLowerCase().includes(tok)),
+    );
+  });
+
+  // Visible slice of the dropdown — the full list drives "add all", only the
+  // first rows render so a broad search doesn't mount hundreds of nodes.
+  const MERGE_CANDIDATE_LIMIT = 20;
+  const mergeVisibleCandidates = $derived(
+    mergeCandidates.slice(0, MERGE_CANDIDATE_LIMIT),
+  );
+
+  // Checked candidate ids for batch add. Pruned whenever the sources or the
+  // search change, so a checked row can never be added twice or go stale.
+  let mergeChecked = $state<string[]>([]);
+  $effect(() => {
+    const visible = new Set(mergeVisibleCandidates.map((c) => c.id));
+    // Read mergeSources to re-prune after an add lands.
+    void mergeSources.length;
+    const pruned = mergeChecked.filter((id) => visible.has(id));
+    if (pruned.length !== mergeChecked.length) mergeChecked = pruned;
+  });
+
+  const mergeCheckedSet = $derived(new Set(mergeChecked));
+  const mergeAllVisibleChecked = $derived(
+    mergeVisibleCandidates.length > 0 &&
+      mergeVisibleCandidates.every((c) => mergeCheckedSet.has(c.id)),
+  );
+
+  function toggleMergeChecked(id: string) {
+    mergeChecked = mergeCheckedSet.has(id)
+      ? mergeChecked.filter((x) => x !== id)
+      : [...mergeChecked, id];
+  }
+
+  function toggleMergeCheckedAll() {
+    mergeChecked = mergeAllVisibleChecked
+      ? []
+      : mergeVisibleCandidates.map((c) => c.id);
+  }
+
+  // "Adding i/N…" progress while a batch of sources loads; null otherwise.
+  let mergeAddProgress = $state<{ done: number; total: number } | null>(null);
+
+  // Fetch several sources in parallel and stage them for label review. The
+  // search text is kept so the user can keep working the same result set;
+  // failures are reported per product without aborting the rest.
+  async function addMergeSources(ids: string[]) {
+    if (!product || mergeBusy || !ids.length) return;
+    const fresh = ids.filter(
+      (id) => id !== product.id && !mergeSources.some((s) => s.id === id),
+    );
+    if (!fresh.length) return;
+    const names = new Map(
+      (($ProductDetail.data?.products ?? []) as { id: string; name: string }[]).map(
+        (p) => [p.id, p.name] as const,
+      ),
+    );
+    mergeBusy = true;
+    mergeAddProgress = { done: 0, total: fresh.length };
+    feedback = null;
+    try {
+      const results = await Promise.allSettled(
+        fresh.map((id) => MergeSourceProduct.fetch({ variables: { id } })),
+      );
+      const staged: MergeSource[] = [];
+      const failed: string[] = [];
+      results.forEach((res, i) => {
+        const id = fresh[i];
+        mergeAddProgress = { done: i + 1, total: fresh.length };
+        const src =
+          res.status === "fulfilled" ? res.value.data?.product : undefined;
+        if (!src) {
+          failed.push(names.get(id) ?? id);
+          return;
+        }
+        staged.push({
+          id: src.id,
+          name: src.name || names.get(id) || id,
+          kind: src.kind,
+          priceMode: src.priceMode,
+          variants: (src.variants ?? []).map((v) => ({
+            variantId: v.id,
+            sku: v.sku,
+            oldLabel: v.label ?? null,
+            label: suggestVariantLabel(
+              product!.name,
+              src.name || names.get(id) || id,
+              v.label ?? null,
+            ),
+          })),
+        });
+      });
+      if (staged.length) mergeSources = [...mergeSources, ...staged];
+      mergeChecked = mergeChecked.filter((id) => !fresh.includes(id));
+      if (failed.length) {
+        feedback = {
+          ok: false,
+          text: t("products.mergeAddPartial", {
+            ok: staged.length,
+            total: fresh.length,
+            names: failed.join(", "),
+          }),
+        };
+      }
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      mergeBusy = false;
+      mergeAddProgress = null;
+    }
+  }
+
+  function addMergeSource(id: string) {
+    return addMergeSources([id]);
+  }
+
+  function removeMergeSource(id: string) {
+    mergeSources = mergeSources.filter((s) => s.id !== id);
+  }
+
+  const mergeBlocked = $derived.by(() => {
+    if (!product) return true;
+    if (!mergeSources.length) return true;
+    return mergeSources.some(
+      (s) => s.kind !== product.kind || s.priceMode !== product.priceMode,
+    );
+  });
+
+  const mergeVariantCount = $derived(
+    mergeSources.reduce((n, s) => n + s.variants.length, 0),
+  );
+
+  async function runMerge() {
+    if (!product || !mergeSources.length || mergeBlocked || mergeBusy) return;
+    if (
+      !confirm(
+        t("products.mergeConfirm", {
+          count: mergeSources.length,
+          variants: mergeVariantCount,
+        }),
+      )
+    )
+      return;
+    mergeBusy = true;
+    feedback = null;
+    try {
+      const res = await MergeProducts.mutate({
+        targetId: product.id,
+        sourceIds: mergeSources.map((s) => s.id),
+        labels: mergeSources.flatMap((s) =>
+          s.variants.map((v) => ({ variantId: v.variantId, label: v.label.trim() || null })),
+        ),
+      });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
+      feedback = { ok: true, text: t("products.mergeDone", { count: mergeSources.length }) };
+      mergeSources = [];
+      mergeSearch = "";
+      await ProductDetail.fetch({
+        variables: { id: product.id },
+        policy: CachePolicy.NetworkOnly,
+      });
+    } catch (e) {
+      feedback = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      mergeBusy = false;
     }
   }
 
@@ -1709,6 +1973,168 @@
           </div>
         </div>
       </dialog>
+    </section>
+
+    <!-- Merge / compact other products into this one -->
+    <section class="space-y-3 rounded-lg border bg-card p-5">
+      <h2 class="text-sm font-semibold">{t("products.mergeTitle")}</h2>
+      <p class="text-xs text-muted-foreground">{t("products.mergeHint")}</p>
+
+      {#if !canMerge}
+        <p class="text-xs text-amber-700">{t("products.mergeNeedsPermission")}</p>
+      {:else}
+        <div class="relative">
+          <Input
+            type="search"
+            placeholder={t("products.mergeSearch")}
+            bind:value={mergeSearch}
+            disabled={mergeBusy}
+            autocomplete="off"
+          />
+          {#if mergeSearch.trim()}
+            {#if mergeCandidates.length > 0}
+              <div
+                class="absolute top-full z-10 mt-1 w-full overflow-hidden rounded-md border bg-popover shadow-md"
+              >
+                <div
+                  class="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    class="size-4 align-middle"
+                    aria-label={t("common.selectAll")}
+                    checked={mergeAllVisibleChecked}
+                    onchange={toggleMergeCheckedAll}
+                    disabled={mergeBusy}
+                  />
+                  <span class="text-muted-foreground">
+                    {t("products.mergeShowing", {
+                      shown: mergeVisibleCandidates.length,
+                      count: mergeCandidates.length,
+                    })}
+                  </span>
+                  <span class="ml-auto flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={mergeBusy || mergeChecked.length === 0}
+                      onclick={() => addMergeSources(mergeChecked)}
+                    >
+                      {mergeAddProgress
+                        ? t("products.mergeAdding", {
+                            done: mergeAddProgress.done,
+                            total: mergeAddProgress.total,
+                          })
+                        : t("products.mergeAddSelected", {
+                            count: mergeChecked.length,
+                          })}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={mergeBusy}
+                      onclick={() =>
+                        addMergeSources(mergeCandidates.map((c) => c.id))}
+                    >
+                      {t("products.mergeAddAll", {
+                        count: mergeCandidates.length,
+                      })}
+                    </Button>
+                  </span>
+                </div>
+                <ul class="max-h-60 overflow-auto">
+                  {#each mergeVisibleCandidates as cand (cand.id)}
+                    <li>
+                      <div
+                        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/60"
+                      >
+                        <input
+                          type="checkbox"
+                          class="size-4 shrink-0 align-middle"
+                          aria-label={cand.name}
+                          checked={mergeCheckedSet.has(cand.id)}
+                          onchange={() => toggleMergeChecked(cand.id)}
+                          disabled={mergeBusy}
+                        />
+                        <span class="min-w-0 flex-1 truncate font-medium"
+                          >{cand.name}</span
+                        >
+                        <button
+                          type="button"
+                          class="shrink-0 text-xs text-primary hover:underline disabled:opacity-50"
+                          disabled={mergeBusy}
+                          onclick={() => addMergeSource(cand.id)}
+                        >
+                          {t("products.mergeAdd")}
+                        </button>
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {:else}
+              <div
+                class="absolute top-full z-10 mt-1 w-full rounded-md border bg-popover px-3 py-2 text-sm text-muted-foreground shadow-md"
+              >
+                {t("products.mergeNoMatches")}
+              </div>
+            {/if}
+          {/if}
+        </div>
+
+        {#if mergeSources.length > 0}
+          <p class="text-sm font-medium">
+            {t("products.mergeSources", { count: mergeSources.length })}
+          </p>
+          {#each mergeSources as src (src.id)}
+            <div class="space-y-2 rounded-md border bg-background p-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium">{src.name}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={mergeBusy}
+                  onclick={() => removeMergeSource(src.id)}
+                >
+                  {t("products.mergeRemove")}
+                </Button>
+              </div>
+              {#if src.kind !== product.kind}
+                <p class="text-xs text-destructive">
+                  {t("products.mergeKindMismatch", {
+                    kind: src.kind,
+                    target: product.kind,
+                  })}
+                </p>
+              {/if}
+              {#if src.priceMode !== product.priceMode}
+                <p class="text-xs text-destructive">
+                  {t("products.mergePriceMismatch", {
+                    mode: src.priceMode,
+                    target: product.priceMode,
+                  })}
+                </p>
+              {/if}
+              {#each src.variants as v (v.variantId)}
+                <div class="grid grid-cols-2 items-center gap-3 text-sm">
+                  <span class="font-mono text-xs text-muted-foreground">
+                    {v.sku}{v.oldLabel ? ` · ${v.oldLabel}` : ""}
+                  </span>
+                  <label class="space-y-1">
+                    <span class="text-xs font-medium">{t("products.mergeNewLabel")}</span>
+                    <Input bind:value={v.label} disabled={mergeBusy} />
+                  </label>
+                </div>
+              {/each}
+            </div>
+          {/each}
+          <div class="flex justify-end">
+            <Button size="sm" disabled={mergeBusy || mergeBlocked} onclick={runMerge}>
+              {mergeBusy ? t("products.mergeMerging") : t("products.mergeButton")}
+            </Button>
+          </div>
+        {/if}
+      {/if}
     </section>
 
     {#if product.kind === "bundle"}

@@ -121,6 +121,11 @@ export const typeDefs = /* GraphQL */ `
     priceMinor: Float!
   }
 
+  input VariantLabelOverride {
+    variantId: ID!
+    label: String
+  }
+
   extend type Query {
     categories: [Category!]!
     interchangeGroups: [InterchangeGroup!]!
@@ -179,6 +184,12 @@ export const typeDefs = /* GraphQL */ `
     setProductArchived(id: ID!, archived: Boolean!): Product!
     "Hard delete — root-only. Prefer archiving."
     hardDeleteProduct(id: ID!): Boolean!
+    "Compact several products into one: move every variant (+images) of each source onto the target, then hard-delete the emptied sources. Requires product.edit + product.hard_delete."
+    mergeProducts(
+      targetId: ID!
+      sourceIds: [ID!]!
+      labels: [VariantLabelOverride!]
+    ): Product!
 
     addVariant(productId: ID!, variant: VariantInput!): ProductVariant!
     updateVariant(
@@ -434,6 +445,30 @@ export const resolvers = {
       try {
         await products.hardDeleteProduct(args.id);
         return true;
+      } catch (e) {
+        asGraphQLError(e);
+      }
+    },
+    mergeProducts: async (
+      _: unknown,
+      args: {
+        targetId: string;
+        sourceIds: string[];
+        labels?: { variantId: string; label?: string | null }[] | null;
+      },
+      ctx: GraphQLContext,
+    ) => {
+      await requirePermission(ctx, "product.edit");
+      await requirePermission(ctx, "product.hard_delete");
+      try {
+        return await products.mergeProducts(
+          args.targetId,
+          args.sourceIds,
+          (args.labels ?? undefined)?.map((l) => ({
+            variantId: l.variantId,
+            label: l.label ?? null,
+          })),
+        );
       } catch (e) {
         asGraphQLError(e);
       }
