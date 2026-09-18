@@ -134,7 +134,8 @@ class Ops {
         customer { id name phone }
         items {
           id displayName qty discountMinor
-          snapshotPriceMinor snapshotUnit lineTotalMinor voidedAt
+          snapshotPriceMinor snapshotUnit snapshotVariantLabel
+          lineTotalMinor voidedAt
         }
         payments { method amountMinor }
       }

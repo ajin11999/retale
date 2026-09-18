@@ -75,7 +75,10 @@ class Receipt {
             .where((it) => it['voidedAt'] == null && (it['qty'] as num) > 0)
             .map(
               (it) => ReceiptLine(
-                name: it['displayName'] as String,
+                name: _displayNameWithVariant(
+                  it['displayName'] as String,
+                  it['snapshotVariantLabel'] as String?,
+                ),
                 qty: (it['qty'] as num).toInt(),
                 unitPriceMinor: it['snapshotPriceMinor'] as num,
                 lineTotalMinor: it['lineTotalMinor'] as num,
@@ -145,4 +148,17 @@ class Receipt {
     b.write(tr('receipt.thanks'));
     return b.toString();
   }
+}
+
+/// Compose the receipt line name from the order line's display name and its
+/// snapshotted variant label — mirroring [CartLine.displayName]
+/// (`'<product> — <label>'`). Older orders predate the label snapshot (null),
+/// and single-variant products carry no label — both fall back to the bare
+/// display name. Skips the suffix when the display name already carries it
+/// (e.g. a cashier-typed remark repeating the variant).
+String _displayNameWithVariant(String displayName, String? variantLabel) {
+  final label = variantLabel?.trim();
+  if (label == null || label.isEmpty) return displayName;
+  if (displayName.contains(label)) return displayName;
+  return '$displayName — $label';
 }
