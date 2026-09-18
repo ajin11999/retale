@@ -9,6 +9,7 @@ class PurchaseSummary {
     required this.date,
     required this.items,
     this.status = 'open',
+    this.openCheckQty = 0,
   });
 
   final String id;
@@ -17,16 +18,25 @@ class PurchaseSummary {
   final String status;
   final List<PurchaseItemSummary> items;
 
+  /// Qty staged in the open draft receiving check (uncommitted). The PO list
+  /// folds this into its progress so the bar moves as staff count — plain
+  /// `qtyDelivered` only advances when the check is committed in the console.
+  final num openCheckQty;
+
   num get totalOrdered =>
       items.fold<num>(0, (sum, i) => sum + i.qtyOrdered);
   num get totalDelivered =>
       items.fold<num>(0, (sum, i) => sum + i.qtyDelivered);
+
+  /// Committed receipts plus the uncommitted draft — what the progress bar shows.
+  num get provisionalDelivered => totalDelivered + openCheckQty;
 
   factory PurchaseSummary.fromJson(Map<String, dynamic> j) => PurchaseSummary(
         id: j['id'] as String,
         vendorName: j['snapshotVendorName'] as String,
         date: j['date'] as String,
         status: (j['status'] as String?) ?? 'open',
+        openCheckQty: (j['openCheckQty'] as num?) ?? 0,
         items: (j['items'] as List<dynamic>)
             .map((i) => PurchaseItemSummary.fromJson(i as Map<String, dynamic>))
             .toList(),
@@ -134,10 +144,13 @@ class StockLevel {
   final int qtyDecimals;
   final num onHand;
 
-  /// Display name: `Product · sku · label` (sku and label only when present).
+  /// Display name: `Product · label` (label only when present). The SKU is
+  /// intentionally excluded — tiles render it on its own greyed line via
+  /// `ProductTitleText`, so keeping it here would bloat single-line labels
+  /// (snackbars, dialog titles). Match against [sku] separately when
+  /// searching.
   String get displayName => [
         productName,
-        if (sku.isNotEmpty) sku,
         if (label != null && label!.isNotEmpty) label!,
       ].join(' · ');
 
@@ -178,7 +191,6 @@ class VariantInfo {
 
   String get displayName => [
         productName,
-        if (sku != null && sku!.isNotEmpty) sku,
         if (label != null && label!.isNotEmpty) label,
       ].join(' · ');
 

@@ -37,5 +37,8 @@ void main() {
     expect(labelSpan.text, ' · 1L');
     expect(skuSpan.text, '\nJUICE-001');
     expect(skuSpan.style?.fontSize, 12.0);
+    // Variant label pops like the console: semibold at the name size.
+    expect(labelSpan.style?.fontWeight, FontWeight.w600);
+    expect(labelSpan.style?.fontSize, 15.0);
   });
 }

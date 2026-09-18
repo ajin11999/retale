@@ -52,11 +52,12 @@ class Ops {
 
   // ── Receiving ────────────────────────────────────────────────────────────
 
-  /// Open purchase orders for the receiving list.
+  /// Open purchase orders for the receiving list. `openCheckQty` is the
+  /// uncommitted draft count, so the list progress moves as staff count.
   static const openPurchases = '''
     query OpenPurchases {
       purchases(status: open) {
-        id snapshotVendorName date status
+        id snapshotVendorName date status openCheckQty
         items { id variantId description qtyOrdered qtyDelivered unitCostMinor }
       }
     }
@@ -66,7 +67,7 @@ class Ops {
   static const allPurchases = '''
     query AllPurchases {
       purchases {
-        id snapshotVendorName date status
+        id snapshotVendorName date status openCheckQty
         items { id variantId description qtyOrdered qtyDelivered unitCostMinor }
       }
     }

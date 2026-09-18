@@ -40,6 +40,11 @@ export const typeDefs = /* GraphQL */ `
     resolveReceivingScan(purchaseId: ID!, code: String!): [PurchaseItem!]!
   }
 
+  extend type Purchase {
+    "Qty staged in the open draft receiving check (uncommitted goods leaves); 0 when no check is open. Lets list views show provisional progress — qtyDelivered only moves on commit."
+    openCheckQty: Float!
+  }
+
   extend type Mutation {
     "Start a receiving check for a purchase, or resume the one already open."
     startReceivingCheck(purchaseId: ID!, targetLocationId: ID!): PurchaseDelivery!

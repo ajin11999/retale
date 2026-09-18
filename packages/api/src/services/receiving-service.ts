@@ -7,7 +7,7 @@
 // the counted purchase lines. See docs/future-features.md → "Delivery
 // completeness UI + API — receiving check".
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { purchaseDeliveries, purchaseDeliveryItems } from "../db/schema/deliveries.ts";
 import { productVariants } from "../db/schema/products.ts";
 import { purchaseItems, purchases } from "../db/schema/purchases.ts";
@@ -323,4 +323,58 @@ export async function getReceivingCheckLines(
       provisionalStatus: lineStatus(pi.qtyDelivered + qtyInCheck, pi.qtyOrdered),
     };
   });
+}
+
+/**
+ * Total qty staged in each purchase's open draft receiving check, keyed by
+ * purchase id. Purchases without an open check (or with an empty one) are
+ * absent from the map — treat missing as 0. Only goods leaves
+ * (`purchaseItemId` set, `qty` non-null) count; freight / cost nodes never do.
+ *
+ * Powers the PO list's provisional progress: the draft is what staff just
+ * counted, while `purchaseItems.qtyDelivered` only moves on commit.
+ */
+export async function stagedQtyByPurchase(
+  purchaseIds: string[],
+): Promise<Map<string, number>> {
+  const totals = new Map<string, number>();
+  if (purchaseIds.length === 0) return totals;
+
+  const checks = await db
+    .select({ id: purchaseDeliveries.id, purchaseId: purchaseDeliveries.purchaseId })
+    .from(purchaseDeliveries)
+    .where(
+      and(
+        inArray(purchaseDeliveries.purchaseId, purchaseIds),
+        eq(purchaseDeliveries.status, "draft"),
+      ),
+    );
+  if (checks.length === 0) return totals;
+
+  const purchaseByDelivery = new Map<string, string>();
+  for (const c of checks) {
+    if (c.purchaseId) purchaseByDelivery.set(c.id, c.purchaseId);
+  }
+  if (purchaseByDelivery.size === 0) return totals;
+
+  const items = await db
+    .select({
+      deliveryId: purchaseDeliveryItems.deliveryId,
+      qty: purchaseDeliveryItems.qty,
+    })
+    .from(purchaseDeliveryItems)
+    .where(
+      and(
+        inArray(purchaseDeliveryItems.deliveryId, [...purchaseByDelivery.keys()]),
+        isNotNull(purchaseDeliveryItems.purchaseItemId),
+        isNotNull(purchaseDeliveryItems.qty),
+      ),
+    );
+
+  for (const it of items) {
+    const purchaseId = purchaseByDelivery.get(it.deliveryId);
+    if (!purchaseId || it.qty == null) continue;
+    totals.set(purchaseId, (totals.get(purchaseId) ?? 0) + it.qty);
+  }
+  return totals;
 }

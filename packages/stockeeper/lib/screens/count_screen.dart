@@ -32,7 +32,9 @@ class CountTarget {
 }
 
 /// Full-screen counter: huge current/expected headline, +1/+5/+10 buttons,
-/// −1, and a "set exact" field. Shared by receiving and reconcile.
+/// −1, and a custom-step field that adds a box/carton qty at once (e.g. type
+/// 12, then every tap on the +12 button adds a box of 12). Shared by
+/// receiving and reconcile.
 class CountScreen extends StatefulWidget {
   const CountScreen({super.key, required this.target});
 
@@ -44,15 +46,30 @@ class CountScreen extends StatefulWidget {
 
 class _CountScreenState extends State<CountScreen> {
   late num _current = widget.target.initial;
-  final _exact = TextEditingController();
+  final _custom = TextEditingController();
+  num? _customStep;
   bool _busy = false;
   num? _pendingNext;
   num? _revertTo;
 
   @override
+  void initState() {
+    super.initState();
+    _custom.addListener(_onCustomChanged);
+  }
+
+  @override
   void dispose() {
-    _exact.dispose();
+    _custom.dispose();
     super.dispose();
+  }
+
+  /// Tracks the typed custom step so the +N button label stays in sync.
+  /// Resets every time the counter opens — nothing is remembered.
+  void _onCustomChanged() {
+    final step = num.tryParse(_custom.text.trim());
+    final valid = step == null || step <= 0 ? null : step;
+    if (valid != _customStep) setState(() => _customStep = valid);
   }
 
   String _fmt(num v) =>
@@ -108,13 +125,14 @@ class _CountScreenState extends State<CountScreen> {
     }
   }
 
-  Future<void> _setExact() async {
-    final text = _exact.text.trim();
-    final value = num.tryParse(text);
-    if (value == null) return;
-    _exact.clear();
+  /// Adds the typed custom step (a box/carton qty) on top of the current
+  /// count — an increment, not an absolute set. Clamping to `expected`
+  /// follows the same rule as the fixed step buttons.
+  Future<void> _addCustom() async {
+    final step = _customStep;
+    if (step == null) return;
     FocusScope.of(context).unfocus();
-    await _set(value);
+    await _set(_current + step);
   }
 
   @override
@@ -200,7 +218,7 @@ class _CountScreenState extends State<CountScreen> {
                 children: [
                   Expanded(
                     child: TextField(
-                      controller: _exact,
+                      controller: _custom,
                       keyboardType: TextInputType.numberWithOptions(
                           decimal: t.qtyDecimals > 0),
                       inputFormatters: [
@@ -208,17 +226,19 @@ class _CountScreenState extends State<CountScreen> {
                           FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: const InputDecoration(
-                        labelText: 'Set exact…',
+                        labelText: 'Custom step… box of 12?',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
-                      onSubmitted: (_) => _setExact(),
+                      onSubmitted: (_) => _addCustom(),
                     ),
                   ),
                   const SizedBox(width: 12),
                   FilledButton.tonal(
-                    onPressed: _setExact,
-                    child: const Text('Set'),
+                    onPressed: _customStep == null ? null : _addCustom,
+                    child: Text(_customStep == null
+                        ? '+…'
+                        : '+${_fmt(_customStep!)}'),
                   ),
                 ],
               ),

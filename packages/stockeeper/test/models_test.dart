@@ -4,7 +4,7 @@ import 'package:retale_stockeeper/models/models.dart';
 
 void main() {
   group('buildVariantLabelMap', () {
-    test('joins product · sku · label, skipping empty parts', () {
+    test('joins product · label, keeping the SKU out of the single line', () {
       final map = buildVariantLabelMap([
         {
           'name': 'Cable Ties',
@@ -15,8 +15,8 @@ void main() {
           ],
         },
       ]);
-      expect(map['v1']?.displayName, 'Cable Ties · CT-100 · 100mm');
-      expect(map['v2']?.displayName, 'Cable Ties · CT-200');
+      expect(map['v1']?.displayName, 'Cable Ties · 100mm');
+      expect(map['v2']?.displayName, 'Cable Ties');
       expect(map['v3']?.displayName, 'Cable Ties');
     });
   });
@@ -37,7 +37,7 @@ void main() {
   });
 
   group('StockLevel', () {
-    test('displayName folds in sku and optional label', () {
+    test('displayName keeps the SKU out, folding in the optional label', () {
       final row = StockLevel.fromJson({
         'variantId': 'v1',
         'productId': 'p1',
@@ -49,7 +49,7 @@ void main() {
         'qtyDecimals': 0,
         'onHand': 3,
       });
-      expect(row.displayName, 'Paint · PNT-1 · 1L');
+      expect(row.displayName, 'Paint · 1L');
     });
   });
 

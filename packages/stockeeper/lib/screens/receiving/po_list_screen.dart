@@ -118,6 +118,8 @@ class _PoListScreenState extends State<PoListScreen> {
                 final p = purchases[i];
                 final ordered = p.totalOrdered;
                 final delivered = p.totalDelivered;
+                final staged = p.openCheckQty;
+                final provisional = p.provisionalDelivered;
                 return ListTile(
                   minTileHeight: 80,
                   leading: const Icon(Icons.receipt_long, size: 32),
@@ -128,12 +130,13 @@ class _PoListScreenState extends State<PoListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('${_fmtDate(p.date)} · '
-                          '$delivered of $ordered received'),
+                          '$delivered of $ordered received'
+                          '${staged > 0 ? ' (+$staged counted)' : ''}'),
                       const SizedBox(height: 6),
                       LinearProgressIndicator(
                         value: ordered <= 0
                             ? 0
-                            : (delivered / ordered).clamp(0.0, 1.0),
+                            : (provisional / ordered).clamp(0.0, 1.0),
                         minHeight: 6,
                         borderRadius: BorderRadius.circular(3),
                       ),

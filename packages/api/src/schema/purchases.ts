@@ -10,6 +10,7 @@ import { db } from "../lib/db.ts";
 import { transitRateByPurchaseItem } from "../services/delivery-service.ts";
 import { buildPurchaseSendDraft } from "../services/purchase-message-service.ts";
 import * as purchases from "../services/purchase-service.ts";
+import { stagedQtyByPurchase } from "../services/receiving-service.ts";
 import * as vendors from "../services/vendor-service.ts";
 
 export const typeDefs = /* GraphQL */ `
@@ -299,6 +300,12 @@ export const resolvers = {
       return p.revision > lastSentRevision;
     },
     unmappedLines: (p: PurchaseRow) => purchases.unmappedLines(p.id),
+    // Declared in the receiving domain (`extend type Purchase`); resolved
+    // here to keep a single `Purchase` resolver map.
+    openCheckQty: async (p: PurchaseRow) => {
+      const totals = await stagedQtyByPurchase([p.id]);
+      return totals.get(p.id) ?? 0;
+    },
   },
   PurchaseSection: {
     items: (s: { id: string }) => purchases.listSectionItems(s.id),

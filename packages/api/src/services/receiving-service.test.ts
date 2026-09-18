@@ -25,6 +25,7 @@ import {
   type ReceivingErrorCode,
   resolveReceivingScan,
   setReceivingCheckLine,
+  stagedQtyByPurchase,
   startReceivingCheck,
 } from "./receiving-service.ts";
 
@@ -389,5 +390,38 @@ describe("commitReceivingCheck", () => {
 
   test("rejects committing a delivery that is not a receiving check", async () => {
     await expectError(commitReceivingCheck(ulid(), userId), "DELIVERY_NOT_FOUND");
+  });
+});
+
+describe("stagedQtyByPurchase", () => {
+  test("sums draft leaves per purchase, ignoring committed checks and empties", async () => {
+    const locationId = await seedLocation();
+    const variantId = await seedVariant();
+    const stagedId = await seedPurchase();
+    const stagedItem = await addItem({ purchaseId: stagedId, variantId, qtyOrdered: 10, unitCostMinor: 500 });
+    const emptyId = await seedPurchase();
+    await addItem({ purchaseId: emptyId, variantId, qtyOrdered: 10, unitCostMinor: 500 });
+    const committedId = await seedPurchase();
+    const committedItem = await addItem({ purchaseId: committedId, variantId, qtyOrdered: 10, unitCostMinor: 500 });
+
+    const staged = await startReceivingCheck({ purchaseId: stagedId, targetLocationId: locationId, userId });
+    await setReceivingCheckLine({ deliveryId: staged.id, purchaseItemId: stagedItem, qty: 4 });
+
+    // Open-but-untouched check stages nothing.
+    await startReceivingCheck({ purchaseId: emptyId, targetLocationId: locationId, userId });
+
+    const committed = await startReceivingCheck({ purchaseId: committedId, targetLocationId: locationId, userId });
+    await setReceivingCheckLine({ deliveryId: committed.id, purchaseItemId: committedItem, qty: 10 });
+    await commitReceivingCheck(committed.id, userId);
+
+    const totals = await stagedQtyByPurchase([stagedId, emptyId, committedId, ulid()]);
+    expect(totals.get(stagedId)).toBe(4);
+    expect(totals.has(emptyId)).toBe(false);
+    // Committed deliveries are no longer drafts, so they stage nothing.
+    expect(totals.has(committedId)).toBe(false);
+  });
+
+  test("returns an empty map for an empty input", async () => {
+    await expect(stagedQtyByPurchase([])).resolves.toEqual(new Map());
   });
 });

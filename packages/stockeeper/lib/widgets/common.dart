@@ -110,6 +110,14 @@ class ProductTitleText extends StatelessWidget {
       color: theme.colorScheme.onSurface,
     );
 
+    // Variant label pops like the console (`font-medium`): same size as the
+    // product name but semibold, so scanning the list catches the variant.
+    final labelStyle = TextStyle(
+      fontSize: fontSize,
+      color: theme.colorScheme.onSurface,
+      fontWeight: FontWeight.w600,
+    );
+
     final skuStyle = TextStyle(
       fontSize: skuFontSize,
       color: theme.colorScheme.outline,
@@ -123,7 +131,7 @@ class ProductTitleText extends StatelessWidget {
 
     // Variant label if present
     if (hasLabel) {
-      spans.add(TextSpan(text: ' · $label', style: mainStyle));
+      spans.add(TextSpan(text: ' · $label', style: labelStyle));
     }
 
     // Greyed and smaller SKU placed under the product/variant title

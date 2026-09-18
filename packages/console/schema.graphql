@@ -1118,6 +1118,11 @@ type Purchase {
   Stock lines the vendor has no part-number mapping for — a pre-send warning.
   """
   unmappedLines: [PurchaseItem!]!
+
+  """
+  Qty staged in the open draft receiving check (uncommitted goods leaves); 0 when no check is open. Lets list views show provisional progress — qtyDelivered only moves on commit.
+  """
+  openCheckQty: Float!
 }
 
 type PurchaseSection {

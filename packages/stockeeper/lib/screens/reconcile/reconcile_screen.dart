@@ -422,8 +422,10 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     final terms = query.split(RegExp(r'\s+'));
     bool matches(StockLevel r) {
       final name = r.displayName.toLowerCase();
+      final sku = r.sku.toLowerCase();
       final barcode = (r.barcode ?? '').toLowerCase();
-      return terms.every((term) => name.contains(term) || barcode.contains(term));
+      return terms.every(
+          (term) => name.contains(term) || sku.contains(term) || barcode.contains(term));
     }
 
     final matchedRows = rows.where(matches).toList();

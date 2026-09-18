@@ -197,6 +197,8 @@ class _PoReconcileSearchScreenState extends State<PoReconcileSearchScreen> {
                 final p = filtered[i];
                 final ordered = p.totalOrdered;
                 final delivered = p.totalDelivered;
+                final staged = p.openCheckQty;
+                final provisional = p.provisionalDelivered;
                 return ListTile(
                   minTileHeight: 84,
                   leading: const Icon(Icons.receipt_long, size: 32),
@@ -221,14 +223,15 @@ class _PoReconcileSearchScreenState extends State<PoReconcileSearchScreen> {
                     children: [
                       const SizedBox(height: 4),
                       Text(
-                        '${_fmtDate(p.date)} · $delivered of $ordered delivered',
+                        '${_fmtDate(p.date)} · $delivered of $ordered delivered'
+                        '${staged > 0 ? ' (+$staged counted)' : ''}',
                         style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: 6),
                       LinearProgressIndicator(
                         value: ordered <= 0
                             ? 0
-                            : (delivered / ordered).clamp(0.0, 1.0),
+                            : (provisional / ordered).clamp(0.0, 1.0),
                         minHeight: 6,
                         borderRadius: BorderRadius.circular(3),
                       ),
