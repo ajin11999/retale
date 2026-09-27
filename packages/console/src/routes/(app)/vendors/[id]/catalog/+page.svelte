@@ -72,6 +72,7 @@
       products(includeArchived: false) {
         id
         name
+        archivedAt
         variants {
           id
           sku
@@ -320,12 +321,13 @@
   });
   const allProducts = $derived($CatalogVariants.data?.products ?? []);
   const variantOptions = $derived.by(() => {
-    const out: { value: string; label: string }[] = [];
+    const out: { value: string; label: string; archived?: boolean }[] = [];
     for (const p of allProducts) {
       for (const v of p.variants) {
         out.push({
           value: v.id,
           label: `${p.name} · ${v.label ? `${v.sku} · ${v.label}` : v.sku}`,
+          archived: Boolean(p.archivedAt),
         });
       }
     }

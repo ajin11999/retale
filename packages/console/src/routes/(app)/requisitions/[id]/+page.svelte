@@ -57,6 +57,7 @@
         id
         name
         kind
+        archivedAt
         variants {
           id
           sku
@@ -226,14 +227,30 @@
         return;
       }
       if (cellQty !== i.qtyRequested) {
-        await UpdateRequisitionItem.mutate({ id: i.id, qtyRequested: cellQty });
-        await refetch();
+        try {
+          const res = await UpdateRequisitionItem.mutate({ id: i.id, qtyRequested: cellQty });
+          if (res.errors?.length) {
+            feedback = { ok: false, text: res.errors[0].message };
+          } else {
+            await refetch();
+          }
+        } catch (e: any) {
+          feedback = { ok: false, text: e?.message || String(e) };
+        }
       }
     } else {
       const d = cellStr.trim();
       if ((d || null) !== (i.description || null)) {
-        await UpdateRequisitionItem.mutate({ id: i.id, description: d || null });
-        await refetch();
+        try {
+          const res = await UpdateRequisitionItem.mutate({ id: i.id, description: d || null });
+          if (res.errors?.length) {
+            feedback = { ok: false, text: res.errors[0].message };
+          } else {
+            await refetch();
+          }
+        } catch (e: any) {
+          feedback = { ok: false, text: e?.message || String(e) };
+        }
       }
     }
     cellEdit = null;
@@ -249,8 +266,10 @@
     }
   }
 
-  // Multi-select state
+  // Multi-select and feedback state
   let selectedItemIds = $state<Set<string>>(new Set());
+  let feedback = $state<{ ok: boolean; text: string } | null>(null);
+  let busy = $state(false);
 
   const flipDurationMs = 200;
 
@@ -265,10 +284,21 @@
   // --- Header Actions ---
   async function saveRequisitionName() {
     const name = editedRequisitionName.trim();
-    if (!requisition || !name) return;
-    await UpdateRequisition.mutate({ id: requisition.id, name });
-    editingRequisitionName = false;
-    await refetch();
+    if (!requisition || !name || busy) return;
+    busy = true;
+    try {
+      const res = await UpdateRequisition.mutate({ id: requisition.id, name });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      } else {
+        editingRequisitionName = false;
+        await refetch();
+      }
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
+    }
   }
 
   // --- Section Actions ---
@@ -285,11 +315,16 @@
 
   async function addSection() {
     const name = (newSectionName ?? "").trim();
-    if (!requisition || !name || adding) return;
+    if (!requisition || !name || adding || busy) return;
     const anchorId = newSectionAnchorId;
     adding = true;
+    feedback = null;
     try {
       const res = await CreateSection.mutate({ requisitionId: requisition.id, name });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
       const newId = res.data?.createRequisitionSection?.id;
       if (newId && anchorId) {
         const currentIds = sections.map((s: any) => s.id).filter((id: string) => id !== newId);
@@ -302,6 +337,8 @@
       newSectionName = null;
       newSectionAnchorId = null;
       await refetch();
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
     } finally {
       adding = false;
     }
@@ -314,16 +351,40 @@
 
   async function saveRenameSection() {
     const name = editedSectionName.trim();
-    if (!editingSectionId || !name) return;
-    await UpdateSection.mutate({ id: editingSectionId, name });
-    editingSectionId = null;
-    await refetch();
+    if (!editingSectionId || !name || busy) return;
+    busy = true;
+    try {
+      const res = await UpdateSection.mutate({ id: editingSectionId, name });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      } else {
+        editingSectionId = null;
+        await refetch();
+      }
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
+    }
   }
 
   async function deleteSection(id: string) {
+    if (busy || requisition?.status === "cancelled") return;
     if (!confirm(t("requisitions.confirmDeleteSection"))) return;
-    await DeleteSection.mutate({ id });
-    await refetch();
+    busy = true;
+    feedback = null;
+    try {
+      const res = await DeleteSection.mutate({ id });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      } else {
+        await refetch();
+      }
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
+    }
   }
 
   // --- Item Actions ---
@@ -337,61 +398,116 @@
   }
 
   async function saveItem() {
-    if (!requisition) return;
+    if (!requisition || busy) return;
     if (newItemQty <= 0) return;
     if (!newItemVariantId && !newItemDescription.trim()) return;
 
     adding = true;
+    feedback = null;
     try {
-      await CreateRequisitionItem.mutate({
+      const res = await CreateRequisitionItem.mutate({
         requisitionId: requisition.id,
         sectionId: newItemSection || null,
         variantId: newItemVariantId || null,
         description: newItemDescription || null,
         qtyRequested: newItemQty
       });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+        return;
+      }
       // Keep form open for continuous additions
       newItemVariantId = "";
       newItemDescription = "";
       newItemQty = 1;
       await refetch();
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
     } finally {
       adding = false;
     }
   }
 
   async function deleteItem(id: string) {
-    await DeleteRequisitionItem.mutate({ id });
-    selectedItemIds.delete(id);
-    await refetch();
+    if (busy) return;
+    if (!confirm(t("requisitions.confirmDeleteItem"))) return;
+    busy = true;
+    feedback = null;
+    try {
+      const res = await DeleteRequisitionItem.mutate({ id });
+      if (res.errors?.length) {
+        feedback = { ok: false, text: res.errors[0].message };
+      } else {
+        const next = new Set(selectedItemIds);
+        next.delete(id);
+        selectedItemIds = next;
+        await refetch();
+      }
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
+    }
   }
 
   function toggleItemSelection(id: string) {
-    if (selectedItemIds.has(id)) {
-      selectedItemIds.delete(id);
+    const next = new Set(selectedItemIds);
+    if (next.has(id)) {
+      next.delete(id);
     } else {
-      selectedItemIds.add(id);
+      next.add(id);
     }
-    selectedItemIds = new Set(selectedItemIds);
+    selectedItemIds = next;
   }
 
   async function moveSelectedToSection(sectionId: string | null) {
-    if (selectedItemIds.size === 0) return;
-    for (const id of selectedItemIds) {
-      await UpdateRequisitionItem.mutate({ id, sectionId });
+    if (selectedItemIds.size === 0 || busy) return;
+    busy = true;
+    feedback = null;
+    try {
+      for (const id of selectedItemIds) {
+        await UpdateRequisitionItem.mutate({ id, sectionId });
+      }
+      selectedItemIds = new Set();
+      await refetch();
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
     }
-    selectedItemIds.clear();
-    await refetch();
   }
 
   async function deleteSelectedItems() {
-    if (selectedItemIds.size === 0) return;
+    if (selectedItemIds.size === 0 || busy) return;
+
     if (!confirm(t("requisitions.confirmDeleteItems", { count: selectedItemIds.size }))) return;
-    for (const id of selectedItemIds) {
-      await DeleteRequisitionItem.mutate({ id });
+
+    busy = true;
+    feedback = null;
+    try {
+      const failed: string[] = [];
+      for (const id of selectedItemIds) {
+        try {
+          const res = await DeleteRequisitionItem.mutate({ id });
+          if (res.errors?.length) {
+            failed.push(id);
+          }
+        } catch {
+          failed.push(id);
+        }
+      }
+
+      selectedItemIds = new Set(failed);
+      await refetch();
+
+      if (failed.length > 0) {
+        feedback = { ok: false, text: t("requisitions.bulkDeletePartial", { count: failed.length }) };
+      }
+    } catch (e: any) {
+      feedback = { ok: false, text: e?.message || String(e) };
+    } finally {
+      busy = false;
     }
-    selectedItemIds.clear();
-    await refetch();
   }
 
   // --- Computed Data ---
@@ -403,7 +519,8 @@
     products.flatMap((p: any) => p.variants.map((v: any) => ({
       value: v.id,
       label: p.kind === "simple" ? p.name : `${p.name} - ${v.label}`,
-      sku: v.sku
+      sku: v.sku,
+      archived: Boolean(p.archivedAt),
     })))
   );
 
@@ -423,6 +540,7 @@
     const term = searchTokens(stockSearch);
     const rows: StockRow[] = [];
     for (const p of products) {
+      if (p.archivedAt) continue;
       for (const v of p.variants) {
         const label = p.kind === "simple" ? p.name : `${p.name} - ${v.label}`;
         const sku = v.sku || "";
@@ -735,6 +853,19 @@
       </div>
     </div>
 
+    {#if feedback}
+      <div
+        class="rounded-md p-3 text-sm flex items-center justify-between {feedback.ok
+          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          : 'bg-destructive/10 text-destructive border border-destructive/20'}"
+      >
+        <span>{feedback.text}</span>
+        <button type="button" class="text-xs hover:underline ml-4" onclick={() => (feedback = null)}>
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
+    {/if}
+
     <div class="space-y-4 max-w-5xl">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2">
@@ -753,13 +884,13 @@
               <Button size="sm" variant="ghost" onclick={cancelAddSection}>{t("common.cancel")}</Button>
             </div>
           {:else}
-            <Button variant="outline" size="sm" onclick={() => startAddSection(null)}>
+            <Button variant="outline" size="sm" onclick={() => startAddSection(null)} disabled={busy || requisition.status === "cancelled"}>
               {t("requisitions.addSection")}
             </Button>
-            <Button variant="outline" size="sm" onclick={openBulk}>
+            <Button variant="outline" size="sm" onclick={openBulk} disabled={busy || requisition.status === "cancelled"}>
               <Layers class="mr-1.5 h-4 w-4" /> {t("requisitions.addMultiple")}
             </Button>
-            <Button variant="default" size="sm" onclick={() => openAddItem("")}>
+            <Button variant="default" size="sm" onclick={() => openAddItem("")} disabled={busy || requisition.status === "cancelled"}>
               <Plus class="mr-1 h-4 w-4" /> {t("requisitions.addLine")}
             </Button>
           {/if}
@@ -776,7 +907,7 @@
              const val = e.currentTarget.value;
              e.currentTarget.value = "";
              if (val) moveSelectedToSection(val === "unsectioned" ? null : val);
-          }}>
+          }} disabled={busy || requisition.status === "cancelled"}>
              <option value="" disabled selected>{t("requisitions.moveToSection")}</option>
              {#each sections as sec}
                 <option value={sec.id}>{sec.name}</option>
@@ -784,8 +915,19 @@
              <option value="unsectioned">{t("requisitions.noSection")}</option>
           </select>
 
-          <Button variant="destructive" size="sm" class="h-8 text-xs" onclick={deleteSelectedItems}>{t("requisitions.deleteSelected")}</Button>
-          <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => selectedItemIds.clear()}>{t("common.clear")}</Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            class="h-8 text-xs disabled:cursor-not-allowed"
+            onclick={deleteSelectedItems}
+            disabled={busy || requisition.status === "cancelled"}
+            title={requisition.status === "cancelled" ? t("requisitions.cannotEditCancelled") : undefined}
+          >
+            {t("requisitions.deleteSelected")}
+          </Button>
+          <Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => (selectedItemIds = new Set())} disabled={busy}>
+            {t("common.clear")}
+          </Button>
         </div>
       {/if}
 
@@ -867,7 +1009,14 @@
                        {/if}
                     </div>
                     {#if section.id !== "unsectioned"}
-                      <Button variant="ghost" size="icon" class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive print:hidden" onclick={() => deleteSection(section.id)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed print:hidden"
+                        disabled={busy || requisition.status === "cancelled"}
+                        onclick={() => deleteSection(section.id)}
+                        title={requisition.status === "cancelled" ? t("requisitions.cannotEditCancelled") : t("requisitions.deleteSection")}
+                      >
                         <Trash2 class="h-3.5 w-3.5" />
                       </Button>
                     {/if}
@@ -946,7 +1095,14 @@
                           </td>
                           <td class="py-2 pr-3 text-right print:hidden">
                              <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
-                               <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" onclick={() => deleteItem(item.id)}>
+                               <Button
+                                 variant="ghost"
+                                 size="icon"
+                                 class="h-7 w-7 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:hover:text-muted-foreground disabled:cursor-not-allowed"
+                                 disabled={busy || requisition.status === "cancelled"}
+                                 onclick={() => deleteItem(item.id)}
+                                 title={requisition.status === "cancelled" ? t("requisitions.cannotEditCancelled") : t("requisitions.deleteLine")}
+                               >
                                  <Trash2 class="h-3.5 w-3.5" />
                                </Button>
                              </div>

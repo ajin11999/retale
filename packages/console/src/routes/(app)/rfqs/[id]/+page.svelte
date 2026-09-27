@@ -77,6 +77,7 @@
         id
         name
         kind
+        archivedAt
         variants {
           id
           sku
@@ -285,6 +286,7 @@
   interface VariantOption {
     value: string;
     label: string;
+    archived?: boolean;
   }
 
   const variantOptions = $derived.by<VariantOption[]>(() => {
@@ -292,7 +294,11 @@
     for (const p of products) {
       for (const v of p.variants) {
         const suffix = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        out.push({ value: v.id, label: `${p.name} · ${suffix}` });
+        out.push({
+          value: v.id,
+          label: `${p.name} · ${suffix}`,
+          archived: Boolean(p.archivedAt),
+        });
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));

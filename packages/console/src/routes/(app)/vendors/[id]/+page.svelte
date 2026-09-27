@@ -189,6 +189,7 @@
       products(includeArchived: false) {
         id
         name
+        archivedAt
         variants {
           id
           sku
@@ -330,6 +331,7 @@
     id: string;
     label: string;
     productName: string;
+    archived?: boolean;
   };
   const availableVariants = $derived.by((): VariantOption[] => {
     const out: VariantOption[] = [];
@@ -337,7 +339,12 @@
       for (const v of p.variants) {
         if (mappedVariantIds.has(v.id)) continue;
         const label = v.label ? `${v.sku} · ${v.label}` : v.sku;
-        out.push({ id: v.id, label, productName: p.name });
+        out.push({
+          id: v.id,
+          label,
+          productName: p.name,
+          archived: Boolean(p.archivedAt),
+        });
       }
     }
     return out.sort((a, b) =>
@@ -349,6 +356,7 @@
     availableVariants.map((v) => ({
       value: v.id,
       label: `${v.productName} — ${v.label}`,
+      archived: v.archived,
     })),
   );
 

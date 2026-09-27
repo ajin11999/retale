@@ -1,9 +1,10 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
 
-  interface Option {
+  export interface Option {
     value: string;
     label: string;
+    archived?: boolean;
   }
 
   let {
@@ -60,9 +61,14 @@
     if (!open) text = selectedLabel;
   });
 
-  // Lowercased labels, recomputed only when `options` changes — not per
+  // Active (non-archived) options for suggestion listbox.
+  // Archived options remain in `options` so `selectedLabel` can still display
+  // existing records without leaking archived items into new suggestions.
+  const activeOptions = $derived(options.filter((o) => !o.archived));
+
+  // Lowercased labels, recomputed only when `activeOptions` changes — not per
   // keystroke — so each search pass skips re-lowercasing every label.
-  const haystacks = $derived(options.map((o) => o.label.toLowerCase()));
+  const haystacks = $derived(activeOptions.map((o) => o.label.toLowerCase()));
 
   // AND-match each whitespace-separated token against the label. The label is
   // often a breadcrumb path ("Electronics › Phones › Cases"), so token matching
@@ -70,10 +76,10 @@
   // break a single contiguous substring match. A single token is a plain
   // substring search, unchanged from before.
   const filtered = $derived.by(() => {
-    if (!dirty) return options;
+    if (!dirty) return activeOptions;
     const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return options;
-    return options.filter((_o, i) =>
+    if (tokens.length === 0) return activeOptions;
+    return activeOptions.filter((_o, i) =>
       tokens.every((t) => haystacks[i].includes(t)),
     );
   });
@@ -97,7 +103,7 @@
     // Clear the box so the user can type a fresh search without first deleting
     // the selected label. Leaving without choosing reverts it (onFocusOut).
     text = "";
-    const idx = options.findIndex((o) => o.value === value);
+    const idx = activeOptions.findIndex((o) => o.value === value);
     highlight = idx >= 0 ? idx : 0;
   }
 

@@ -32,6 +32,7 @@
           product {
             id
             publicDisplayName
+            archivedAt
           }
         }
       }
@@ -149,7 +150,9 @@
   let feedback = $state<{ ok: boolean; text: string } | null>(null);
 
   const variantComboOptions = $derived.by(() => {
-    const options = [{ value: "", label: t("interchangeGroups.none") }];
+    const options: { value: string; label: string; archived?: boolean }[] = [
+      { value: "", label: t("interchangeGroups.none") },
+    ];
     const d = draft;
     if (!d?.id) return options;
     const group = interchangeGroups.find((g) => g.id === d.id);
@@ -158,7 +161,8 @@
       const name = `${v.product.publicDisplayName}${v.label ? ` - ${v.label}` : ''}`;
       options.push({
         value: v.id,
-        label: `${name} (${v.sku})`
+        label: `${name} (${v.sku})`,
+        archived: Boolean(v.product.archivedAt),
       });
     }
     return options;

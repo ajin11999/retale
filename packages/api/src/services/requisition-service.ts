@@ -239,10 +239,33 @@ export async function deleteItem(id: string): Promise<void> {
   const item = await loadItem(id);
   const req = await loadRequisition(item.requisitionId);
   assertEditable(req);
-  if (item.qtyOrdered > 0) {
-    throw new RequisitionError("NOT_OPEN", "cannot delete an item that has already been partially or fully ordered");
-  }
-  await db.delete(purchaseRequisitionItems).where(eq(purchaseRequisitionItems.id, id));
+  await db.transaction(async (tx) => {
+    await tx.delete(purchaseRequisitionItems).where(eq(purchaseRequisitionItems.id, id));
+
+    const remainingItems = await tx
+      .select({ qtyRequested: purchaseRequisitionItems.qtyRequested, qtyOrdered: purchaseRequisitionItems.qtyOrdered })
+      .from(purchaseRequisitionItems)
+      .where(eq(purchaseRequisitionItems.requisitionId, item.requisitionId));
+
+    if (req.status !== "draft" && req.status !== "cancelled") {
+      let nextStatus: "open" | "partially_ordered" | "fully_ordered" = "open";
+      if (remainingItems.length > 0) {
+        const pending = remainingItems.filter((i) => i.qtyOrdered < i.qtyRequested);
+        const ordered = remainingItems.filter((i) => i.qtyOrdered > 0);
+        if (pending.length === 0) {
+          nextStatus = "fully_ordered";
+        } else if (ordered.length > 0) {
+          nextStatus = "partially_ordered";
+        }
+      }
+      if (nextStatus !== req.status) {
+        await tx
+          .update(purchaseRequisitions)
+          .set({ status: nextStatus })
+          .where(eq(purchaseRequisitions.id, item.requisitionId));
+      }
+    }
+  });
 }
 
 export async function reorderItems(
