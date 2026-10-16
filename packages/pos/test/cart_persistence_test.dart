@@ -190,5 +190,49 @@ void main() {
       expect(cart.lines[1].displayName, 'Bearing p1 — std');
       expect(cart.lines[1].qty, 1);
     });
+
+    test(
+        'clerk facing uses real internal name while customer facing uses display name',
+        () {
+      final cart = Register().active;
+      final product = Product(
+        id: 'p-dual',
+        name: 'INTERNAL-BEARING-6201',
+        publicDisplayName: 'Public Bearing 6201',
+        kind: 'physical',
+        costRatioBps: null,
+        variants: [
+          Variant(
+            id: 'v1',
+            sku: 'SKU-6201',
+            barcode: null,
+            label: '2RS',
+            unit: 'piece',
+            priceMinor: 15000,
+            costMinor: 9000,
+            totalQty: 10,
+          ),
+        ],
+      );
+
+      cart.add(product, product.variants.first);
+      final line = cart.lines.single;
+
+      // Clerk facing: shows real internal product name with variant label
+      expect(line.internalName, 'INTERNAL-BEARING-6201 — 2RS');
+      expect(line.clerkName, 'INTERNAL-BEARING-6201 — 2RS');
+
+      // Customer facing / print receipt: shows public display name with variant label
+      expect(line.displayName, 'Public Bearing 6201 — 2RS');
+      expect(line.defaultDisplayName, 'Public Bearing 6201 — 2RS');
+
+      // When cashier sets a custom remark
+      cart.setCustomName(line, 'discounted open box');
+      expect(line.hasCustomName, isTrue);
+      expect(line.clerkName, 'discounted open box');
+      expect(line.internalName, 'INTERNAL-BEARING-6201 — 2RS');
+      expect(line.displayName, 'discounted open box');
+      expect(line.defaultDisplayName, 'Public Bearing 6201 — 2RS');
+    });
   });
 }

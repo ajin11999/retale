@@ -77,6 +77,8 @@ class CartLine {
   double? get marginFraction =>
       lineTotalMinor == 0 ? null : lineMarginMinor / lineTotalMinor;
 
+  /// Customer-facing / receipt display name: per-line remark if set, otherwise
+  /// the catalog publicDisplayName with variant label.
   String get displayName {
     if (hasCustomName) return customName!.trim();
     final label = variant.label;
@@ -85,13 +87,27 @@ class CartLine {
         : '${product.publicDisplayName} — $label';
   }
 
-  /// The catalog default name, ignoring any per-line remark. Used as the edit
-  /// dialog's hint / reset target.
+  /// The catalog default public display name, ignoring any per-line remark.
   String get defaultDisplayName {
     final label = variant.label;
     return label == null || label.isEmpty
         ? product.publicDisplayName
         : '${product.publicDisplayName} — $label';
+  }
+
+  /// The real internal catalog product name with variant label (e.g. "Bearing 6201 — 2RS").
+  /// Clerk-facing catalog name.
+  String get internalName {
+    final label = variant.label;
+    return label == null || label.isEmpty
+        ? product.name
+        : '${product.name} — $label';
+  }
+
+  /// The clerk-facing name: custom remark if entered, otherwise [internalName].
+  String get clerkName {
+    if (hasCustomName) return customName!.trim();
+    return internalName;
   }
 
   /// Serialise for the durable cart store. The full product and variant are

@@ -58,13 +58,17 @@ class ProductCache {
     );
   }
 
-  /// Case-insensitive search over product name, variant SKU and barcode.
+  /// Case-insensitive search over product name, variant SKU, barcode and label.
   /// Open-price products are excluded — they live in the quick-tile palette.
   ///
   /// The query is split into whitespace-separated terms, each of which must
   /// match somewhere in the product's combined text (name, public name, and
-  /// every variant's SKU/barcode). This makes search order-independent and
-  /// cross-field, so "6201 nkn" finds "NKN 6201 2RS".
+  /// every variant's SKU/barcode/label). This makes search order-independent
+  /// and cross-field, so "6201 nkn" finds "NKN 6201 2RS".
+  ///
+  /// The variant label is indexed because compaction moves the model/size/OEM
+  /// code out of the product name and into the label; without it, searching a
+  /// compacted product by model (e.g. "valve guide beat") would miss it.
   List<Product> search(String query) {
     final sellable = _products.where((p) => p.kind != 'open_price');
     final terms = query.toLowerCase().split(RegExp(r'\s+'))
@@ -74,7 +78,7 @@ class ProductCache {
       final haystack = [
         p.name,
         p.publicDisplayName,
-        for (final v in p.variants) ...[v.sku, v.barcode ?? ''],
+        for (final v in p.variants) ...[v.sku, v.barcode ?? '', v.label ?? ''],
       ].join(' ').toLowerCase();
       return terms.every(haystack.contains);
     }).toList();

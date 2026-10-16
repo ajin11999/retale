@@ -449,7 +449,7 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
     return ListTile(
       dense: true,
       title: Text(
-        it['displayName'] as String,
+        _clerkItemName(it),
         style:
             voided
                 ? const TextStyle(decoration: TextDecoration.lineThrough)
@@ -459,6 +459,17 @@ class _OrderDetailPanelState extends State<_OrderDetailPanel> {
       trailing: Text(Money.format(it['lineTotalMinor'] as num)),
     );
   }
+}
+
+/// Clerk-facing name for an order line: real internal product name with variant
+/// label, falling back to displayName when snapshotProductName is absent.
+String _clerkItemName(Map<String, dynamic> it) {
+  final name = (it['snapshotProductName'] as String?)?.trim();
+  final fallback = it['displayName'] as String? ?? '';
+  final base = (name != null && name.isNotEmpty) ? name : fallback;
+  final label = (it['snapshotVariantLabel'] as String?)?.trim();
+  if (label == null || label.isEmpty || base.contains(label)) return base;
+  return '$base — $label';
 }
 
 /// Pick lines and quantities to return, choose a refund method, and submit.
@@ -645,7 +656,7 @@ class _ReturnScreenState extends State<ReturnScreen> {
     final max = (it['qty'] as num).toInt();
     final selected = _qty[id] ?? 0;
     return ListTile(
-      title: Text(it['displayName'] as String),
+      title: Text(_clerkItemName(it)),
       subtitle: Text(
         tr('history.soldLine', {
           'qty': max,

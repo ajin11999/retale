@@ -133,7 +133,7 @@ class Ops {
         snapshotCustomerName
         customer { id name phone }
         items {
-          id displayName qty discountMinor
+          id snapshotProductName displayName qty discountMinor
           snapshotPriceMinor snapshotUnit snapshotVariantLabel
           lineTotalMinor voidedAt
         }
@@ -151,7 +151,7 @@ class Ops {
       ordersForReturn(variantIds: \$variantIds, limit: \$limit) {
         id displayNumber totalMinor createdAt returnOfOrderId
         items {
-          id variantId displayName qty snapshotPriceMinor voidedAt
+          id variantId snapshotProductName displayName qty snapshotPriceMinor snapshotVariantLabel voidedAt
         }
       }
     }

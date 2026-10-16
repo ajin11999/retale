@@ -379,8 +379,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
             PopupMenuButton<String>(
               onSelected: (v) {
-                if (v == 'language')
+                if (v == 'language') {
                   LanguageSelectorButton.showLanguageDialog(context);
+                }
                 if (v == 'close') _closeShift();
                 if (v == 'logout') _logout();
               },
@@ -474,7 +475,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 .map(
                   (p) => ActionChip(
                     avatar: const Icon(Icons.add, size: 18),
-                    label: Text(p.publicDisplayName),
+                    label: Text(p.name),
                     onPressed: () => _pickOpenPrice(p),
                   ),
                 )
@@ -492,7 +493,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: Text(product.publicDisplayName),
+            title: Text(product.name),
             content: TextField(
               controller: controller,
               autofocus: true,
@@ -546,7 +547,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   'count': product.variants.length,
                 });
         return ListTile(
-          title: Text(product.publicDisplayName),
+          title: Text(product.name),
           subtitle: Text(
             first?.sku ?? '',
             style: const TextStyle(
@@ -1014,7 +1015,7 @@ class _CartLineTile extends StatelessWidget {
     final overridden = line.overridePriceMinor != null;
     return ListTile(
       onTap: () => _edit(context),
-      title: Text(line.displayName),
+      title: Text(line.clerkName),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1035,7 +1036,7 @@ class _CartLineTile extends StatelessWidget {
           // cashier can still tell which product it actually is.
           if (line.hasCustomName)
             Text(
-              line.defaultDisplayName,
+              line.internalName,
               style: TextStyle(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
@@ -1089,7 +1090,7 @@ class _CartLineTile extends StatelessWidget {
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: Text(line.displayName),
+            title: Text(line.clerkName),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1099,7 +1100,7 @@ class _CartLineTile extends StatelessWidget {
                   onSubmitted: (_) => Navigator.pop(ctx, 'save'),
                   decoration: InputDecoration(
                     labelText: tr('register.lineName'),
-                    hintText: line.defaultDisplayName,
+                    hintText: line.internalName,
                     border: const OutlineInputBorder(),
                   ),
                 ),
@@ -1256,7 +1257,7 @@ class _VariantPickerState extends State<_VariantPicker> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
-              widget.product.publicDisplayName,
+              widget.product.name,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ),
@@ -1351,7 +1352,7 @@ class _CartDetailSheet extends StatelessWidget {
                 final negative = line.lineMarginMinor < 0;
                 return ListTile(
                   dense: true,
-                  title: Text('${line.displayName}  ×${line.qty}'),
+                  title: Text('${line.clerkName}  ×${line.qty}'),
                   subtitle: Text(
                     '${tr('register.revenueValue', {'value': Money.format(line.lineTotalMinor)})}'
                     '   ·   ${tr('register.costValue', {'value': Money.format(line.lineCostMinor)})}\n'
