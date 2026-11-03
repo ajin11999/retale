@@ -211,13 +211,22 @@
     const el = document.getElementById("printable-document");
     if (!el) throw new Error(t("rfqPrint.elementNotFound"));
 
+    const elRect = el.getBoundingClientRect();
+    const computedStyle = window.getComputedStyle(el);
+    const padTopCss = parseFloat(computedStyle.paddingTop) || 32;
+    const padBottomCss = parseFloat(computedStyle.paddingBottom) || 32;
+
     // Capture DOM layout as high-resolution canvas with full oklch() / Tailwind v4 support
     const canvas = await domToCanvas(el, {
       scale: 2,
       backgroundColor: "#ffffff",
+      style: {
+        borderColor: "transparent",
+        boxShadow: "none",
+        borderRadius: "0",
+      },
     });
 
-    const imgData = canvas.toDataURL("image/png");
     const pdfDoc = await PDFDocument.create();
 
     const isLetter = paperSize === "Letter";
@@ -225,61 +234,210 @@
     const pdfW = isLetter ? 612 : isLegal ? 612 : 595.28;
     const pdfH = isLetter ? 792 : isLegal ? 1008 : 841.89;
 
-    const pngImage = await pdfDoc.embedPng(imgData);
-    const imgW = pngImage.width;
-    const imgH = pngImage.height;
+    const imgW = canvas.width;
+    const imgH = canvas.height;
+    const scaleX = elRect.width > 0 ? imgW / elRect.width : 2;
+    const scaleY = elRect.height > 0 ? imgH / elRect.height : 2;
+    const toCanvasX = (clientX: number) => Math.round((clientX - elRect.left) * scaleX);
+    const toCanvasY = (clientY: number) => Math.round((clientY - elRect.top) * scaleY);
 
-    const renderW = pdfW;
-    const renderH = (imgH * renderW) / imgW;
+    const fullPageCanvasH = Math.round((imgW * pdfH) / pdfW);
+    const padTop = Math.round(padTopCss * scaleY);
+    const padBottom = Math.round(padBottomCss * scaleY);
+    const borderThickness = Math.max(1, Math.round(scaleY));
 
-    if (renderH <= pdfH) {
-      const page = pdfDoc.addPage([pdfW, pdfH]);
-      page.drawImage(pngImage, {
-        x: 0,
-        y: pdfH - renderH,
-        width: renderW,
-        height: renderH,
-      });
-    } else {
-      const pageCanvasH = (imgW * pdfH) / pdfW;
-      let pageOffset = 0;
+    // Measure table wrapper bounds so split pages get clean top/bottom table borders
+    const tableEl = el.querySelector("table.print-table") as HTMLTableElement | null;
+    const tableWrapper = tableEl?.parentElement as HTMLElement | null;
+    const tableBounds = tableWrapper
+      ? (() => {
+          const r = tableWrapper.getBoundingClientRect();
+          return {
+            top: toCanvasY(r.top),
+            bottom: toCanvasY(r.bottom),
+            left: toCanvasX(r.left),
+            right: toCanvasX(r.right),
+          };
+        })()
+      : null;
 
-      while (pageOffset < imgH) {
-        const pageCanvas = document.createElement("canvas");
-        pageCanvas.width = imgW;
-        pageCanvas.height = Math.min(pageCanvasH, imgH - pageOffset);
+    // Collect atomic vertical bands so page breaks never slice through a table row or block
+    interface Band {
+      top: number;
+      bottom: number;
+      keepWithNext: boolean;
+    }
 
-        const ctx = pageCanvas.getContext("2d");
-        if (ctx) {
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-          ctx.drawImage(
-            canvas,
-            0,
-            pageOffset,
-            imgW,
-            pageCanvas.height,
-            0,
-            0,
-            imgW,
-            pageCanvas.height
-          );
+    const rawBands: Band[] = [];
+    for (const child of Array.from(el.children) as HTMLElement[]) {
+      const table = child.querySelector("table.print-table");
+      if (table) {
+        const wrapperRect = child.getBoundingClientRect();
+        const wrapperTop = Math.max(0, toCanvasY(wrapperRect.top));
+        const wrapperBottom = Math.min(imgH, toCanvasY(wrapperRect.bottom));
+        const rows = Array.from(table.querySelectorAll("tr")) as HTMLTableRowElement[];
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const r = row.getBoundingClientRect();
+          if (r.height <= 0) continue;
+          const inThead = row.parentElement?.tagName === "THEAD";
+          const inTfoot = row.parentElement?.tagName === "TFOOT";
+          const isSectionHeader = row.classList.contains("section-header-row");
+          const isNonFinalTfoot = inTfoot && row.nextElementSibling !== null;
+          const isFirstTableRow = i === 0;
+          const isLastTableRow = i === rows.length - 1;
+          rawBands.push({
+            top: isFirstTableRow ? wrapperTop : Math.max(0, toCanvasY(r.top)),
+            bottom: isLastTableRow ? wrapperBottom : Math.min(imgH, toCanvasY(r.bottom)),
+            keepWithNext: inThead || isSectionHeader || isNonFinalTfoot,
+          });
         }
-
-        const pageImgData = pageCanvas.toDataURL("image/png");
-        const pagePng = await pdfDoc.embedPng(pageImgData);
-        const pageRenderH = (pageCanvas.height * pdfW) / imgW;
-
-        const page = pdfDoc.addPage([pdfW, pdfH]);
-        page.drawImage(pagePng, {
-          x: 0,
-          y: pdfH - pageRenderH,
-          width: pdfW,
-          height: pageRenderH,
+      } else {
+        const r = child.getBoundingClientRect();
+        if (r.height <= 0) continue;
+        rawBands.push({
+          top: Math.max(0, toCanvasY(r.top)),
+          bottom: Math.min(imgH, toCanvasY(r.bottom)),
+          keepWithNext: false,
         });
-
-        pageOffset += pageCanvasH;
       }
+    }
+
+    // Merge consecutive keepWithNext bands (e.g. section header + its first item row)
+    // so section headers and table headers are never orphaned at the bottom of a page.
+    interface Unit {
+      top: number;
+      bottom: number;
+      subBands: Band[];
+    }
+
+    const units: Unit[] = [];
+    let bIdx = 0;
+    while (bIdx < rawBands.length) {
+      const startTop = rawBands[bIdx].top;
+      let endBottom = rawBands[bIdx].bottom;
+      const subBands: Band[] = [rawBands[bIdx]];
+      while (rawBands[bIdx].keepWithNext && bIdx + 1 < rawBands.length) {
+        bIdx++;
+        endBottom = rawBands[bIdx].bottom;
+        subBands.push(rawBands[bIdx]);
+      }
+      units.push({ top: startTop, bottom: endBottom, subBands });
+      bIdx++;
+    }
+
+    if (units.length === 0) {
+      units.push({ top: 0, bottom: imgH, subBands: [{ top: 0, bottom: imgH, keepWithNext: false }] });
+    }
+
+    let unitIdx = 0;
+    let isFirstPage = true;
+
+    while (unitIdx < units.length) {
+      const sliceStartY = isFirstPage ? 0 : units[unitIdx].top;
+      const destY = isFirstPage ? 0 : padTop;
+      const availH = fullPageCanvasH - destY - padBottom;
+      const limitY = sliceStartY + availH;
+
+      let j = unitIdx;
+      while (j < units.length && units[j].bottom <= limitY) {
+        j++;
+      }
+
+      let sliceEndY: number;
+      if (j === units.length) {
+        // All remaining units fit on this page
+        sliceEndY = units[units.length - 1].bottom;
+        unitIdx = units.length;
+      } else if (j > unitIdx) {
+        // Units [unitIdx .. j-1] fit; break cleanly before units[j]
+        sliceEndY = units[j - 1].bottom;
+        unitIdx = j;
+      } else {
+        // Single merged unit exceeds availH — try splitting across its subBands first
+        const curr = units[unitIdx];
+        let k = 0;
+        while (k < curr.subBands.length && curr.subBands[k].bottom <= limitY) {
+          k++;
+        }
+        if (k > 0) {
+          sliceEndY = curr.subBands[k - 1].bottom;
+          const remaining = curr.subBands.slice(k);
+          units[unitIdx] = {
+            top: remaining[0].top,
+            bottom: remaining[remaining.length - 1].bottom,
+            subBands: remaining,
+          };
+        } else {
+          // Fallback if a single unbreakable element is taller than an entire page
+          sliceEndY = Math.min(curr.bottom, limitY);
+          if (sliceEndY >= curr.bottom) {
+            unitIdx++;
+          } else {
+            curr.subBands[0].top = sliceEndY;
+            curr.top = sliceEndY;
+          }
+        }
+      }
+
+      const sliceH = Math.max(1, sliceEndY - sliceStartY);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = imgW;
+      pageCanvas.height = destY + sliceH;
+
+      const ctx = pageCanvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        ctx.drawImage(
+          canvas,
+          0,
+          sliceStartY,
+          imgW,
+          sliceH,
+          0,
+          destY,
+          imgW,
+          sliceH
+        );
+
+        // Close top/bottom table border cleanly when splitting inside the table
+        if (tableBounds) {
+          ctx.fillStyle = "#cbd5e1";
+          const tableW = tableBounds.right - tableBounds.left;
+          if (
+            sliceStartY > tableBounds.top + borderThickness * 2 &&
+            sliceStartY < tableBounds.bottom
+          ) {
+            ctx.fillRect(tableBounds.left, destY, tableW, borderThickness);
+          }
+          if (
+            sliceEndY > tableBounds.top &&
+            sliceEndY < tableBounds.bottom - borderThickness * 2
+          ) {
+            ctx.fillRect(
+              tableBounds.left,
+              destY + sliceH - borderThickness,
+              tableW,
+              borderThickness
+            );
+          }
+        }
+      }
+
+      const pageImgData = pageCanvas.toDataURL("image/png");
+      const pagePng = await pdfDoc.embedPng(pageImgData);
+      const pageRenderH = (pageCanvas.height * pdfW) / imgW;
+
+      const page = pdfDoc.addPage([pdfW, pdfH]);
+      page.drawImage(pagePng, {
+        x: 0,
+        y: pdfH - pageRenderH,
+        width: pdfW,
+        height: pageRenderH,
+      });
+
+      isFirstPage = false;
     }
 
     const pdfBytes = await pdfDoc.save();
@@ -518,7 +676,7 @@
       {/if}
 
       <!-- Striped Items Table (1.5x Bigger Table Text with Precision Right-Side Border Fix) -->
-      <div class="rounded-lg border border-slate-300 print:border-slate-400 overflow-hidden">
+      <div class="rounded-lg border border-slate-300 print:border-slate-400 overflow-hidden print:overflow-visible">
         <table class="w-full text-left print-table">
           <thead class="bg-muted/80 text-muted-foreground font-bold text-sm uppercase">
             <tr>
@@ -633,7 +791,7 @@
   .print-table td:last-child {
     border-right: none;
   }
-  .print-table tbody tr:last-child td {
+  .print-table > *:last-child > tr:last-child td {
     border-bottom: none;
   }
   tr.section-header-row td {
@@ -658,6 +816,15 @@
       border-spacing: 0 !important;
       box-sizing: border-box !important;
     }
+    .print-table tr {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    .print-table tfoot {
+      display: table-row-group !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
     .print-table th,
     .print-table td {
       border-bottom: 1px solid #cbd5e1 !important;
@@ -667,6 +834,10 @@
     .print-table th:last-child,
     .print-table td:last-child {
       border-right: none !important;
+    }
+    tr.section-header-row {
+      break-after: avoid !important;
+      page-break-after: avoid !important;
     }
     tr.section-header-row td {
       border-right: none !important;
