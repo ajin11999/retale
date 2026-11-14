@@ -5,18 +5,42 @@ import 'package:intl/intl.dart';
 import '../../graphql/graphql_service.dart';
 import '../../graphql/operations.dart';
 import '../../models/models.dart';
+import '../../voice/voice_input_service.dart';
+import '../../voice/voice_quantity_parser.dart';
 import '../../widgets/common.dart';
 import '../../widgets/scan_sheet.dart';
 import '../count_screen.dart';
+
+/// Loaded catalog + location stock payload for [ReconcileScreen].
+class ReconcileCatalogData {
+  const ReconcileCatalogData({
+    required this.localRows,
+    required this.globalVariants,
+    required this.categories,
+    required this.products,
+  });
+
+  final List<StockLevel> localRows;
+  final List<StockLevel> globalVariants;
+  final List<CategoryNode> categories;
+  final List<ProductFilterOption> products;
+}
 
 /// Count what is physically at one location. Counts stay local in
 /// [_counted] (presence = touched) until staff apply them in the review
 /// sheet; only touched lines are sent, so partial / spot counts are safe —
 /// untouched stock is never adjusted.
 class ReconcileScreen extends StatefulWidget {
-  const ReconcileScreen({super.key, required this.location});
+  const ReconcileScreen({
+    super.key,
+    required this.location,
+    this.voiceRecognizer,
+    this.loadCatalog,
+  });
 
   final LocationNode location;
+  final VoiceRecognizer? voiceRecognizer;
+  final Future<ReconcileCatalogData> Function(String locationId)? loadCatalog;
 
   @override
   State<ReconcileScreen> createState() => _ReconcileScreenState();
@@ -25,6 +49,8 @@ class ReconcileScreen extends StatefulWidget {
 class _ReconcileScreenState extends State<ReconcileScreen> {
   List<StockLevel>? _rows;
   List<StockLevel> _globalVariants = [];
+  List<CategoryNode> _categories = [];
+  List<ProductFilterOption> _products = [];
   Object? _loadError;
 
   /// variantId -> counted qty. Presence means the line was touched.
@@ -34,8 +60,16 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
   final _searchField = TextEditingController();
   final _qtyControllers = <String, TextEditingController>{};
   String _search = '';
+  String? _selectedCategoryId;
+  String? _selectedProductId;
   String? _lastScanHitId;
   bool _applying = false;
+
+  late final VoiceRecognizer _voice =
+      widget.voiceRecognizer ?? SpeechToTextVoiceRecognizer();
+  String? _listeningVariantId;
+  String _listeningLabel = '';
+  String _liveTranscript = '';
 
   final _checklistKeys = <String, GlobalKey>{};
   final _byProductKeys = <String, GlobalKey>{};
@@ -48,6 +82,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
 
   @override
   void dispose() {
+    _voice.dispose();
     _scanField.dispose();
     _searchField.dispose();
     for (final c in _qtyControllers.values) {
@@ -59,46 +94,95 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
   String _fmt(num v) =>
       v == v.truncate() ? v.toInt().toString() : v.toString();
 
+  bool get _hasActiveFilter =>
+      _search.trim().isNotEmpty ||
+      _selectedCategoryId != null ||
+      _selectedProductId != null;
+
+  Future<ReconcileCatalogData> _defaultLoadCatalog(String locationId) async {
+    final results = await Future.wait([
+      GraphQLService.instance.query(Ops.locationStockLevels,
+          variables: {'locationId': locationId}),
+      GraphQLService.instance.query(Ops.productLabels),
+      GraphQLService.instance.query(Ops.categories),
+    ]);
+
+    final categories = (results[2]['categories'] as List<dynamic>)
+        .map((c) => CategoryNode.fromJson(c as Map<String, dynamic>))
+        .toList();
+
+    final products = results[1]['products'] as List<dynamic>;
+    final productCategoryById = <String, String?>{};
+    final globalVariants = <StockLevel>[];
+    final productOptions = <ProductFilterOption>[];
+
+    for (final p in products) {
+      final product = p as Map<String, dynamic>;
+      final productId = product['id'] as String;
+      final productName = product['name'] as String;
+      final categoryId = product['categoryId'] as String?;
+      final archivedAt = product['archivedAt'] as String?;
+      final isArchived = archivedAt != null && archivedAt.isNotEmpty;
+      final variants = product['variants'] as List<dynamic>;
+
+      productCategoryById[productId] = categoryId;
+      if (!isArchived && variants.isNotEmpty) {
+        productOptions.add(ProductFilterOption(
+          id: productId,
+          name: productName,
+          categoryId: categoryId,
+          variantCount: variants.length,
+          isArchived: isArchived,
+        ));
+      }
+
+      for (final v in variants) {
+        final variant = v as Map<String, dynamic>;
+        globalVariants.add(StockLevel(
+          variantId: variant['id'] as String,
+          productId: productId,
+          productName: productName,
+          sku: variant['sku'] as String? ?? '',
+          label: variant['label'] as String?,
+          barcode: variant['barcode'] as String?,
+          unit: variant['unit'] as String? ?? 'piece',
+          qtyDecimals: variant['qtyDecimals'] as int? ?? 0,
+          onHand: 0,
+          categoryId: categoryId,
+        ));
+      }
+    }
+
+    productOptions
+        .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    final localRows = (results[0]['locationStockLevels'] as List<dynamic>)
+        .map((r) => StockLevel.fromJson(r as Map<String, dynamic>))
+        .map((r) => r.withCategoryId(productCategoryById[r.productId]))
+        .toList();
+
+    return ReconcileCatalogData(
+      localRows: localRows,
+      globalVariants: globalVariants,
+      categories: categories,
+      products: productOptions,
+    );
+  }
+
   Future<void> _load() async {
     setState(() {
       _rows = null;
       _loadError = null;
     });
     try {
-      final results = await Future.wait([
-        GraphQLService.instance.query(Ops.locationStockLevels,
-            variables: {'locationId': widget.location.id}),
-        GraphQLService.instance.query(Ops.productLabels),
-      ]);
+      final data =
+          await (widget.loadCatalog ?? _defaultLoadCatalog)(widget.location.id);
       if (!mounted) return;
-      
-      final localRows = (results[0]['locationStockLevels'] as List<dynamic>)
-          .map((r) => StockLevel.fromJson(r as Map<String, dynamic>))
-          .toList();
-          
-      final products = results[1]['products'] as List<dynamic>;
-      final globalVariants = <StockLevel>[];
-      for (final p in products) {
-        final product = p as Map<String, dynamic>;
-        for (final v in product['variants'] as List<dynamic>) {
-          final variant = v as Map<String, dynamic>;
-          globalVariants.add(StockLevel(
-            variantId: variant['id'] as String,
-            productId: product['id'] as String,
-            productName: product['name'] as String,
-            sku: variant['sku'] as String? ?? '',
-            label: variant['label'] as String?,
-            barcode: variant['barcode'] as String?,
-            unit: variant['unit'] as String? ?? 'piece',
-            qtyDecimals: variant['qtyDecimals'] as int? ?? 0,
-            onHand: 0,
-          ));
-        }
-      }
-      
       setState(() {
-        _rows = localRows;
-        _globalVariants = globalVariants;
+        _rows = data.localRows;
+        _globalVariants = data.globalVariants;
+        _categories = data.categories;
+        _products = data.products;
       });
     } catch (e) {
       if (mounted) setState(() => _loadError = e);
@@ -161,6 +245,93 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
               RegExp('^\\d*\\.?\\d{0,${row.qtyDecimals}}\$')),
       ];
 
+  // ── Voice recognition ────────────────────────────────────────────────────
+
+  Future<void> _toggleVoiceFor(StockLevel row) async {
+    if (_listeningVariantId == row.variantId) {
+      await _cancelListening();
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _listeningVariantId = row.variantId;
+      _listeningLabel = row.displayName;
+      _liveTranscript = '';
+    });
+
+    final started = await _voice.startListening(
+      onPartial: (partial) {
+        if (!mounted || _listeningVariantId != row.variantId) return;
+        setState(() => _liveTranscript = partial);
+      },
+      onFinal: (finalWords) {
+        if (!mounted || _listeningVariantId != row.variantId) return;
+        _handleVoiceTranscript(row, finalWords);
+      },
+      onError: (message) {
+        if (!mounted || _listeningVariantId != row.variantId) return;
+        setState(() {
+          _listeningVariantId = null;
+          _liveTranscript = '';
+        });
+        HapticFeedback.vibrate();
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      },
+      onStopped: () {
+        if (!mounted || _listeningVariantId != row.variantId) return;
+        setState(() {
+          _listeningVariantId = null;
+          _liveTranscript = '';
+        });
+      },
+    );
+
+    if (!started && mounted && _listeningVariantId == row.variantId) {
+      setState(() {
+        _listeningVariantId = null;
+        _liveTranscript = '';
+      });
+    }
+  }
+
+  Future<void> _cancelListening() async {
+    await _voice.cancel();
+    if (!mounted) return;
+    setState(() {
+      _listeningVariantId = null;
+      _liveTranscript = '';
+    });
+  }
+
+  void _handleVoiceTranscript(StockLevel row, String transcript) {
+    setState(() {
+      _listeningVariantId = null;
+      _liveTranscript = '';
+    });
+
+    final parsed =
+        VoiceQuantityParser.parse(transcript, qtyDecimals: row.qtyDecimals);
+    if (!parsed.isSuccess) {
+      HapticFeedback.vibrate();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(parsed.error ?? 'Could not parse quantity'),
+        ),
+      );
+      return;
+    }
+
+    final qty = parsed.value!;
+    _setCount(row, qty);
+    setState(() => _lastScanHitId = row.variantId);
+    HapticFeedback.mediumImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${row.displayName} → ${_fmt(qty)}')),
+    );
+  }
+
   // ── Scanning (pure client-side over the loaded rows) ─────────────────────
 
   Future<void> _handleCode(String code) async {
@@ -174,27 +345,29 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
             (r.barcode != null && r.barcode!.toLowerCase() == lower) ||
             r.sku.toLowerCase() == lower)
         .toList();
-        
+
     if (matches.isEmpty) {
       final globalMatches = _globalVariants
           .where((r) =>
               (r.barcode != null && r.barcode!.toLowerCase() == lower) ||
               r.sku.toLowerCase() == lower)
           .toList();
-          
+
       if (globalMatches.isNotEmpty) {
-        final row = globalMatches.length == 1 ? globalMatches.first : await _pickRow(globalMatches);
+        final row = globalMatches.length == 1
+            ? globalMatches.first
+            : await _pickRow(globalMatches);
         if (row == null || !mounted) return;
         _setCount(row, (_counted[row.variantId] ?? 0) + 1);
         setState(() => _lastScanHitId = row.variantId);
         return;
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('No product matches "$trimmed" anywhere')));
       return;
     }
-    
+
     final row = matches.length == 1 ? matches.first : await _pickRow(matches);
     if (row == null || !mounted) return;
     _setCount(row, (_counted[row.variantId] ?? 0) + 1);
@@ -213,7 +386,8 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ProductTitleText.fromStockLevel(row, fontSize: 16, skuFontSize: 13),
+                  ProductTitleText.fromStockLevel(row,
+                      fontSize: 16, skuFontSize: 13),
                   const SizedBox(height: 4),
                   Text(
                     'system ${_fmt(row.onHand)}',
@@ -232,6 +406,126 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     if (code != null && mounted) await _handleCode(code);
   }
 
+  // ── Category & Product filter pickers ────────────────────────────────────
+
+  String? get _selectedCategoryName {
+    if (_selectedCategoryId == null) return null;
+    for (final c in _categories) {
+      if (c.id == _selectedCategoryId) return c.name;
+    }
+    return null;
+  }
+
+  String? get _selectedProductName {
+    if (_selectedProductId == null) return null;
+    for (final p in _products) {
+      if (p.id == _selectedProductId) return p.name;
+    }
+    return null;
+  }
+
+  Future<void> _pickCategory() async {
+    final entries = buildCategoryTreeEntries(_categories);
+    final result = await showModalBottomSheet<_PickerSelection<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _SearchablePickerSheet<CategoryTreeEntry>(
+        title: 'Filter by category',
+        allLabel: 'All categories',
+        searchHint: 'Search categories…',
+        items: entries,
+        isSelected: (e) => e.category.id == _selectedCategoryId,
+        matchesQuery: (e, q) =>
+            e.category.name.toLowerCase().contains(q) ||
+            e.pathLabel.toLowerCase().contains(q),
+        itemBuilder: (e) => Padding(
+          padding: EdgeInsets.only(left: e.depth * 14.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(e.category.name),
+              if (e.depth > 0)
+                Text(
+                  e.pathLabel,
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+            ],
+          ),
+        ),
+        valueOf: (e) => e.category.id,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _selectedCategoryId = result.value;
+      if (_selectedProductId != null && _selectedCategoryId != null) {
+        final allowed =
+            collectCategoryAndDescendants(_selectedCategoryId!, _categories);
+        ProductFilterOption? prod;
+        for (final p in _products) {
+          if (p.id == _selectedProductId) {
+            prod = p;
+            break;
+          }
+        }
+        if (prod == null ||
+            prod.categoryId == null ||
+            !allowed.contains(prod.categoryId)) {
+          _selectedProductId = null;
+        }
+      }
+    });
+  }
+
+  Future<void> _pickProduct() async {
+    final allowedCategories = _selectedCategoryId == null
+        ? null
+        : collectCategoryAndDescendants(_selectedCategoryId!, _categories);
+    final availableProducts = allowedCategories == null
+        ? _products
+        : _products
+            .where((p) =>
+                p.categoryId != null && allowedCategories.contains(p.categoryId))
+            .toList();
+
+    final result = await showModalBottomSheet<_PickerSelection<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _SearchablePickerSheet<ProductFilterOption>(
+        title: _selectedCategoryName == null
+            ? 'Filter by product'
+            : 'Product in $_selectedCategoryName',
+        allLabel: 'All products',
+        searchHint: 'Search products…',
+        items: availableProducts,
+        isSelected: (p) => p.id == _selectedProductId,
+        matchesQuery: (p, q) => p.name.toLowerCase().contains(q),
+        itemBuilder: (p) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(p.name),
+            Text(
+              '${p.variantCount} variant${p.variantCount == 1 ? '' : 's'}',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        valueOf: (p) => p.id,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _selectedProductId = result.value);
+  }
+
+  void _clearFilters() {
+    _searchField.clear();
+    setState(() {
+      _search = '';
+      _selectedCategoryId = null;
+      _selectedProductId = null;
+    });
+  }
+
   // ── Review & apply ───────────────────────────────────────────────────────
 
   Future<void> _openReview() async {
@@ -240,7 +534,8 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     final touched =
         rows.where((r) => _counted.containsKey(r.variantId)).toList();
     final reason = TextEditingController(
-        text: 'Stockeeper count ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
+        text:
+            'Stockeeper count ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
     try {
       await showModalBottomSheet<void>(
         context: context,
@@ -331,6 +626,9 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final categoryLabel = _selectedCategoryName;
+    final productLabel = _selectedProductName;
+
     return PopScope(
       canPop: _counted.isEmpty,
       onPopInvokedWithResult: (didPop, _) => _confirmLeave(didPop),
@@ -340,8 +638,9 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
           appBar: AppBar(
             title: Text('Count: ${widget.location.name}'),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(164),
+              preferredSize: const Size.fromHeight(216),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -375,13 +674,64 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
                     child: TextField(
                       controller: _searchField,
                       autocorrect: false,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Filter products',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search),
+                        hintText: 'Filter products or variants',
+                        border: const OutlineInputBorder(),
                         isDense: true,
+                        suffixIcon: _search.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                icon: const Icon(Icons.close),
+                                onPressed: () {
+                                  _searchField.clear();
+                                  setState(() => _search = '');
+                                },
+                              ),
                       ),
                       onChanged: (v) => setState(() => _search = v),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 50,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      children: [
+                        InputChip(
+                          avatar: const Icon(Icons.category_outlined, size: 18),
+                          label: Text(categoryLabel == null
+                              ? 'Category'
+                              : 'Category: $categoryLabel'),
+                          selected: categoryLabel != null,
+                          onPressed: _categories.isEmpty ? null : _pickCategory,
+                          onDeleted: categoryLabel == null
+                              ? null
+                              : () => setState(() => _selectedCategoryId = null),
+                        ),
+                        const SizedBox(width: 8),
+                        InputChip(
+                          avatar:
+                              const Icon(Icons.inventory_2_outlined, size: 18),
+                          label: Text(productLabel == null
+                              ? 'Product'
+                              : 'Product: $productLabel'),
+                          selected: productLabel != null,
+                          onPressed: _products.isEmpty ? null : _pickProduct,
+                          onDeleted: productLabel == null
+                              ? null
+                              : () => setState(() => _selectedProductId = null),
+                        ),
+                        if (_hasActiveFilter) ...[
+                          const SizedBox(width: 8),
+                          ActionChip(
+                            avatar: const Icon(Icons.filter_alt_off, size: 18),
+                            label: const Text('Clear'),
+                            onPressed: _clearFilters,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   const TabBar(tabs: [
@@ -392,7 +742,12 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
               ),
             ),
           ),
-          body: _buildBody(),
+          body: Column(
+            children: [
+              if (_listeningVariantId != null) _buildListeningBanner(context),
+              Expanded(child: _buildBody()),
+            ],
+          ),
           bottomNavigationBar: SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -415,26 +770,90 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     );
   }
 
+  Widget _buildListeningBanner(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.mic, color: scheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Listening (English): $_listeningLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                  Text(
+                    _liveTranscript.isEmpty
+                        ? 'Say the quantity…'
+                        : '"$_liveTranscript"',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _cancelListening,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<StockLevel> _visibleRows() {
     final rows = _rows ?? [];
     final query = _search.trim().toLowerCase();
-    if (query.isEmpty) return rows;
-    final terms = query.split(RegExp(r'\s+'));
+    final terms = query.isEmpty ? const <String>[] : query.split(RegExp(r'\s+'));
+    final allowedCategoryIds = _selectedCategoryId == null
+        ? null
+        : collectCategoryAndDescendants(_selectedCategoryId!, _categories);
+
     bool matches(StockLevel r) {
-      final name = r.displayName.toLowerCase();
-      final sku = r.sku.toLowerCase();
-      final barcode = (r.barcode ?? '').toLowerCase();
-      return terms.every(
-          (term) => name.contains(term) || sku.contains(term) || barcode.contains(term));
+      if (allowedCategoryIds != null &&
+          (r.categoryId == null || !allowedCategoryIds.contains(r.categoryId))) {
+        return false;
+      }
+      if (_selectedProductId != null && r.productId != _selectedProductId) {
+        return false;
+      }
+      if (terms.isNotEmpty) {
+        final name = r.displayName.toLowerCase();
+        final sku = r.sku.toLowerCase();
+        final barcode = (r.barcode ?? '').toLowerCase();
+        final matchesTerms = terms.every((term) =>
+            name.contains(term) ||
+            sku.contains(term) ||
+            barcode.contains(term));
+        if (!matchesTerms) return false;
+      }
+      return true;
     }
 
+    if (!_hasActiveFilter) return rows;
+
     final matchedRows = rows.where(matches).toList();
-        
     final existingIds = rows.map((r) => r.variantId).toSet();
     final extraMatches = _globalVariants
         .where((r) => !existingIds.contains(r.variantId) && matches(r))
         .toList();
-        
+
     return [...matchedRows, ...extraMatches];
   }
 
@@ -445,9 +864,16 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     if (_rows == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_rows!.isEmpty) {
+    if (_rows!.isEmpty && !_hasActiveFilter) {
       return const Center(
-          child: Text('No stock has ever been at this location.'));
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No stock has ever been at this location.\nUse search or Category / Product filters above to count items.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
     }
     final visible = _visibleRows();
     if (visible.isEmpty) {
@@ -472,59 +898,93 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
         final counted = _counted[row.variantId];
         final confirmed = counted != null && counted == row.onHand;
         final partial = counted != null && !confirmed;
-        return ListTile(
+        final isListening = _listeningVariantId == row.variantId;
+        final theme = Theme.of(context);
+
+        return Container(
           key: key,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          minLeadingWidth: 24,
-          horizontalTitleGap: 8,
-          minTileHeight: 72,
-          selected: _lastScanHitId == row.variantId,
-          selectedTileColor:
-              Theme.of(context).colorScheme.primaryContainer.withAlpha(120),
-          leading: Checkbox(
-            visualDensity: VisualDensity.compact,
-            tristate: true,
-            value: confirmed ? true : (partial ? null : false),
-            onChanged: (_) =>
-                confirmed ? _clearCount(row) : _setCount(row, row.onHand),
-          ),
-          title: ProductTitleText.fromStockLevel(row),
-          subtitle: Text(counted == null
-              ? 'system ${_fmt(row.onHand)} · not counted'
-              : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+          color: _lastScanHitId == row.variantId
+              ? theme.colorScheme.primaryContainer.withAlpha(120)
+              : null,
+          padding: const EdgeInsets.fromLTRB(4, 6, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconButton(
-                icon: const Icon(Icons.remove),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _setCount(row, ((counted ?? 0) - 1).clamp(0, double.infinity)),
-              ),
-              SizedBox(
-                width: 48,
-                child: TextField(
-                  controller: _controllerFor(row),
-                  textAlign: TextAlign.center,
-                  keyboardType: TextInputType.numberWithOptions(
-                      decimal: row.qtyDecimals > 0),
-                  inputFormatters: _qtyFormatters(row),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                    border: OutlineInputBorder(),
-                    hintText: '—',
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Checkbox(
+                    visualDensity: VisualDensity.compact,
+                    tristate: true,
+                    value: confirmed ? true : (partial ? null : false),
+                    onChanged: (_) => confirmed
+                        ? _clearCount(row)
+                        : _setCount(row, row.onHand),
                   ),
-                ),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => confirmed
+                          ? _clearCount(row)
+                          : _setCount(row, row.onHand),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: ProductTitleText.fromStockLevel(row),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  _VoiceRowButton(
+                    buttonKey: Key('voice-btn-${row.variantId}'),
+                    isListening: isListening,
+                    onPressed: () => _toggleVoiceFor(row),
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _setCount(row, (counted ?? 0) + 1),
+              Padding(
+                padding: const EdgeInsets.only(left: 40),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        counted == null
+                            ? 'system ${_fmt(row.onHand)} · not counted'
+                            : 'system ${_fmt(row.onHand)} · counted ${_fmt(counted)}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _setCount(
+                          row, ((counted ?? 0) - 1).clamp(0, double.infinity)),
+                    ),
+                    SizedBox(
+                      width: 52,
+                      child: TextField(
+                        controller: _controllerFor(row),
+                        textAlign: TextAlign.center,
+                        keyboardType: TextInputType.numberWithOptions(
+                            decimal: row.qtyDecimals > 0),
+                        inputFormatters: _qtyFormatters(row),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding:
+                              EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                          border: OutlineInputBorder(),
+                          hintText: '—',
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => _setCount(row, (counted ?? 0) + 1),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          onTap: () =>
-              confirmed ? _clearCount(row) : _setCount(row, row.onHand),
         );
       },
     );
@@ -540,6 +1000,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
             _byProductKeys.putIfAbsent(row.variantId, () => GlobalKey());
         final counted = _counted[row.variantId];
         final over = counted != null && counted > row.onHand;
+        final isListening = _listeningVariantId == row.variantId;
         return ListTile(
           key: key,
           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -566,7 +1027,18 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
               ),
             ],
           ),
-          trailing: const Icon(Icons.add),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _VoiceRowButton(
+                buttonKey: Key('voice-byproduct-btn-${row.variantId}'),
+                isListening: isListening,
+                onPressed: () => _toggleVoiceFor(row),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.add),
+            ],
+          ),
           onTap: () => _openCounter(row),
         );
       },
@@ -578,7 +1050,8 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
       builder: (_) => CountScreen(
         target: CountTarget(
           title: row.displayName,
-          titleWidget: ProductTitleText.fromStockLevel(row, fontSize: 18, skuFontSize: 14),
+          titleWidget: ProductTitleText.fromStockLevel(row,
+              fontSize: 18, skuFontSize: 14),
           expected: row.onHand,
           initial: _counted[row.variantId] ?? 0,
           allowOverage: true,
@@ -588,6 +1061,159 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
       ),
     ));
     if (mounted) setState(() => _syncController(row));
+  }
+}
+
+class _VoiceRowButton extends StatelessWidget {
+  const _VoiceRowButton({
+    this.buttonKey,
+    required this.isListening,
+    required this.onPressed,
+  });
+
+  final Key? buttonKey;
+  final bool isListening;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (isListening) {
+      return IconButton.filled(
+        key: buttonKey,
+        tooltip: 'Stop voice input',
+        style: IconButton.styleFrom(
+          backgroundColor: scheme.error,
+          foregroundColor: scheme.onError,
+        ),
+        icon: const Icon(Icons.stop),
+        onPressed: onPressed,
+      );
+    }
+    return IconButton.filledTonal(
+      key: buttonKey,
+      tooltip: 'Set quantity by voice',
+      icon: const Icon(Icons.mic),
+      onPressed: onPressed,
+    );
+  }
+}
+
+class _PickerSelection<T> {
+  const _PickerSelection(this.value);
+  final T? value;
+}
+
+class _SearchablePickerSheet<T> extends StatefulWidget {
+  const _SearchablePickerSheet({
+    required this.title,
+    required this.allLabel,
+    required this.searchHint,
+    required this.items,
+    required this.isSelected,
+    required this.matchesQuery,
+    required this.itemBuilder,
+    required this.valueOf,
+  });
+
+  final String title;
+  final String allLabel;
+  final String searchHint;
+  final List<T> items;
+  final bool Function(T item) isSelected;
+  final bool Function(T item, String query) matchesQuery;
+  final Widget Function(T item) itemBuilder;
+  final String Function(T item) valueOf;
+
+  @override
+  State<_SearchablePickerSheet<T>> createState() =>
+      _SearchablePickerSheetState<T>();
+}
+
+class _SearchablePickerSheetState<T> extends State<_SearchablePickerSheet<T>> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _query.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? widget.items
+        : widget.items.where((item) => widget.matchesQuery(item, q)).toList();
+
+    return SafeArea(
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        builder: (context, scrollController) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.pop(context, const _PickerSelection<String>(null)),
+                      child: Text(widget.allLabel),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: TextField(
+                  autofocus: false,
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search),
+                    hintText: widget.searchHint,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(child: Text('No matches'))
+                    : ListView.separated(
+                        controller: scrollController,
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, i) {
+                          final item = filtered[i];
+                          final selected = widget.isSelected(item);
+                          return ListTile(
+                            title: widget.itemBuilder(item),
+                            trailing: selected ? const Icon(Icons.check) : null,
+                            selected: selected,
+                            onTap: () => Navigator.pop(
+                              context,
+                              _PickerSelection<String>(widget.valueOf(item)),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -616,10 +1242,11 @@ class _ReviewSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Apply ${touched.length} counted '
+            Text(
+                'Apply ${touched.length} counted '
                 'line${touched.length == 1 ? '' : 's'}',
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold)),
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Flexible(
               child: ListView.separated(
@@ -637,7 +1264,8 @@ class _ReviewSheet extends StatelessWidget {
                           : Colors.red.shade700;
                   return ListTile(
                     dense: true,
-                    title: ProductTitleText.fromStockLevel(row, fontSize: 14, skuFontSize: 11),
+                    title: ProductTitleText.fromStockLevel(row,
+                        fontSize: 14, skuFontSize: 11),
                     subtitle: null,
                     trailing: Text(
                       delta == 0

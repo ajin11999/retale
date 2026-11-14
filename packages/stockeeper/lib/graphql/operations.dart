@@ -120,13 +120,22 @@ class Ops {
     }
   ''';
 
-  /// Variant labels for purchase lines (PurchaseItem carries no variant label).
+  /// Variant labels + category links for purchase lines and reconcile filters.
   /// Archived products included so old PO lines still resolve.
   static const productLabels = '''
     query ProductLabels {
       products(includeArchived: true) {
-        id name
+        id name categoryId archivedAt
         variants { id sku label barcode unit qtyDecimals }
+      }
+    }
+  ''';
+
+  /// Active & archived product categories for hierarchical reconcile filtering.
+  static const categories = '''
+    query Categories {
+      categories {
+        id name parentId archivedAt
       }
     }
   ''';

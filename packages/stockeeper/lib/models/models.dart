@@ -132,6 +132,7 @@ class StockLevel {
     required this.unit,
     required this.qtyDecimals,
     required this.onHand,
+    this.categoryId,
   });
 
   final String variantId;
@@ -143,6 +144,20 @@ class StockLevel {
   final String unit;
   final int qtyDecimals;
   final num onHand;
+  final String? categoryId;
+
+  StockLevel withCategoryId(String? categoryId) => StockLevel(
+        variantId: variantId,
+        productId: productId,
+        productName: productName,
+        sku: sku,
+        label: label,
+        barcode: barcode,
+        unit: unit,
+        qtyDecimals: qtyDecimals,
+        onHand: onHand,
+        categoryId: categoryId,
+      );
 
   /// Display name: `Product · label` (label only when present). The SKU is
   /// intentionally excluded — tiles render it on its own greyed line via
@@ -164,7 +179,117 @@ class StockLevel {
         unit: j['unit'] as String,
         qtyDecimals: j['qtyDecimals'] as int,
         onHand: j['onHand'] as num,
+        categoryId: j['categoryId'] as String?,
       );
+}
+
+/// One node of the product category tree for reconcile filtering.
+class CategoryNode {
+  CategoryNode({
+    required this.id,
+    required this.name,
+    this.parentId,
+    this.archivedAt,
+  });
+
+  final String id;
+  final String name;
+  final String? parentId;
+  final String? archivedAt;
+
+  bool get isArchived => archivedAt != null && archivedAt!.isNotEmpty;
+
+  factory CategoryNode.fromJson(Map<String, dynamic> j) => CategoryNode(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        parentId: j['parentId'] as String?,
+        archivedAt: j['archivedAt'] as String?,
+      );
+}
+
+/// Flattened category row with tree depth and full breadcrumb path.
+class CategoryTreeEntry {
+  const CategoryTreeEntry({
+    required this.category,
+    required this.depth,
+    required this.pathLabel,
+  });
+
+  final CategoryNode category;
+  final int depth;
+  final String pathLabel;
+}
+
+/// Summary of a product for the Reconcile product filter picker.
+class ProductFilterOption {
+  const ProductFilterOption({
+    required this.id,
+    required this.name,
+    this.categoryId,
+    required this.variantCount,
+    this.isArchived = false,
+  });
+
+  final String id;
+  final String name;
+  final String? categoryId;
+  final int variantCount;
+  final bool isArchived;
+}
+
+/// Collects [rootId] and all descendant category IDs from [categories].
+Set<String> collectCategoryAndDescendants(
+  String rootId,
+  List<CategoryNode> categories,
+) {
+  final childrenByParent = <String, List<String>>{};
+  for (final c in categories) {
+    if (c.parentId != null) {
+      childrenByParent.putIfAbsent(c.parentId!, () => []).add(c.id);
+    }
+  }
+  final result = <String>{};
+  final queue = <String>[rootId];
+  while (queue.isNotEmpty) {
+    final current = queue.removeLast();
+    if (!result.add(current)) continue;
+    final children = childrenByParent[current];
+    if (children != null) {
+      queue.addAll(children);
+    }
+  }
+  return result;
+}
+
+/// Orders active categories in depth-first alphabetical tree order with breadcrumbs.
+List<CategoryTreeEntry> buildCategoryTreeEntries(List<CategoryNode> categories) {
+  final active = categories.where((c) => !c.isArchived).toList()
+    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  final byId = {for (final c in active) c.id: c};
+  final children = <String?, List<CategoryNode>>{};
+  for (final c in active) {
+    final parentKey =
+        (c.parentId != null && byId.containsKey(c.parentId)) ? c.parentId : null;
+    children.putIfAbsent(parentKey, () => []).add(c);
+  }
+
+  final out = <CategoryTreeEntry>[];
+  final visited = <String>{};
+  void visit(String? parentId, int depth, List<String> ancestors) {
+    for (final node in children[parentId] ?? const <CategoryNode>[]) {
+      if (!visited.add(node.id)) continue;
+      final path = [...ancestors, node.name];
+      out.add(CategoryTreeEntry(
+        category: node,
+        depth: depth,
+        pathLabel: path.join(' › '),
+      ));
+      visit(node.id, depth + 1, path);
+    }
+  }
+
+  visit(null, 0, const []);
+  return out;
 }
 
 /// One node of the location tree for the picker.

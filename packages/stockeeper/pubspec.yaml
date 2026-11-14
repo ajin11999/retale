@@ -1,7 +1,7 @@
 name: retale_stockeeper
 description: "Retale Stockeeper — warehouse receiving and stock reconcile for the Retale GraphQL API."
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.7.0
@@ -28,6 +28,9 @@ dependencies:
 
   # Camera barcode scanning (scan-field input needs no plugin).
   mobile_scanner: 7.1.4
+
+  # English voice recognition for reconcile quantity entry.
+  speech_to_text: ^7.0.0
 
   intl: ^0.20.2
 
