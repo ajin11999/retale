@@ -15,3 +15,6 @@ COPY packages/pos/build/web /srv/pos-web
 
 # Static Flutter workshop web/PWA build, served at :8082 (see Caddyfile root *).
 COPY packages/workshop/build/web /srv/workshop-web
+
+# Standalone fastener voice restock helper app, served at /voice-restock/ on :443.
+COPY packages/voice-restock/index.html /srv/voice-restock/index.html

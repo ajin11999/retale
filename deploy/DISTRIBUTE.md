@@ -122,7 +122,7 @@ anywhere: `docker-compose.dist.yml` and a filled-in `.env.prod`.
    are identical here — the `docker compose ... cp caddy:/data/...` cert export
    works the same against the pre-built caddy image.
 
-Addresses once up: console at `https://<HOST_IP>`, API at `https://<HOST_IP>:8443`,
+Addresses once up: console at `https://<HOST_IP>`, Voice Restock Helper at `https://<HOST_IP>/voice-restock/`, API at `https://<HOST_IP>:8443`,
 POS web at `https://<HOST_IP>:8081`, workshop web at `https://<HOST_IP>:8082`.
 
 ### Stockeeper app (Android)

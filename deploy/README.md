@@ -7,6 +7,7 @@ part of this stack.
 | Address (from any LAN device)  | Service |
 |--------------------------------|---------|
 | `https://<HOST_IP>`            | Console (back-office admin) |
+| `https://<HOST_IP>/voice-restock/` | Voice Restock Helper (standalone static tool) |
 | `https://<HOST_IP>:8443`       | API — GraphQL at `/graphql` + HTTP routes |
 | `https://<HOST_IP>:8081`       | POS web/PWA (static Flutter build) |
 | `https://<HOST_IP>:8082`       | Workshop web/PWA (static Flutter build) |

@@ -13,9 +13,21 @@
 	default_sni {$HOST_IP}
 }
 
-# Console (back-office admin)
+# Console (back-office admin) + standalone static helper apps
 {$HOST_IP}:443, localhost:443 {
-	reverse_proxy console:3000
+	# Standalone zero-dependency fastener voice restock helper (same HTTPS origin
+	# so Android Chrome microphone / Web Speech API permissions reuse the trusted CA).
+	redir /voice-restock /voice-restock/ 308
+	handle_path /voice-restock/* {
+		root * /srv/voice-restock
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		reverse_proxy console:3000
+	}
 }
 
 # API — GraphQL + HTTP routes (product images, PO PDF, receipts, journal CSV).
