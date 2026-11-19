@@ -1,9 +1,11 @@
 import "../lib/load-env.ts";
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
+import { like, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { db } from "../lib/db.ts";
 import { users } from "../db/schema/auth.ts";
+import { documentSequences } from "../db/schema/document-sequences.ts";
+import { requestForQuotations } from "../db/schema/rfqs.ts";
 import { vendors } from "../db/schema/vendors.ts";
 import * as reqService from "./requisition-service.ts";
 import * as rfqService from "./rfq-service.ts";
@@ -25,6 +27,7 @@ async function wipe(): Promise<void> {
     await db.execute(sql.raw(`DELETE FROM \`${t}\``));
   }
   await db.execute(sql`SET FOREIGN_KEY_CHECKS = 1`);
+  await db.delete(documentSequences).where(like(documentSequences.prefix, "RFQ-%"));
 }
 
 beforeEach(wipe);
@@ -51,6 +54,57 @@ async function seedVendor(): Promise<string> {
   });
   return id;
 }
+
+describe("RFQ numbering", () => {
+  const date = "2026-11-19";
+  beforeEach(() => setSystemTime(new Date("2026-11-19T03:00:00Z")));
+  afterEach(() => setSystemTime());
+
+  test("sequential creations get consecutive numbers", async () => {
+    const input = { date, createdByUserId: await seedUser() };
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202611-0001");
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202611-0002");
+  });
+
+  test("deleting the newest RFQ does not release its number", async () => {
+    const input = { date, createdByUserId: await seedUser() };
+    const newest = await rfqService.createRfq(input);
+    await rfqService.deleteRfq(newest.id);
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202611-0002");
+  });
+
+  test("concurrent creations opening a month get distinct numbers", async () => {
+    const input = { date, createdByUserId: await seedUser() };
+    const rfqs = await Promise.all(Array.from({ length: 3 }, () => rfqService.createRfq(input)));
+    expect(rfqs.map(rfq => rfq.rfqNumber).sort()).toEqual([
+      "RFQ-202611-0001", "RFQ-202611-0002", "RFQ-202611-0003",
+    ]);
+  });
+
+  test("the sequence changes month at midnight in Jakarta", async () => {
+    const input = { date, createdByUserId: await seedUser() };
+    setSystemTime(new Date("2026-11-30T16:59:59Z"));
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202611-0001");
+    setSystemTime(new Date("2026-11-30T18:00:00Z"));
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202612-0001");
+  });
+
+  test("continues from each month's backfilled numeric maximum", async () => {
+    const input = { date, createdByUserId: await seedUser() };
+    await db.insert(requestForQuotations).values([
+      "RFQ-202610-9999", "RFQ-202610-10000", "RFQ-202611-0024", "RFQ-202611-0025",
+    ].map(rfqNumber => ({ ...input, id: ulid(), rfqNumber })));
+
+    const migration = await Bun.file(new URL("../../drizzle/0054_mixed_iron_patriot.sql", import.meta.url)).text();
+    const backfill = migration.split("--> statement-breakpoint").find(stmt => stmt.includes("INSERT INTO"));
+    if (!backfill) throw new Error("Missing RFQ sequence backfill");
+    await db.execute(sql.raw(backfill));
+
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202611-0026");
+    setSystemTime(new Date("2026-10-31T03:00:00Z"));
+    expect((await rfqService.createRfq(input)).rfqNumber).toBe("RFQ-202610-10001");
+  });
+});
 
 describe("RFQ & PR Procurement Sandbox Workflow", () => {
   test("PR item budgeting with estimatedUnitCostMinor", async () => {

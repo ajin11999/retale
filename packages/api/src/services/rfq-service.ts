@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { ulid } from "ulid";
 import { db } from "../lib/db.ts";
+import { documentSequences } from "../db/schema/document-sequences.ts";
 import {
   requestForQuotations,
   rfqSections,
@@ -77,14 +78,22 @@ export function listRfqs(opts: {
     .orderBy(desc(requestForQuotations.createdAt));
 }
 
+const jakartaYearMonth = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Jakarta",
+  year: "numeric",
+  month: "2-digit",
+});
+
 async function generateRfqNumber(): Promise<string> {
-  const datePrefix = new Date().toISOString().slice(0, 7).replace("-", ""); // YYYYMM
-  const prefix = `RFQ-${datePrefix}-`;
-  const existing = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(requestForQuotations);
-  const count = (existing[0]?.count ?? 0) + 1;
-  return `${prefix}${count.toString().padStart(4, "0")}`;
+  const prefix = `RFQ-${jakartaYearMonth.format(new Date()).replace("-", "")}-`;
+  return db.transaction(async (tx) => {
+    // The upsert takes an exclusive lock even when several creators open the month.
+    await tx.insert(documentSequences).values({ prefix, lastNumber: 1 })
+      .onDuplicateKeyUpdate({ set: { lastNumber: sql`${documentSequences.lastNumber} + 1` } });
+    const [sequence] = await tx.select({ n: documentSequences.lastNumber })
+      .from(documentSequences).where(eq(documentSequences.prefix, prefix));
+    return `${prefix}${String(sequence!.n).padStart(4, "0")}`;
+  });
 }
 
 export async function createRfq(input: {

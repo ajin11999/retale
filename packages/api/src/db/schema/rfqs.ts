@@ -27,7 +27,7 @@ export const RFQ_STATUSES = [
 
 export const requestForQuotations = mysqlTable("request_for_quotations", {
   id: ulidPk(),
-  rfqNumber: varchar({ length: 100 }).notNull(),
+  rfqNumber: varchar({ length: 100 }).notNull().unique(),
   vendorId: ulidRef().references(() => vendors.id, { onDelete: "set null" }),
   snapshotVendorName: varchar({ length: 300 }),
   date: date({ mode: "string" }).notNull(),

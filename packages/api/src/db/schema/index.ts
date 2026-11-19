@@ -26,3 +26,4 @@ export * from "./business.ts";
 export * from "./addresses.ts";
 export * from "./requisitions.ts";
 export * from "./rfqs.ts";
+export * from "./document-sequences.ts";
