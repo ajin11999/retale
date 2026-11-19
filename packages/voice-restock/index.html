@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Voice Restock Helper</title>
   <style>
     :root {
@@ -450,7 +450,7 @@
       color: #ffffff;
       box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
     }
-    .btn-main-mic:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-main-mic:disabled, .btn-action:disabled { opacity: 0.45; cursor: not-allowed; }
 
     .btn-action {
       background: #1e293b;
@@ -592,8 +592,9 @@
       </div>
       <div id="liveTranscriptText" class="live-transcript-text">Tap "Start Recording" below, then speak size &amp; quantity...</div>
       <div class="live-transcript-hint">
-        Say: <em>"10 = 100 pcs"</em> · <em>"10, 100"</em> · <em>"20 is 100 and 30 is 50"</em> · <em>"undo"</em> · <em>"next section"</em>
+        Say <em>“twenty-five equals fifteen pieces”</em>. Repeating a size adds to its total. · <em>“20 is 100 and 30 is 50”</em> · <em>"undo"</em> · <em>"next section"</em>
       </div>
+      <div id="storageError" class="error-banner" role="alert"></div>
       <div id="speechErrorBanner" class="error-banner"></div>
     </div>
 
@@ -607,6 +608,7 @@
       </div>
       <div class="controls-actions">
         <button id="btnManualAdd" class="btn-action">+ Add Item</button>
+        <button id="btnUndo" class="btn-action" title="Undo the last item change in the selected section">Undo</button>
         <button id="btnClearCounts" class="btn-action">Clear Counts</button>
       </div>
     </div>
@@ -688,6 +690,7 @@
           <span>Include empty sections</span>
         </label>
       </div>
+      <p id="exportNotice" class="error-banner" role="status"></p>
       <textarea id="previewText" readonly></textarea>
       <div class="btn-row">
         <button id="btnModalCopy" class="btn-action btn-primary">📋 Copy Plain Text</button>
@@ -760,7 +763,8 @@
               id: s.id || uid("sec"),
               name: String(s.name || "Untitled Section"),
               items: Array.isArray(s.items) ? s.items : [],
-              unparsed: Array.isArray(s.unparsed) ? s.unparsed : []
+              unparsed: Array.isArray(s.unparsed) ? s.unparsed : [],
+              history: Array.isArray(s.history) ? s.history : []
             }));
             state.activeSectionId = parsed.activeSectionId || state.sections[0].id;
             state.ttsEnabled = typeof parsed.ttsEnabled === "boolean" ? parsed.ttsEnabled : true;
@@ -781,7 +785,12 @@
     function saveState() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (e) {}
+        document.getElementById("storageError").classList.remove("visible");
+      } catch {
+        const banner = document.getElementById("storageError");
+        banner.textContent = "Browser storage is unavailable. Copy or download your list before closing this page.";
+        banner.classList.add("visible");
+      }
     }
 
     function getActiveSection() {
@@ -794,12 +803,16 @@
 
     function selectSection(sectionId, announce = false) {
       if (!state.sections.some(s => s.id === sectionId)) return;
+      if (sectionId !== state.activeSectionId && sessionOpen) {
+        if (announce) captureSectionId = sectionId; // Spoken switch is ordered with the recognition results.
+        else recognition.stop(); // Finish pending speech in its original section before restarting.
+      }
       state.activeSectionId = sectionId;
       saveState();
       renderAll();
       const sec = getActiveSection();
       if (announce && state.ttsEnabled) {
-        speakText(sec.name);
+        speakText(`Section ${sec.name}`);
       }
     }
 
@@ -816,64 +829,64 @@
       if (!clean) return;
       const sec = { id: uid("sec"), name: clean, items: [], unparsed: [] };
       state.sections.push(sec);
-      state.activeSectionId = sec.id;
-      saveState();
-      renderAll();
+      selectSection(sec.id);
       showToast(`Added section: ${clean}`);
     }
 
-    function addItemToActive(sizeLabel, qty, rawText = "", options = {}) {
-      const sec = getActiveSection();
+    function rememberChange(sec, itemId, previous) {
+      sec.history ??= [];
+      sec.history.push({ itemId, previous: previous ? { ...previous } : null });
+      if (sec.history.length > 50) sec.history.shift();
+    }
+
+    function addItem(sec, sizeLabel, qty, rawText) {
       const cleanSize = String(sizeLabel || "").trim();
-      const safeQty = Math.max(1, parseInt(qty, 10) || 1);
-      if (!cleanSize) return;
+      if (!cleanSize || !Number.isSafeInteger(qty) || qty < 1) return false;
 
       const normKey = cleanSize.toLowerCase();
       const existing = sec.items.find(i => i.key === normKey);
       if (existing) {
-        existing.qty += safeQty;
+        if (!Number.isSafeInteger(existing.qty + qty)) return false;
+        rememberChange(sec, existing.id, existing);
+        existing.qty += qty;
         existing.updatedAt = Date.now();
-        if (rawText && !existing.rawText.includes(rawText)) {
+        if (rawText && !existing.rawText?.includes(rawText)) {
           existing.rawText = existing.rawText ? `${existing.rawText}; ${rawText}` : rawText;
         }
       } else {
+        const id = uid("itm");
+        rememberChange(sec, id, null);
         sec.items.push({
-          id: uid("itm"),
+          id,
           key: normKey,
           size: cleanSize,
-          qty: safeQty,
+          qty,
           unit: DEFAULT_UNIT,
           rawText,
           updatedAt: Date.now()
         });
       }
 
-      saveState();
-      renderAll();
-      playChime("success");
-      if (state.ttsEnabled && !options.silentTts) {
-        speakText(`${cleanSize}, ${safeQty} ${DEFAULT_UNIT}`);
-      }
+      return true;
     }
 
-    function undoLastInActive() {
-      const sec = getActiveSection();
-      if (!sec || sec.items.length === 0) {
-        showToast("Nothing to undo in this section.");
+    function undoLastInActive(sec = getActiveSection()) {
+      const change = sec.history?.pop();
+      if (!change) {
+        showToast("No recorded change to undo in this section.");
+        if (state.ttsEnabled) speakText("Nothing to undo");
         return;
       }
-      let latestIdx = sec.items.length - 1;
-      for (let i = 0; i < sec.items.length; i++) {
-        if ((sec.items[i].updatedAt || 0) >= (sec.items[latestIdx].updatedAt || 0)) {
-          latestIdx = i;
-        }
-      }
-      const [removed] = sec.items.splice(latestIdx, 1);
+      sec.items = sec.items.filter(item => item.id !== change.itemId);
+      if (change.previous) sec.items.push(change.previous);
       saveState();
       renderAll();
       playChime("undo");
-      showToast(`Undid ${removed.size} (${removed.qty} ${DEFAULT_UNIT})`);
-      if (state.ttsEnabled) speakText(`Undid ${removed.size}`);
+      const message = change.previous
+        ? `Restored ${change.previous.size}, ${change.previous.qty} pcs`
+        : "Last addition removed";
+      showToast(message);
+      if (state.ttsEnabled) speakText(message);
     }
 
     function adjustItemQty(sectionId, itemId, delta) {
@@ -881,6 +894,8 @@
       if (!sec) return;
       const item = sec.items.find(i => i.id === itemId);
       if (!item) return;
+      if (!Number.isSafeInteger(item.qty + delta)) return;
+      rememberChange(sec, item.id, item);
       item.qty += delta;
       if (item.qty <= 0) {
         sec.items = sec.items.filter(i => i.id !== itemId);
@@ -893,6 +908,9 @@
     function deleteItem(sectionId, itemId) {
       const sec = state.sections.find(s => s.id === sectionId);
       if (!sec) return;
+      const item = sec.items.find(i => i.id === itemId);
+      if (!item) return;
+      rememberChange(sec, itemId, item);
       sec.items = sec.items.filter(i => i.id !== itemId);
       saveState();
       renderAll();
@@ -923,146 +941,96 @@
       sixty: 60, seventy: 70, eighty: 80, ninety: 90
     };
 
-    const EN_NUM_TOKENS = new Set([
-      ...Object.keys(EN_UNITS),
-      ...Object.keys(EN_TENS),
-      "hundred", "thousand"
-    ]);
+    // Match complete number phrases before converting them. The same grammar is
+    // used for commands spoken as words and for Chrome's numeric transcripts.
+    const ones = "one|two|three|four|five|six|seven|eight|nine";
+    const tens = Object.keys(EN_TENS).join("|");
+    const underHundred = `(?:(?:${tens})(?: +(?:${ones}))?|${Object.keys(EN_UNITS).join("|")})`;
+    const underThousand = `(?:(?:(?:${ones}|a) +)?hundred(?: +(?:and +)?${underHundred})?|${underHundred})`;
+    const spokenNumber = `(?:(?:(?!zero )${underThousand} +|a +)?thousand(?: +(?:and +)?${underThousand})?|${underThousand})`;
+    const lengthPattern = `(?:\\d+(?:\\.\\d+)?|${spokenNumber})`;
+    const quantityPattern = `(?:\\d{1,3}(?:,\\d{3})+|\\d+|${spokenNumber})`;
+    const separator = String.raw`(?: *(?:[=:×x,-]|\bequals?\b|\bis\b|\bfor\b|\bqty\b|\bat\b|\btimes\b|\bby\b) *| +)`;
+    const pairPattern = new RegExp(
+      `(${lengthPattern})(?: *(?:mm|millimet(?:er|re)s?))?${separator}(${quantityPattern})(?: *(?:pcs?|pieces?|units?)\\b)?` +
+      // Look ahead so "one hundred and thirty equals five" leaves the next size in place.
+      `(?=$| *[,;]| +(?:and|then|next)\\b| +(?=${lengthPattern}))`, "y"
+    );
+    const betweenPairs = / *(?:[,;] *(?:(?:and|then|next)\b *)?|(?:and|then|next)\b +)| +/y;
+    const oneSpokenNumber = new RegExp(`^${spokenNumber}(?: *(?:pcs?|pieces?|units?))?$`);
 
-    function wordsSliceToNumber(tokens) {
+    function numberValue(phrase) {
+      if (/^\d/.test(phrase)) return Number(phrase.replaceAll(",", ""));
       let total = 0;
-      let current = 0;
-      for (const w of tokens) {
-        if (w in EN_UNITS) {
-          current += EN_UNITS[w];
-        } else if (w in EN_TENS) {
-          current += EN_TENS[w];
-        } else if (w === "hundred") {
-          current = (current || 1) * 100;
-        } else if (w === "thousand") {
-          total += (current || 1) * 1000;
-          current = 0;
+      let group = 0;
+      for (const word of phrase.split(/ +/)) {
+        if (word === "thousand") {
+          total += (group || 1) * 1000;
+          group = 0;
+        } else if (word === "hundred") {
+          group = (group || 1) * 100;
+        } else if (word !== "and") {
+          group += word === "a" ? 1 : EN_UNITS[word] ?? EN_TENS[word];
         }
       }
-      return total + current;
+      return total + group;
     }
 
-    function normalizeEnglishSpeech(text) {
-      let s = String(text || "").toLowerCase().trim();
-      // Strip English thousands-separator commas (e.g. "1,000" -> "1000") without touching "10, 100"
-      s = s.replace(/\b\d{1,3}(?:,\d{3})+\b/g, m => m.replace(/,/g, ""));
-      s = s.replace(/(\d)\s*pc\b/g, "$1 pcs")
-           .replace(/\bpc\b/g, "pcs")
-           .replace(/(\d)\s*pcs\b/g, "$1 pcs")
-           .replace(/\bpieces?\b/g, "pcs")
-           .replace(/\bunits?\b/g, "pcs")
-           .replace(/\b(hundred|thousand)\s+and\s+(?=(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b)/g, "$1 ")
-           .replace(/\bequals?\b/g, "=")
-           .replace(/\bis\b/g, "=")
-           .replace(/\bfor\b/g, "=")
-           .replace(/\bqty\b/g, "=")
-           .replace(/\bat\b/g, "=")
-           .replace(/\btimes\b/g, "x")
-           .replace(/\bby\b/g, "x");
-
-      // Convert contiguous English number word phrases into digits
-      const tokens = s.split(/\s+/);
-      const out = [];
-      let i = 0;
-      while (i < tokens.length) {
-        // Strip trailing punctuation for check, preserve punctuation after number
-        const m = tokens[i].match(/^([a-z-]+?)([,.;:]*)$/);
-        if (m && m[1].includes("-")) {
-          const parts = m[1].split("-");
-          if (parts.every(p => EN_NUM_TOKENS.has(p))) {
-            out.push(String(wordsSliceToNumber(parts)) + m[2]);
-            i += 1;
-            continue;
-          }
-        }
-        if (m && EN_NUM_TOKENS.has(m[1])) {
-          const run = [m[1]];
-          let punct = m[2];
-          let j = i + 1;
-          while (j < tokens.length) {
-            const mj = tokens[j].match(/^([a-z]+?)([,.;:]*)$/);
-            if (mj && EN_NUM_TOKENS.has(mj[1])) {
-              // Avoid merging two separate numbers like "ten twenty" when neither is hundred/thousand and previous is already complete
-              const prev = run[run.length - 1];
-              const next = mj[1];
-              const isCompoundTensUnit = (prev in EN_TENS) && (next in EN_UNITS) && EN_UNITS[next] < 10;
-              const isMultiplier = next === "hundred" || next === "thousand";
-              const followsMultiplier = prev === "hundred" || prev === "thousand";
-              if (isCompoundTensUnit || isMultiplier || followsMultiplier) {
-                run.push(next);
-                punct = mj[2];
-                j += 1;
-                if (punct) break;
-                continue;
-              }
-            }
-            break;
-          }
-          out.push(String(wordsSliceToNumber(run)) + punct);
-          i = j;
-        } else {
-          out.push(tokens[i]);
-          i += 1;
-        }
+    function parsePairs(text) {
+      const pairs = [];
+      let pos = 0;
+      while (pos < text.length) {
+        pairPattern.lastIndex = pos;
+        const match = pairPattern.exec(text);
+        if (!match || oneSpokenNumber.test(match[0])) return null;
+        const size = numberValue(match[1]);
+        const qty = numberValue(match[2]);
+        if (!Number.isFinite(size) || size <= 0 || !Number.isSafeInteger(qty) || qty <= 0) return null;
+        pairs.push({ size: /^\d/.test(match[1]) ? match[1] : String(size), qty });
+        pos = pairPattern.lastIndex;
+        if (pos === text.length) break;
+        betweenPairs.lastIndex = pos;
+        if (!betweenPairs.test(text) || betweenPairs.lastIndex === text.length) return null;
+        pos = betweenPairs.lastIndex;
       }
-      return out.join(" ");
+      return pairs.length ? pairs : null;
     }
 
-    function parseAndExecuteSpeech(rawTranscript) {
-      const norm = normalizeEnglishSpeech(rawTranscript);
-
-      if (/^\s*(undo|cancel|delete|remove|hapus|batal)\s*$/i.test(norm) || /\bundo\s+last\b/i.test(norm)) {
-        undoLastInActive();
+    function parseAndExecuteSpeech(rawTranscript, sec = getActiveSection()) {
+      const text = rawTranscript.toLowerCase().trim().replace(/[.!?]+$/, "").trim()
+        .replace(/([a-z])-(?=[a-z])/g, "$1 ").replace(/\s*\n+\s*/g, ";").replace(/[ \t]+/g, " ");
+      if (/^(undo(?: last)?|cancel|delete|remove|hapus|batal)$/.test(text)) {
+        undoLastInActive(sec);
+        return;
+      }
+      if (/^(next(?: section)?|switch section)$/.test(text)) {
+        if (sec === getActiveSection()) nextSection(true);
         return;
       }
 
-      if (/^\s*(next|next\s+section|switch\s+section)\s*$/i.test(norm)) {
-        nextSection(true);
-        return;
-      }
-
-      // Split on explicit item-chain words or semicolons/newlines (keep commas for "10, 100 pcs")
-      const chunks = norm.split(/[;\n]|\s+\b(?:and|then|next)\b\s+/i);
-      let matched = 0;
-
-      // Matches pairs like: "10 = 100 pcs", "20, 100", "30 50 pcs", "10 x 100"
-      const pairRegex = /\b(\d+(?:\.\d+)?)\s*(?:=|:|\/|-|x|×|,|\s)+\s*(\d+)\s*(?:pcs)?\b/gi;
-
-      for (let chunk of chunks) {
-        chunk = chunk.trim();
-        if (!chunk) continue;
-
-        const matches = [...chunk.matchAll(pairRegex)];
-        if (matches.length > 0) {
-          for (const m of matches) {
-            const size = m[1];
-            const qty = parseInt(m[2], 10);
-            if (qty > 0) {
-              addItemToActive(size, qty, rawTranscript);
-              matched += 1;
-            }
-          }
-        }
-      }
-
-      if (matched === 0) {
-        const sec = getActiveSection();
-        sec.unparsed.unshift({
-          id: uid("u"),
-          text: rawTranscript,
-          timestamp: new Date().toISOString()
-        });
-        if (sec.unparsed.length > 20) sec.unparsed.length = 20;
+      const pairs = parsePairs(text);
+      const totals = new Map(sec.items.map(item => [item.key, item.qty]));
+      if (!pairs || !pairs.every(({ size, qty }) => {
+        const total = (totals.get(size) || 0) + qty;
+        totals.set(size, total);
+        return Number.isSafeInteger(total);
+      })) {
+        sec.unparsed.unshift({ id: uid("u"), text: rawTranscript, timestamp: new Date().toISOString() });
         saveState();
         renderAll();
         playChime("miss");
-        showToast(`Could not parse: "${rawTranscript}"`);
+        showToast("No quantities added. Check the unrecognized speech.");
         if (state.ttsEnabled) speakText("Repeat");
+        return;
+      }
+
+      for (const { size, qty } of pairs) addItem(sec, size, qty, rawTranscript);
+      saveState();
+      renderAll();
+      playChime("success");
+      if (state.ttsEnabled) {
+        const lines = pairs.map(({ size, qty }) => `${size}, added ${qty} pieces`);
+        speakText(`Recorded ${lines.join(". ")}`);
       }
     }
 
@@ -1077,18 +1045,25 @@
     let restartTimer = null;
     let consecutiveErrors = 0;
     let wakeLock = null;
-    let sessionFinals = new Map();
-    let lastFinalCanonical = "";
-    let lastFinalAt = 0;
+    let sessionOpen = false;
+    let captureSectionId = null;
+    const sessionFinals = new Set();
     let lastTtsNormalized = "";
     let ttsEchoGuardUntil = 0;
 
     async function requestWakeLock() {
       if (!("wakeLock" in navigator)) return;
       try {
-        wakeLock = await navigator.wakeLock.request("screen");
+        const lock = await navigator.wakeLock.request("screen");
+        if (!isListeningActive || document.visibilityState !== "visible" || (wakeLock && !wakeLock.released)) {
+          await lock.release();
+          return;
+        }
+        wakeLock = lock;
         document.getElementById("wakeBadge").style.display = "inline-flex";
-        wakeLock.addEventListener("release", () => {
+        lock.addEventListener("release", () => {
+          if (wakeLock !== lock) return;
+          wakeLock = null;
           document.getElementById("wakeBadge").style.display = "none";
         });
       } catch (e) {}
@@ -1133,8 +1108,7 @@
       recognition.lang = "en-US";
 
       recognition.onstart = () => {
-        consecutiveErrors = 0;
-        sessionFinals = new Map();
+        if (!isListeningActive) return;
         showSpeechError("");
         document.getElementById("statusBadge").className = "badge-status status-listening";
         document.getElementById("statusBadge").innerHTML = '<span class="pulse-dot"></span><span>Listening...</span>';
@@ -1144,38 +1118,19 @@
       };
 
       recognition.onresult = (event) => {
-        let interim = "";
-        const finalParts = [];
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcript = String(event.results[i][0]?.transcript || "").trim();
-          if (!transcript) continue;
-
-          if (event.results[i].isFinal) {
-            const prev = sessionFinals.get(i);
-            sessionFinals.set(i, transcript);
-
-            if (prev === transcript) continue;
-            if (prev && transcript.toLowerCase().startsWith(prev.toLowerCase())) {
-              const suffix = transcript.slice(prev.length).trim();
-              if (!suffix || /^(?:pcs?|pieces?|units?)[.,!?]*$/i.test(suffix)) continue;
-              finalParts.push(suffix);
-            } else {
-              finalParts.push(transcript);
-            }
-          } else {
-            interim += " " + transcript;
-          }
+        consecutiveErrors = 0;
+        const display = [];
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const transcript = result[0]?.transcript.trim();
+          if (!transcript || sessionFinals.has(i)) continue;
+          display.push(transcript);
+          if (!result.isFinal) continue;
+          sessionFinals.add(i);
+          const sec = state.sections.find(section => section.id === captureSectionId);
+          if (sec && !isTtsEcho(transcript)) parseAndExecuteSpeech(transcript, sec);
         }
-
-        const finalText = finalParts.join(" ").trim();
-        const display = (finalText || interim).trim();
-        if (display) document.getElementById("liveTranscriptText").textContent = display;
-
-        if (finalText) {
-          if (isTtsEcho(finalText) || isRapidDuplicateFinal(finalText)) return;
-          parseAndExecuteSpeech(finalText);
-        }
+        if (display.length) document.getElementById("liveTranscriptText").textContent = display.join(" ");
       };
 
       recognition.onerror = (event) => {
@@ -1199,14 +1154,14 @@
       };
 
       recognition.onend = () => {
+        sessionOpen = false;
+        captureSectionId = null;
+        if (document.getElementById("previewModal").classList.contains("open")) refreshPreview();
         if (isListeningActive) {
           clearTimeout(restartTimer);
           const delay = consecutiveErrors === 0 ? 300 : Math.min(4000, 1000 * consecutiveErrors);
-          restartTimer = setTimeout(() => {
-            if (isListeningActive) {
-              try { recognition.start(); } catch (e) {}
-            }
-          }, delay);
+          document.getElementById("statusBadge").textContent = "Restarting mic…";
+          restartTimer = setTimeout(startRecognition, delay);
         } else {
           updateIdleUi();
         }
@@ -1219,6 +1174,21 @@
       document.getElementById("btnToggleMic").className = "btn-main-mic";
       document.getElementById("micIcon").textContent = "🎙️";
       document.getElementById("micLabel").textContent = "Start Recording";
+    }
+
+    function startRecognition() {
+      if (!isListeningActive || sessionOpen) return;
+      try {
+        recognition.start();
+        captureSectionId = state.activeSectionId;
+        sessionFinals.clear();
+        sessionOpen = true;
+      } catch {
+        isListeningActive = false;
+        releaseWakeLock();
+        updateIdleUi();
+        showSpeechError("Microphone could not start. Tap Start Recording to retry.");
+      }
     }
 
     function toggleListening() {
@@ -1235,39 +1205,25 @@
         isListeningActive = true;
         consecutiveErrors = 0;
         requestWakeLock();
-        try { recognition.start(); } catch (e) {}
+        startRecognition();
       }
     }
 
-    function canonicalForDedup(text) {
-      return normalizeEnglishSpeech(text)
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\bpcs\b/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    function feedbackKey(text) {
+      return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+        .replace(new RegExp(`\\b${spokenNumber}\\b`, "g"), words => String(numberValue(words)))
+        .replace(/\bp(?:iece)?s?\b|\bpcs?\b/g, "pieces");
     }
 
-    function isRapidDuplicateFinal(rawText) {
-      const now = Date.now();
-      const canon = canonicalForDedup(rawText);
-      if (!canon) return false;
-      if (now - lastFinalAt < 1800 && canon === lastFinalCanonical) {
-        return true;
-      }
-      lastFinalCanonical = canon;
-      lastFinalAt = now;
-      return false;
-    }
-
-    function isTtsEcho(rawText) {
+    function isTtsEcho(text) {
       if (Date.now() > ttsEchoGuardUntil || !lastTtsNormalized) return false;
-      const canon = canonicalForDedup(rawText);
-      if (!canon) return false;
-      return canon === lastTtsNormalized || lastTtsNormalized.includes(canon) || canon.includes(lastTtsNormalized);
+      const key = feedbackKey(text);
+      return key === lastTtsNormalized || (key.includes("added") && lastTtsNormalized.includes(key));
     }
 
     let audioCtx = null;
     function playChime(type = "success") {
+      if (!state.ttsEnabled) return;
       try {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === "suspended") audioCtx.resume();
@@ -1295,13 +1251,15 @@
 
     function speakText(text) {
       if (!window.speechSynthesis) return;
-      lastTtsNormalized = canonicalForDedup(text);
+      lastTtsNormalized = feedbackKey(text);
       ttsEchoGuardUntil = Date.now() + 4000;
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "en-US";
       u.rate = 1.1;
-      u.onend = () => { ttsEchoGuardUntil = Date.now() + 900; };
+      u.onend = () => {
+        if (lastTtsNormalized === feedbackKey(text)) ttsEchoGuardUntil = Date.now() + 900;
+      };
       window.speechSynthesis.speak(u);
     }
 
@@ -1339,6 +1297,7 @@
       renderActiveSection();
       renderUnparsed();
       renderOtherSections();
+      if (document.getElementById("previewModal").classList.contains("open")) refreshPreview();
     }
 
     function renderSectionPills() {
@@ -1356,6 +1315,7 @@
 
     function renderActiveSection() {
       const sec = getActiveSection();
+      document.getElementById("btnUndo").disabled = !sec.history?.length;
       const card = document.getElementById("activeSectionCard");
       const sorted = sortItems(sec.items);
 
@@ -1470,10 +1430,11 @@
 
     function removeSection(id) {
       if (state.sections.length <= 1) return;
+      const sec = state.sections.find(s => s.id === id);
+      if (!sec) return;
+      if ((sec.items.length || sec.unparsed.length) && !confirm(`Delete ${sec.name} and its recorded counts?`)) return;
       state.sections = state.sections.filter(s => s.id !== id);
-      if (state.activeSectionId === id) state.activeSectionId = state.sections[0].id;
-      saveState();
-      renderAll();
+      selectSection(state.activeSectionId === id ? state.sections[0].id : state.activeSectionId);
       renderManageSections();
     }
 
@@ -1482,6 +1443,7 @@
        ========================================================================== */
 
     function openAddItemModal() {
+      document.getElementById("itemModal").dataset.sectionId = state.activeSectionId;
       document.getElementById("itemModalTitle").textContent = `Add Item → ${getActiveSection().name}`;
       document.getElementById("editingItemId").value = "";
       document.getElementById("itemSizeInput").value = "";
@@ -1494,6 +1456,10 @@
       const sec = getActiveSection();
       const item = sec.items.find(i => i.id === itemId);
       if (!item) return;
+      const modal = document.getElementById("itemModal");
+      modal.dataset.sectionId = sec.id;
+      modal.dataset.originalSize = item.size;
+      modal.dataset.originalQty = String(item.qty);
       document.getElementById("itemModalTitle").textContent = `Edit Item (${sec.name})`;
       document.getElementById("editingItemId").value = item.id;
       document.getElementById("itemSizeInput").value = item.size;
@@ -1536,6 +1502,7 @@
     });
 
     document.getElementById("btnManualAdd").addEventListener("click", openAddItemModal);
+    document.getElementById("btnUndo").addEventListener("click", () => undoLastInActive());
     document.getElementById("btnCloseItemModal").addEventListener("click", () => {
       document.getElementById("itemModal").classList.remove("open");
     });
@@ -1543,33 +1510,58 @@
     document.getElementById("btnSaveItemModal").addEventListener("click", () => {
       const editId = document.getElementById("editingItemId").value;
       const size = document.getElementById("itemSizeInput").value.trim();
-      const qty = Math.max(1, parseInt(document.getElementById("itemQtyInput").value, 10) || 1);
+      const qty = document.getElementById("itemQtyInput").valueAsNumber;
+      const sec = state.sections.find(s => s.id === document.getElementById("itemModal").dataset.sectionId);
+      if (!sec) return;
+      if (!Number.isSafeInteger(qty) || qty < 1) {
+        showToast("Enter a positive whole number of pieces.");
+        return;
+      }
       if (!size) {
         showToast("Enter a size/length.");
         return;
       }
       if (editId) {
-        const sec = getActiveSection();
-        sec.items = sec.items.filter(i => i.id !== editId);
-        addItemToActive(size, qty, "Manual", { silentTts: true });
-      } else {
-        addItemToActive(size, qty, "Manual");
+        const item = sec.items.find(i => i.id === editId);
+        const original = document.getElementById("itemModal").dataset;
+        if (!item || item.size !== original.originalSize || String(item.qty) !== original.originalQty) {
+          document.getElementById("itemModal").classList.remove("open");
+          showToast("This item changed while editing. Reopen it to see the latest count.");
+          return;
+        }
+        if (sec.items.some(i => i.id !== editId && i.key === size.toLowerCase())) {
+          showToast("Check the current list and edit the matching size.");
+          return;
+        }
+        rememberChange(sec, item.id, item);
+        Object.assign(item, { size, key: size.toLowerCase(), qty, rawText: "Manual", updatedAt: Date.now() });
+      } else if (!addItem(sec, size, qty, "Manual")) {
+        showToast("Quantity exceeds the supported total.");
+        return;
       }
+      saveState();
+      renderAll();
+      playChime("success");
+      if (state.ttsEnabled && !editId) speakText(`Recorded ${size}, added ${qty} pieces`);
       document.getElementById("itemModal").classList.remove("open");
     });
 
     document.getElementById("btnClearCounts").addEventListener("click", () => {
-      const totalItems = state.sections.reduce((acc, s) => acc + s.items.length + s.unparsed.length, 0);
-      if (totalItems === 0) {
+      if (!state.sections.some(s => s.items.length || s.unparsed.length || s.history?.length) && !sessionOpen) {
         showToast("All sections are already empty.");
         return;
       }
       const btn = document.getElementById("btnClearCounts");
       const now = Date.now();
       if (now < clearArmedUntil) {
+        if (sessionOpen) {
+          captureSectionId = null;
+          recognition.abort();
+        }
         for (const s of state.sections) {
           s.items = [];
           s.unparsed = [];
+          s.history = [];
         }
         clearArmedUntil = 0;
         btn.textContent = "Clear Counts";
@@ -1599,49 +1591,71 @@
 
     document.getElementById("ttsToggle").addEventListener("change", (e) => {
       state.ttsEnabled = e.target.checked;
+      if (!state.ttsEnabled) window.speechSynthesis?.cancel();
       saveState();
     });
 
-    function copyPlainToClipboard() {
-      const text = generatePlainText(false);
-      if (text === "No items recorded yet.") {
-        showToast("No items recorded yet.");
-        return;
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Restock list copied.");
+      } catch {
+        openPreview();
+        const preview = document.getElementById("previewText");
+        preview.value = text;
+        preview.focus();
+        preview.select();
+        showToast("Clipboard unavailable. Copy the selected text or download the list.");
       }
-      navigator.clipboard.writeText(text).then(() => {
-        showToast("Plain text copied! Paste to Paperclip / agent.");
-      });
     }
 
-    document.getElementById("btnCopyPlain").addEventListener("click", copyPlainToClipboard);
+    function openPreview() {
+      if (isListeningActive) toggleListening();
+      document.getElementById("previewModal").classList.add("open");
+      refreshPreview();
+    }
 
     function refreshPreview() {
       const includeEmpty = document.getElementById("includeEmptyToggle").checked;
       document.getElementById("previewText").value = generatePlainText(includeEmpty);
+      const unresolved = state.sections.filter(s => s.unparsed.length)
+        .map(s => `${s.name} (${s.unparsed.length})`);
+      const notice = document.getElementById("exportNotice");
+      notice.textContent = sessionOpen ? "Finishing voice capture…"
+        : unresolved.length ? `Unrecognized speech excluded from this order: ${unresolved.join(", ")}` : "";
+      notice.classList.toggle("visible", Boolean(notice.textContent));
+      for (const id of ["btnModalCopy", "btnModalShare", "btnModalDownload"]) {
+        document.getElementById(id).disabled = sessionOpen;
+      }
     }
 
-    document.getElementById("btnPreviewModal").addEventListener("click", () => {
-      refreshPreview();
-      document.getElementById("previewModal").classList.add("open");
+    document.getElementById("btnCopyPlain").addEventListener("click", () => {
+      if (sessionOpen || state.sections.some(s => s.unparsed.length)) return openPreview();
+      if (!state.sections.some(s => s.items.length)) return showToast("No items recorded yet.");
+      if (isListeningActive) toggleListening();
+      copyText(generatePlainText());
     });
+    document.getElementById("btnPreviewModal").addEventListener("click", openPreview);
     document.getElementById("includeEmptyToggle").addEventListener("change", refreshPreview);
     document.getElementById("btnClosePreview").addEventListener("click", () => {
       document.getElementById("previewModal").classList.remove("open");
     });
 
     document.getElementById("btnModalCopy").addEventListener("click", () => {
-      navigator.clipboard.writeText(document.getElementById("previewText").value).then(() => {
-        showToast("Plain text copied!");
-      });
+      copyText(document.getElementById("previewText").value);
     });
 
     document.getElementById("btnModalShare").addEventListener("click", async () => {
       const text = document.getElementById("previewText").value;
       if (navigator.share) {
-        try { await navigator.share({ title: "Fastener Restock List", text }); } catch (e) {}
-      } else {
-        navigator.clipboard.writeText(text).then(() => showToast("Share unavailable — copied to clipboard."));
+        try {
+          await navigator.share({ title: "Fastener Restock List", text });
+          return;
+        } catch (e) {
+          if (e.name === "AbortError") return;
+        }
       }
+      await copyText(text);
     });
 
     document.getElementById("btnModalDownload").addEventListener("click", () => {
